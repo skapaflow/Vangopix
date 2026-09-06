@@ -1,37 +1,54 @@
-SHELL = cmd.exe
-
 # Vangopix - a pixel art editor.
-# Library paths. Override: make SDL3=/other/path SDL3IMG=/other/path
-SDL3    ?= C:/SDL3
-SDL3IMG ?= C:/SDL3_image
+#
+# One makefile for Windows, Linux and macOS. The platform decides three things and no
+# more: where the SDL headers come from, what the binary is called, and whether there is
+# an icon resource to link. Everything below that line is shared.
 
-CC     = gcc
-CFLAGS = -Wall -Wextra -O2 -I$(SDL3)/include -I$(SDL3IMG)/include -Isrc
-LFLAGS = -L$(SDL3)/lib -L$(SDL3IMG)/lib -lSDL3 -lSDL3_image
+ifeq ($(OS),Windows_NT)
+    # cmd.exe on purpose: with git-bash installed, make would otherwise find sh.exe and
+    # the del/copy recipes below would break in a way that depends on who is compiling.
+    SHELL      = cmd.exe
+    OUT        = vangopix.exe
+    SDL3      ?= C:/SDL3
+    SDL3IMG   ?= C:/SDL3_image
+    SDL_CFLAGS = -I$(SDL3)/include -I$(SDL3IMG)/include
+    SDL_LIBS   = -L$(SDL3)/lib -L$(SDL3IMG)/lib -lSDL3 -lSDL3_image
+    # Windows resource: the exe/window icon plus VERSIONINFO. It joins the LINK as if it
+    # were an object file - not a header, not a library, a COFF blob the linker appends.
+    RES        = icon/recicon.res
+else
+    OUT        = vangopix
+    # pkg-config rather than hardcoded paths: on Linux and macOS the libraries come from
+    # a package manager that already knows where it put them, and hardcoding would be
+    # wrong on every distribution and on both homebrew prefixes.
+    SDL_CFLAGS = $(shell pkg-config --cflags sdl3 sdl3-image)
+    SDL_LIBS   = $(shell pkg-config --libs sdl3 sdl3-image) -lm
+    RES        =
+endif
 
-# SDL3 3.4+ reads and writes png on its own (SDL_LoadPNG / SDL_SavePNG). SDL3_image is
-# linked anyway, and for a PRODUCT reason rather than a technical one: Vangopix is meant
-# to become this machine's default viewer, the place where any image opens. A reader
-# that only understands png does not replace Paint. The satellite brings webp, avif,
-# tiff, gif, tga, qoi, ico, pcx, svg, xcf - plus IMG_LoadAnimation / IMG_SaveAnimation,
-# which is the road to animated gif once a timeline exists.
+# ?= would NOT work here: make ships a built-in CC = cc, which counts as set, so the
+# assignment would never fire and a machine without cc would fail. Testing the origin
+# overrides only make own default and still yields to the environment and the command
+# line (make CC=clang).
+ifeq ($(origin CC),default)
+    CC = gcc
+endif
+CFLAGS  = -Wall -Wextra -O2 -Isrc $(SDL_CFLAGS)
+LFLAGS  = $(SDL_LIBS)
 
 # One file per RESPONSIBILITY, never per size.
-#   main.c = the frame envelope: window, loop, present
-#   tabs.c = the tabs, which ARE the documents (sheet, view, and one day undo, palette)
+#   main.c     the pipeline, and nothing else
+#   vangopix.c the program: globals, window, renderer, font, argv
+#   core.c     the frame: input, draw, present
+#   tabs.c     the tabs, which ARE the documents
+#   text.c     glyphs packed into one atlas by stb_truetype
 #
 # To come:
-#   view.c = the camera: integer zoom and pan (what the eye sees, not what exists)
-#   tool.c = the tools: pencil, bucket, eyedropper
-#   io.c   = open and save
-SRC = src/main.c src/tabs.c
+#   view.c     the camera: integer zoom and pan (what the eye sees, not what exists)
+#   tool.c     the tools: pencil, bucket, eyedropper
+#   io.c       open and save
+SRC = src/main.c src/vangopix.c src/core.c src/tabs.c src/text.c
 DEP = $(wildcard src/*.h)
-OUT = vangopix.exe
-
-# Windows resource: the exe/window icon plus VERSIONINFO. It joins the LINK as if it
-# were an object file - it is not a header and not a library, it is a COFF blob the
-# linker appends to the binary.
-RES = icon/recicon.res
 
 all: $(OUT) run
 
@@ -41,28 +58,31 @@ all: $(OUT) run
 $(OUT): $(SRC) $(DEP) $(RES)
 	$(CC) $(CFLAGS) $(SRC) $(RES) -o $(OUT) $(LFLAGS)
 
-# The .res is committed, but as a RULE rather than a comment: editing recicon.rc
-# (new icon, bumped version) has to rebuild it on its own. Parking the windres line in
-# a separate file leaves the manual step waiting to be forgotten - and an exe with the
-# old icon reports no error at all.
+run: $(OUT)
+	./$(OUT)
+
+# -mwindows drops the console, and only on Windows does that mean anything. It stays OUT
+# of the normal build on purpose: while developing, SDL_Log is the only window into the
+# program, and a mute editor is worse than an ugly one.
+release: CFLAGS += -DNDEBUG
+ifeq ($(OS),Windows_NT)
+release: CFLAGS += -mwindows
+endif
+release: clean $(OUT)
+
+ifeq ($(OS),Windows_NT)
+
+# The .res is derived, not authored: the sources are icon/recicon.rc and the .ico beside
+# it. As a RULE rather than a comment, editing either one rebuilds the binary on its own
+# - a windres line parked in a text file leaves a manual step waiting to be forgotten,
+# and an exe carrying last week's icon reports no error at all.
 $(RES): icon/recicon.rc icon/vangopix.ico
 	windres -i icon/recicon.rc --input-format=rc --target=pe-x86-64 -o $(RES) -O coff
 
-run: $(OUT)
-	$(OUT)
-
-# -mwindows drops the console. It stays OUT of the normal build on purpose: while
-# developing, SDL_Log is the only window into the program, and a mute editor is worse
-# than an ugly one. Only the release hides it.
-release: CFLAGS += -mwindows -DNDEBUG
-release: clean $(OUT)
-
-# The dlls have to sit next to the exe. This target exists for the day you upgrade SDL
-# and forget to refresh the local copy.
-#
-# The libpng16 / libtiff / libwebp / libavif dlls in the root do NOT belong here: they
-# come from the SDL3_image runtime package and are optional in the literal sense -
-# SDL3_image.dll calls LoadLibrary on them by name when it meets a file of that format,
+# The dlls have to sit next to the exe, and only Windows works that way. The
+# libpng16 / libtiff / libwebp / libavif dlls in the root are NOT copied here: they come
+# from the SDL3_image runtime package and are optional in the literal sense -
+# SDL3_image.dll calls LoadLibrary on them by name when it meets a file of that format
 # and survives their absence. Deleting libavif-16.dll breaks nothing; it only stops
 # .avif from opening.
 dll:
@@ -71,5 +91,16 @@ dll:
 
 clean:
 	@if exist $(OUT) del $(OUT)
+	@if exist $(subst /,\,$(RES)) del $(subst /,\,$(RES))
+
+else
+
+dll:
+	@echo "dll: nothing to do - shared libraries come from the package manager here"
+
+clean:
+	rm -f $(OUT)
+
+endif
 
 .PHONY: all clean run release dll

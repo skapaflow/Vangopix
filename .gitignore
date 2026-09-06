@@ -13,3 +13,11 @@
 
 # Upstream packages downloaded during setup
 *.zip
+
+# Lucida Console ships with Windows and is Bigelow & Holmes property - usable on a
+# machine that already has it, never redistributable from a public repository. The
+# committed fallback is font/FreeSans.ttf. See CLAUDE.md section 5.
+font/lucon.ttf
+
+# Frame captures taken while verifying rendering
+shot.png

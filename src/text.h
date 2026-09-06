@@ -1,0 +1,54 @@
+#ifndef VANGOPIX_TEXT_H
+#define VANGOPIX_TEXT_H
+
+#include <stdint.h>
+
+/*
+ * Text rendering, adapted from the text module of the Skyonara engine (SKNE_CORE).
+ *
+ * The glyphs of a TrueType face are packed once into a 512x512 atlas with stb_truetype
+ * and uploaded as a single texture; drawing a string is then one SDL_RenderTexture per
+ * character out of that atlas. No per-string texture, no per-frame rasterising.
+ *
+ * WHY THIS AND NOT SDL_ttf: SDL_ttf would be a third dll to ship on three platforms,
+ * and it rasterises to a surface per string, which then has to become a texture. Here
+ * the only cost after startup is drawing quads, and stb_truetype is a header - it
+ * crosses to Linux and macOS with the source, not with a package manager.
+ */
+
+typedef struct SDL_Renderer SDL_Renderer;
+typedef struct TextSystem   TextSystem;
+
+/* Loads the face at font_path, packs the printable ASCII range into the atlas and
+   uploads it. Returns NULL on failure, having logged the reason. */
+TextSystem *text_init (SDL_Renderer *renderer, const char *font_path, float font_size);
+
+/* Draws text at (x, y), the top-left of the first line. Handles '\n'.
+   color is 0xRRGGBBAA. */
+void text_draw (TextSystem *ts, const char *text, float x, float y, uint32_t color);
+
+/* printf into a draw. color is 0xRRGGBBAA. */
+void text_print (TextSystem *ts, float x, float y, uint32_t color, const char *fmt, ...);
+
+/* Same, but (x, y) is the geometric centre of the block. */
+void text_print_center (TextSystem *ts, float x, float y, uint32_t color,
+                        const char *fmt, ...);
+
+/* Width and height text would occupy, without drawing it. */
+void text_measure (TextSystem *ts, const char *text, float *out_w, float *out_h);
+
+/* The cell of one character, measured on 'M'.
+ *
+ * ONLY MEANINGFUL FOR A MONOSPACED FACE. It exists because VagrantUI asks for a fixed
+ * char_w/char_h through vui_font() and lays its content out in columns from it; give it
+ * the cell of a proportional face and every column drifts. Whoever wires that up must
+ * check the face first. */
+void text_cell (TextSystem *ts, float *out_w, float *out_h);
+
+/* Distance between the baselines of two consecutive lines. */
+float text_line_height (TextSystem *ts);
+
+/* Destroys the atlas texture and frees the system. */
+void text_free (TextSystem *ts);
+
+#endif
