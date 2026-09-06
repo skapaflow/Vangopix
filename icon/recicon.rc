@@ -1,0 +1,31 @@
+#include <winver.h>
+
+MEUAPLIC ICON DISCARDABLE "vangopix.ico"
+
+1 VERSIONINFO
+FILEVERSION 3,3,0,0
+PRODUCTVERSION 3,3,0,0
+#ifndef _DEBUG
+FILEFLAGS 0xbl
+BEGIN
+BLOCK "StringFileInfo"
+BEGIN
+BLOCK "040904B0"
+BEGIN
+VALUE "CompanyName", "GenericCompany\0"
+VALUE "FileDescription", "Vangopix\0"
+VALUE "FileVersion", "1.0\0"
+VALUE "InternalName", "1.0\0"
+VALUE "LegalCopyright", "Copyright \251 Generic Company. 2024\0"
+VALUE "LegalTrademarks", "Generic Trademark.\0"
+VALUE "OriginalFilename", "\0"
+VALUE "ProductName", "Generic Application.\0"
+VALUE "ProductVersion", "1.0\0"
+END
+END
+BLOCK "VarFileInfo"
+BEGIN
+VALUE "Translation", 0x400, 1200
+END
+END
+#endif

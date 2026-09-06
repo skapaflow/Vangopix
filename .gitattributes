@@ -1,0 +1,11 @@
+# Normalise line endings. Without this, files written by different tools land in the
+# repository with different endings and every later diff carries the whole file as
+# changed. LF in the repository and LF on checkout, on every platform - mingw make,
+# gcc and windres all read LF without complaint.
+* text=auto eol=lf
+
+*.ico binary
+*.res binary
+*.png binary
+*.jpg binary
+*.dll binary

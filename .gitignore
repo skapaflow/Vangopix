@@ -1,0 +1,15 @@
+# Build output
+*.exe
+*.o
+
+# Windows resource blob. Regenerated from icon/recicon.rc by the Makefile rule, so the
+# source of truth (the .rc and the .ico) is versioned and the derived COFF is not.
+*.res
+
+# Third party runtime libraries. Not vendored on purpose: SDL3 and SDL3_image are
+# versioned upstream, and a repository should not be the place people get their copy
+# from. See README.md for where they come from and where they go.
+*.dll
+
+# Upstream packages downloaded during setup
+*.zip

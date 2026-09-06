@@ -1,0 +1,5 @@
+/*
+#getline {
+	windres -i recicon.rc --input-format=rc --target=pe-x86-64 -o recicon.res -O coff
+}
+*/
