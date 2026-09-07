@@ -63,11 +63,16 @@ that already have it.
 | middle drag, or `SPACE` + left drag | pan |
 | `CTRL+0` / `CTRL+1` | fit the sheet / go to 1:1 |
 | drag a corner grip | resize the canvas |
+| `SHIFT` while dragging | put the corner on the 8 pixel grid |
 
 The four small blue squares sit just outside the corners of the sheet, touching it only
 at the corner point so they never cover the artwork. Dragging one moves that corner and
 leaves the opposite one anchored; the outline and the size readout follow the hand, and
 the pixels are only rebuilt on release.
+
+Holding `SHIFT` lands the dragged corner on the nearest multiple of eight - it does not
+step by eight, so a canvas of 53 snaps straight to 56 however the drag arrived there.
+The readout shows `[8]` while it is on.
 
 While the bar is up: click a tab to select it, drag it sideways to reorder, click its
 `x` to close it, click `+` for a new sheet. The bar floats over the sheet and takes no
