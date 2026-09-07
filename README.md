@@ -27,7 +27,7 @@ that — opening, viewing, framing, sizing and saving.
 | keyboard | one owner at a time, so a field being open silences every shortcut |
 | undo | per document, made of pixel carries and resizes rather than snapshots |
 | drawing | a pencil: left draws, right rubs out to transparent |
-| colour | `CTRL` absorbs the colour under the pointer, with a hex readout |
+| colour | two, one per mouse button, filled by `CTRL`+click and shown as hex |
 | transparency | checkerboard behind the sheet, black frame around it |
 | text | one atlas, packed by stb_truetype |
 
@@ -106,8 +106,8 @@ drawing near the border.
 | drag a corner grip | resize the canvas |
 | `SHIFT` while dragging a grip | put the corner on the 8 pixel grid |
 | left drag on the sheet | draw |
-| right drag on the sheet | rub out, to transparent |
-| hold `CTRL` over the sheet | absorb that colour — no click, hex follows the pointer |
+| right drag on the sheet | draw colour 2 — transparent to begin with, so it rubs out |
+| `CTRL` + left / right click | absorb that colour into 1 or 2; drag to keep absorbing |
 | drag a file in | open it in a new tab |
 | drag a folder in | add it as a project |
 | `ENTER` / `ESC` in a field | accept / cancel |
@@ -177,9 +177,19 @@ sheet from 2x zoom up, which is the signal that matters in a pixel editor. It te
 A stroke joins its samples, so a fast hand draws a line and not a row of dots. One stroke
 is one undo.
 
-**Hold `CTRL` and the colour under the pointer is absorbed — no click.** It follows the hand
-while the key is down, and a bar beside the pointer shows the value as `RRGGBBAA`. Let go
-when you have the one you want, and draw with it.
+### Two colours, one per mouse button
+
+Left button draws colour 1, right button draws colour 2. **`CTRL` + click absorbs the colour
+under the pointer** into whichever slot that button owns — so the button that takes a colour
+is the button that lays it down. Keep the button down and drag to go on absorbing.
+
+Colour 2 starts as **nothing**, which is what makes the right button an eraser without an
+eraser existing: in a program that keeps alpha, rubbing out *is* drawing with nothing. Put a
+colour in slot 2 and the right button draws with it instead.
+
+While `CTRL` is held, a bar follows the pointer with the colour under it and its value as
+`RRGGBBAA` — what you would get if you pressed. The two loaded colours sit at the bottom
+left, side by side, and step aside when the project sidebar slides in.
 
 That is the whole colour interface for now, and it is deliberate: a pixel artist settles on
 eight to sixteen colours and then picks from the drawing constantly, so **the image is the

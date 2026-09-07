@@ -30,20 +30,41 @@
  * The crosshair is what is here today. A line-art glyph per tool is the next step, and it
  * is SDL_CreateColorCursor with the hot spot at the aim point - not a redesign.
  *
- * CTRL IS THE EYEDROPPER, AND IT ABSORBS ON HOVER - NO CLICK.
+ * TWO COLOURS, ONE PER MOUSE BUTTON, AND CTRL+CLICK FILLS THEM.
  *
- * Hold CTRL over the sheet and the pencil's colour becomes the pixel under the pointer,
- * live, following the hand until CTRL is let go. That is not a shortcut for a click; it is
- * the shape of the work. A pixel artist settles on eight to sixteen colours and then picks
- * from the drawing constantly - which means THE IMAGE IS THE PALETTE, and a strip of
- * coloured tiles down the side of the screen is answering a question that the sheet
- * already answers. A palette window will still come, for the times a colour is not on the
- * sheet yet, and it will be summoned like everything else here.
+ * Left button draws colour 1, right button draws colour 2. CTRL held turns both buttons
+ * into the eyedropper: CTRL+left absorbs into 1, CTRL+right into 2. The button that takes
+ * a colour is the button that will lay it down, so there is nothing to remember about
+ * which slot was filled.
  *
- * While CTRL is held a hex readout follows the pointer: a bar filled with the colour, the
- * value inside it as RRGGBBAA. It sits OFFSET from the aim point, for the same reason the
- * first Vangopix offset its tool glyph - whatever reports what you are pointing at must
- * not stand on it.
+ * COLOUR 2 STARTS TRANSPARENT, which is what makes the right button an eraser without an
+ * eraser existing. It is not a special case bolted on - in a program that keeps alpha,
+ * rubbing out IS drawing with nothing, and the secondary colour is where nothing lives
+ * until somebody puts something there.
+ *
+ * THE PICK IS ON THE PRESS, not on hover. Hovering was tried and it is wrong: the hand
+ * rests, drifts and travels across the sheet on its way to somewhere, and a colour that
+ * changes under all of that is a colour nobody chose. The first Vangopix asked for the
+ * press and it was right to.
+ *
+ * What hover does instead is PREVIEW. While CTRL is held a bar follows the pointer with
+ * the colour under it and its value as RRGGBBAA - the answer to "what would I get", which
+ * is what makes a deliberate press worth making. It sits OFFSET from the aim point, for
+ * the same reason the first Vangopix offset its tool glyph: whatever reports what you are
+ * pointing at must not stand on it.
+ *
+ * The two loaded colours are shown in the same kind of bar, at the bottom left, and they
+ * step aside when the project sidebar comes in.
+ *
+ * THEY ARE ALWAYS THERE, AND THAT IS A READOUT RATHER THAN CHROME. A toolbar is commands
+ * parked on screen in case they are wanted; a swatch answers "which colour lands if I press
+ * the left MOUSE button now" - the state of the thing in your hand, not an entry in a menu.
+ * There is no other way to know what each side of the mouse is holding, and that is not a
+ * question a person should have to press a key to ask.
+ *
+ * A pixel artist settles on eight to sixteen colours and picks from the drawing constantly -
+ * THE IMAGE IS THE PALETTE - so what has to be on screen is not a grid of tiles but the two
+ * colours currently in hand.
  *
  * IT IS LAST IN THE INPUT CHAIN, after everything that can claim the same button - the
  * bar, the panel, the corner grips and the camera's space-pan. That order is in core.c
@@ -58,11 +79,12 @@ extern void tool_free (void);
 /* Returns true when the tool consumed the event. */
 extern bool tool_event (const SDL_Event *e, VNG_TAB *t);
 
-/* What the pencil lays down. The palette, when it exists, sets and reads it here. */
-extern Uint32 tool_colour (void);
+/* Slot 0 is the left button's colour, slot 1 the right button's. Anything else reads as
+   slot 0 rather than reading out of bounds. The palette, when it exists, works here. */
+extern Uint32 tool_colour (int slot);
 
-/* Absorbs the colour at that document pixel. Out of bounds changes nothing. */
-extern void tool_pick (VNG_TAB *t, int x, int y);
+/* Absorbs the colour at that document pixel into a slot. Out of bounds changes nothing. */
+extern void tool_pick (VNG_TAB *t, int x, int y, int slot);
 
 /*
  * A colour as a person reads it: RRGGBBAA, eight hex digits, no prefix.

@@ -200,26 +200,43 @@ int main (void)
 		ok("half transparent red keeps its alpha last",
 		   SDL_strcmp(hex, "FF000080") == 0);
 
-		p->pixels[3 * 16 + 5] = 0xFF123456u;
-		tool_pick(p, 5, 3);
-		ok("the pick absorbs the pixel under it", tool_colour() == 0xFF123456u);
+		/* The CTRL branch of tool_event cannot be driven from here - keys_mods reads the
+		 * real keyboard - so what is checked is tool_pick, which is where the absorbing
+		 * actually happens, and the two slots either side of it. */
+		ok("colour 2 starts as nothing, which is what makes the right button an eraser",
+		   tool_colour(1) == 0x00000000u);
 
-		Uint32 held = tool_colour();
-		tool_pick(p, 99, 99);
-		ok("a pick outside the sheet changes nothing", tool_colour() == held);
+		p->pixels[3 * 16 + 5] = 0xFF123456u;
+		tool_pick(p, 5, 3, 0);
+		ok("a pick fills the slot it was given", tool_colour(0) == 0xFF123456u);
+		ok("and leaves the other one alone",    tool_colour(1) == 0x00000000u);
+
+		Uint32 held = tool_colour(0);
+		tool_pick(p, 99, 99, 0);
+		ok("a pick outside the sheet changes nothing", tool_colour(0) == held);
 
 		/* The colour outlives a stroke: it belongs to the pencil, not to the drag. */
 		mouse(p, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 9, 9);
 		mouse(p, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 9, 9);
-		ok("a stroke draws with the picked colour",
-		   p->pixels[9 * 16 + 9] == 0xFF123456u);
-		ok("and the colour survives the stroke", tool_colour() == 0xFF123456u);
+		ok("the LEFT button draws colour 1", p->pixels[9 * 16 + 9] == 0xFF123456u);
+		ok("and the colour survives the stroke", tool_colour(0) == 0xFF123456u);
 
-		/* The right button still rubs out, and does not become the picked colour. */
+		/* Colour 2 is still nothing, so the right button rubs out. */
 		mouse(p, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_RIGHT, 9, 9);
 		mouse(p, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_RIGHT, 9, 9);
-		ok("the right button rubs out whatever the colour is",
+		ok("the RIGHT button draws colour 2, which is nothing",
 		   p->pixels[9 * 16 + 9] == 0x00000000u);
+
+		/* Put something in slot 2 and the right button stops being an eraser - the eraser
+		 * was never a tool, only a colour that happened to be absent. */
+		p->pixels[2 * 16 + 2] = 0xFFABCDEFu;
+		tool_pick(p, 2, 2, 1);
+		mouse(p, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_RIGHT, 9, 9);
+		mouse(p, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_RIGHT, 9, 9);
+		ok("a filled slot 2 makes the right button draw with it",
+		   p->pixels[9 * 16 + 9] == 0xFFABCDEFu);
+		ok("colour 1 was not touched by any of that",
+		   tool_colour(0) == 0xFF123456u);
 	}
 
 	/* ---- what a save dialog's answer means ----
