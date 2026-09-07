@@ -65,7 +65,10 @@ static VNG_TAB *tab_alloc (int w, int h)
 	t->pixels = (Uint32 *) SDL_malloc((size_t)w * h * sizeof(Uint32));
 	if (!t->pixels) { SDL_free(t); return NULL; }
 
-	t->zoom = 1.0f;
+	/* Zoom 0 means "never framed". view_sheet_rect frames it on the first draw, when
+	 * the window size is certainly known. Setting 1.0 here would show every opened
+	 * image at 1:1 and let a 4000px photograph arrive off screen. */
+	t->zoom = 0.0f;
 	return t;
 }
 

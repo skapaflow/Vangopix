@@ -59,6 +59,9 @@ that already have it.
 | `CTRL+TAB` / `CTRL+SHIFT+TAB` | walk through the tabs |
 | `TAB` | show and hide the tab bar |
 | `F1` | toggle the document overlay |
+| wheel | zoom in steps, centred on the cursor |
+| middle drag, or `SPACE` + left drag | pan |
+| `CTRL+0` / `CTRL+1` | fit the sheet / go to 1:1 |
 
 While the bar is up: click a tab to select it, drag it sideways to reorder, click its
 `x` to close it, click `+` for a new sheet. The bar floats over the sheet and takes no
@@ -77,6 +80,7 @@ src/
   core.c/.h     the frame: input, draw, present
   tabs.c/.h     the tabs, which ARE the documents
   tabbar.c/.h   the tab bar: the only file that draws a tab
+  view.c/.h     the camera: stepped zoom at the cursor, and pan
   text.c/.h     glyphs packed into one atlas
 ```
 
@@ -92,5 +96,7 @@ the source of most of the design that survives here. This one is written with
 [Claude Code](https://claude.com/claude-code) (Claude Opus 5) as a collaborator, and that
 participation is recorded in the commit history rather than hidden.
 
-Text rendering is adapted from the text module of the author's Skyonara engine, on top of
+Text rendering and the camera are adapted from the author's Skyonara engine
+(`text/text.c` and `camera/camera.c`), the latter carrying pan and zoom that go back to
+the 2016 Skyonara. Text sits on top of
 [stb_truetype](https://github.com/nothings/stb) by Sean Barrett (public domain).

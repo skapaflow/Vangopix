@@ -2,45 +2,11 @@
 #include "vangopix.h"
 #include "tabs.h"
 #include "tabbar.h"
-
-/* The desk around the paper: without it the white touches the window edge and the eye
- * loses where the document ends. */
-#define MARGIN 24
+#include "view.h"
 
 /* The overlay is OFF by default and it is not chrome: it occupies no space when it is
- * not asked for, and it is the only consumer of the text module today. It exists so
- * that module is proven rather than merely compiled. F1 toggles it; deleting it is
- * deleting one call in vangopix_core and one case in vangopix_input. */
+ * not asked for. F1 toggles it. */
 static bool overlay = false;
-
-/*
- * Where the sheet lands on screen.
- *
- * Two rules, not one. When the sheet FITS, zoom is an integer: one art pixel has to
- * become an exact N by N square, otherwise nearest rounds differently on each column
- * and the columns come out unequal in width - the flaw that gives away a badly made
- * editor. When it does NOT fit (a 4000px photo), integer zoom would be 0; there the
- * fractional reduction is right, because seeing the whole image matters more than a
- * perfect grid.
- */
-static SDL_FRect sheet_rect (VNG_TAB *t, float *zoom_out)
-{
-	float aw = (float)(vng_win_w - 2 * MARGIN);
-	float ah = (float)(vng_win_h - 2 * MARGIN);
-	if (aw < 1) aw = 1;
-	if (ah < 1) ah = 1;
-
-	float fit = SDL_min(aw / t->w, ah / t->h);
-	float z   = fit >= 1.0f ? SDL_floorf(fit) : fit;
-
-	float w = t->w * z, h = t->h * z;
-	/* Centred on integer coordinates: half a pixel of offset brings back the same
-	 * uneven rounding the integer zoom just avoided. */
-	SDL_FRect r = { SDL_floorf((vng_win_w - w) / 2.0f),
-	                SDL_floorf((vng_win_h - h) / 2.0f), w, h };
-	*zoom_out = z;
-	return r;
-}
 
 void vangopix_input (void)
 {
@@ -52,6 +18,11 @@ void vangopix_input (void)
 		 * without this a click meant for a tab would also land on the drawing
 		 * underneath - and once tools exist, that is a stray pixel every time. */
 		if (tabbar_event(&e))
+			continue;
+
+		/* Then the camera. It answers the wheel and the pan drag; anything it does not
+		 * want falls through to the keys below, and one day to the drawing tools. */
+		if (view_event(&e, vng_tab))
 			continue;
 
 		switch (e.type) {
@@ -91,6 +62,10 @@ void vangopix_input (void)
 				case SDLK_TAB:
 					vng_tab_step((e.key.mod & SDL_KMOD_SHIFT) ? -1 : +1);
 					break;
+				/* The two framings every editor has: fit the whole sheet, and go to
+				 * 1:1 where one art pixel is one screen pixel. */
+				case SDLK_0: view_reset(vng_tab);       break;
+				case SDLK_1: view_actual_size(vng_tab); break;
 				default: break;
 				}
 			}
@@ -102,15 +77,15 @@ void vangopix_input (void)
 	}
 }
 
-static void draw_sheet (VNG_TAB *t, float *zoom_out)
+static void draw_sheet (VNG_TAB *t)
 {
 	if (t->tex_dirty) {
 		SDL_UpdateTexture(t->tex, NULL, t->pixels, t->w * (int)sizeof(Uint32));
 		t->tex_dirty = false;
 	}
 
-	float z;
-	SDL_FRect dst = sheet_rect(t, &z);
+	SDL_FRect dst = view_sheet_rect(t);
+	float     z   = t->zoom;
 
 	/* Nearest when magnifying (pixel art has to come out square); linear when
 	 * shrinking, because nearest on a downscaled photo throws away whole rows and
@@ -125,7 +100,6 @@ static void draw_sheet (VNG_TAB *t, float *zoom_out)
 	SDL_RenderFillRect(vng_ren, &dst);
 	SDL_RenderTexture(vng_ren, t->tex, NULL, &dst);
 
-	*zoom_out = z;
 }
 
 static void draw_overlay (VNG_TAB *t, float zoom)
@@ -149,9 +123,8 @@ void vangopix_core (void)
 
 	VNG_TAB *t = vng_tab;
 	if (t) {
-		float zoom = 1.0f;
-		draw_sheet(t, &zoom);
-		if (overlay) draw_overlay(t, zoom);
+		draw_sheet(t);
+		if (overlay) draw_overlay(t, t->zoom);
 		tabbar_draw();   /* last, so it floats over the sheet instead of under it */
 	}
 
