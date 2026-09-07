@@ -9,6 +9,7 @@
 #include "keys.h"
 #include "prompt.h"
 #include "file.h"
+#include "undo.h"
 
 /*
  * The desk: a grey checkerboard, the size and the two greys taken from what the first
@@ -229,6 +230,14 @@ void vangopix_input (void)
 				case SDLK_W: file_close_tab(vng_tab);           break;
 				case SDLK_O: file_open_ask();                   break;
 
+				/* CTRL+Z back, CTRL+SHIFT+Z or CTRL+Y forward. Both redo spellings,
+				 * because half the world learned one and half the other. */
+				case SDLK_Z:
+					if (e.key.mod & SDL_KMOD_SHIFT) undo_redo(vng_tab);
+					else                            undo_undo(vng_tab);
+					break;
+				case SDLK_Y: undo_redo(vng_tab);                break;
+
 				/* CTRL+S writes, CTRL+SHIFT+S always asks where. The standard pair,
 				 * and the ask is the system's own dialog - see file.c. */
 				case SDLK_S:
@@ -275,6 +284,26 @@ static void draw_sheet (VNG_TAB *t)
 	 * checkerboard, which is the whole point of having one - white paper underneath
 	 * would make an empty image and a white image look identical. */
 	SDL_RenderTexture(vng_ren, t->tex, NULL, &dst);
+
+	/*
+	 * The stroke in progress, OVER the document and not yet in it. That separation is
+	 * what lets a stroke be abandoned, and what stops a half transparent brush from
+	 * blending onto its own output - see the mask in tabs.h.
+	 *
+	 * Only the rectangle the stroke has reached goes to the GPU. The preview is
+	 * transparent everywhere else and stays that way, which is the invariant
+	 * vng_tab_stroke_close maintains on the way out.
+	 */
+	if (t->stroke && t->tex_preview && t->sx1 > t->sx0 && t->sy1 > t->sy0) {
+		SDL_Rect r = { t->sx0, t->sy0, t->sx1 - t->sx0, t->sy1 - t->sy0 };
+		SDL_UpdateTexture(t->tex_preview, &r,
+		                  t->pixels_preview + (size_t)r.y * t->w + r.x,
+		                  t->w * (int)sizeof(Uint32));
+
+		SDL_SetTextureScaleMode(t->tex_preview, z >= 1.0f ? SDL_SCALEMODE_NEAREST
+		                                                  : SDL_SCALEMODE_LINEAR);
+		SDL_RenderTexture(vng_ren, t->tex_preview, NULL, &dst);
+	}
 
 	/* A black frame just OUTSIDE the sheet, never on it. An image that is mostly alpha
 	 * has no visible edge of its own, and its bounds are exactly what a person needs to

@@ -1,4 +1,5 @@
 #include "tabs.h"
+#include "undo.h"
 
 VNG_TAB *vng_tabs = NULL;
 VNG_TAB *vng_tab  = NULL;
@@ -46,22 +47,142 @@ static void tab_link (VNG_TAB *t)
 
 /* A texture has a fixed size from creation, and opening a file changes the document's
  * dimensions - which is why it is born here and not where the sheet is filled in. */
-static bool tab_make_texture (VNG_TAB *t)
+static SDL_Texture *texture_make (int w, int h)
 {
-	if (t->tex) SDL_DestroyTexture(t->tex);
-	t->tex = SDL_CreateTexture(vng_ren, SDL_PIXELFORMAT_ARGB8888,
-	                           SDL_TEXTUREACCESS_STREAMING, t->w, t->h);
-	if (!t->tex) {
+	SDL_Texture *tex = SDL_CreateTexture(vng_ren, SDL_PIXELFORMAT_ARGB8888,
+	                                     SDL_TEXTUREACCESS_STREAMING, w, h);
+	if (!tex) {
 		SDL_Log("SDL_CreateTexture: %s", SDL_GetError());
-		return false;
+		return NULL;
 	}
 	/* Without this the alpha in the buffer is carried to the GPU and then ignored: the
 	 * default for a new texture is no blending, so a half transparent pixel would draw
 	 * as fully opaque and the checkerboard behind it would never show. */
-	SDL_SetTextureBlendMode(t->tex, SDL_BLENDMODE_BLEND);
+	SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+	return tex;
+}
 
+static bool tab_make_texture (VNG_TAB *t)
+{
+	SDL_Texture *tex = texture_make(t->w, t->h);
+	if (!tex) return false;
+
+	if (t->tex) SDL_DestroyTexture(t->tex);
+	t->tex = tex;
 	t->tex_dirty = true;
 	return true;
+}
+
+/* Thrown away rather than resized: a resize cannot happen in the middle of a stroke, so
+ * there is never anything in them worth carrying to the new geometry, and the next
+ * stroke allocates them at the right size for nothing. */
+static void draw_buffers_free (VNG_TAB *t)
+{
+	if (t->tex_preview) SDL_DestroyTexture(t->tex_preview);
+	t->tex_preview = NULL;
+
+	SDL_free(t->pixels_preview);
+	SDL_free(t->mask);
+	t->pixels_preview = NULL;
+	t->mask           = NULL;
+	t->stroke         = false;
+}
+
+static bool draw_buffers_make (VNG_TAB *t)
+{
+	if (t->pixels_preview && t->mask && t->tex_preview) return true;
+	draw_buffers_free(t);
+
+	/* calloc, and it matters: the preview must start fully transparent, because it is
+	 * composited over the document every frame a stroke is open. */
+	t->pixels_preview = (Uint32 *) SDL_calloc((size_t)t->w * t->h, sizeof(Uint32));
+	t->mask           = (Uint8  *) SDL_calloc((size_t)t->w * t->h, 1);
+
+	t->tex_preview = SDL_CreateTexture(vng_ren, SDL_PIXELFORMAT_ARGB8888,
+	                                   SDL_TEXTUREACCESS_STREAMING, t->w, t->h);
+
+	if (!t->pixels_preview || !t->mask || !t->tex_preview) {
+		SDL_Log("stroke buffers: %s", SDL_GetError());
+		draw_buffers_free(t);
+		return false;
+	}
+
+	SDL_SetTextureBlendMode(t->tex_preview, SDL_BLENDMODE_BLEND);
+
+	/* A new texture holds whatever was in that memory. It is cleared once, here, and
+	 * from then on every stroke leaves it transparent again on the way out - which is
+	 * what lets the per-frame upload be the touched rectangle and not the whole sheet. */
+	SDL_UpdateTexture(t->tex_preview, NULL, t->pixels_preview,
+	                  t->w * (int)sizeof(Uint32));
+	return true;
+}
+
+bool vng_tab_stroke_open (VNG_TAB *t)
+{
+	if (!t || !draw_buffers_make(t)) return false;
+	if (!undo_open(t)) return false;
+
+	/* An empty box, stated so that the first put widens it in both directions. */
+	t->sx0 = t->w; t->sy0 = t->h;
+	t->sx1 = 0;    t->sy1 = 0;
+	t->stroke = true;
+	return true;
+}
+
+bool vng_tab_touched (VNG_TAB *t, int x, int y)
+{
+	if (!t || !t->mask || x < 0 || y < 0 || x >= t->w || y >= t->h) return false;
+	return t->mask[(size_t)y * t->w + x] != 0;
+}
+
+void vng_tab_put (VNG_TAB *t, int x, int y, Uint32 argb)
+{
+	if (!t || !t->stroke || x < 0 || y < 0 || x >= t->w || y >= t->h) return;
+
+	size_t i = (size_t)y * t->w + x;
+	t->pixels_preview[i] = argb;
+	t->mask[i]           = 1;
+
+	if (x     < t->sx0) t->sx0 = x;
+	if (y     < t->sy0) t->sy0 = y;
+	if (x + 1 > t->sx1) t->sx1 = x + 1;
+	if (y + 1 > t->sy1) t->sy1 = y + 1;
+}
+
+void vng_tab_stroke_close (VNG_TAB *t)
+{
+	if (!t || !t->stroke) return;
+	t->stroke = false;
+
+	/* Only the rectangle the stroke actually reached is walked. The alternative is the
+	 * whole sheet on every stroke, which on a large canvas is millions of untouched
+	 * pixels read to find out they are untouched. */
+	for (int y = t->sy0; y < t->sy1; y++) {
+		for (int x = t->sx0; x < t->sx1; x++) {
+			size_t i = (size_t)y * t->w + x;
+			if (!t->mask[i]) continue;
+
+			undo_carry(t, x, y, t->pixels[i], t->pixels_preview[i]);
+			t->pixels[i] = t->pixels_preview[i];
+
+			/* Left clean for the next stroke, so opening one costs nothing. */
+			t->pixels_preview[i] = 0;
+			t->mask[i]           = 0;
+		}
+	}
+
+	if (t->sx1 > t->sx0 && t->sy1 > t->sy0) {
+		/* The same rectangle, now transparent, goes back to the GPU: the preview
+		 * texture is transparent everywhere again, which is the invariant the
+		 * partial upload during a stroke depends on. */
+		SDL_Rect r = { t->sx0, t->sy0, t->sx1 - t->sx0, t->sy1 - t->sy0 };
+		SDL_UpdateTexture(t->tex_preview, &r,
+		                  t->pixels_preview + (size_t)r.y * t->w + r.x,
+		                  t->w * (int)sizeof(Uint32));
+		t->tex_dirty = true;
+	}
+
+	undo_close(t);
 }
 
 static VNG_TAB *tab_alloc (int w, int h)
@@ -173,6 +294,8 @@ void vng_tab_close (VNG_TAB *t)
 	if (t->next) t->next->prev = t->prev; else tail     = t->prev;
 
 	if (t->tex) SDL_DestroyTexture(t->tex);
+	draw_buffers_free(t);
+	undo_free(t->undo);
 	SDL_free(t->pixels);
 	SDL_free(t->path);
 	SDL_free(t);
@@ -246,12 +369,34 @@ void vng_tab_move (VNG_TAB *t, int index)
  * The new buffer is filled white first, so any area the old image does not cover comes
  * out as paper rather than as whatever the allocator had lying there.
  */
-bool vng_tab_resize (VNG_TAB *t, int w, int h, int dx, int dy)
+Uint32 *vng_tab_adopt (VNG_TAB *t, Uint32 *pixels, int w, int h)
 {
-	if (!t || w < 1 || h < 1) return false;
+	if (!t || !pixels || w < 1 || h < 1) return NULL;
+
+	/* The texture is made BEFORE anything is swapped, so a failure here leaves the
+	 * document exactly as it was rather than half changed. */
+	SDL_Texture *tex = texture_make(w, h);
+	if (!tex) return NULL;
+
+	Uint32 *old = t->pixels;
+
+	if (t->tex) SDL_DestroyTexture(t->tex);
+	t->tex       = tex;
+	t->pixels    = pixels;
+	t->w         = w;
+	t->h         = h;
+	t->tex_dirty = true;
+
+	draw_buffers_free(t);   /* the geometry moved out from under them */
+	return old;
+}
+
+Uint32 *vng_tab_resize_raw (VNG_TAB *t, int w, int h, int dx, int dy)
+{
+	if (!t || w < 1 || h < 1) return NULL;
 
 	Uint32 *buf = (Uint32 *) SDL_malloc((size_t)w * h * sizeof(Uint32));
-	if (!buf) return false;
+	if (!buf) return NULL;
 
 	for (int i = 0; i < w * h; i++)
 		buf[i] = 0xFFFFFFFFu;
@@ -269,16 +414,27 @@ bool vng_tab_resize (VNG_TAB *t, int w, int h, int dx, int dy)
 		           t->pixels + (size_t)(y - dy) * t->w + (x0 - dx),
 		           (size_t)(x1 - x0) * sizeof(Uint32));
 
-	SDL_free(t->pixels);
-	t->pixels = buf;
-	t->w = w;
-	t->h = h;
+	/* Hands the old buffer out instead of freeing it - which is what makes recording a
+	 * resize for undo cost nothing at all. A caller that does not want it frees it. */
+	Uint32 *old = vng_tab_adopt(t, buf, w, h);
+	if (!old) { SDL_free(buf); return NULL; }
+	return old;
+}
 
-	/* A texture has a fixed size from creation, so the size change forces a new one. */
-	if (!tab_make_texture(t)) return false;
+bool vng_tab_resize (VNG_TAB *t, int w, int h, int dx, int dy)
+{
+	int was_w = t->w, was_h = t->h;
+
+	Uint32 *was = vng_tab_resize_raw(t, w, h, dx, dy);
+	if (!was) return false;
 
 	t->dirty = true;
 	vng_tab_title();
+
+	/* THE BUFFER IS NOT FREED - it becomes the undo record, and the record is therefore
+	 * free. Recomputing it would be impossible anyway: shrinking a canvas destroys the
+	 * pixels outside the new edge, and nothing but a copy can bring them back. */
+	undo_resize(t, was, was_w, was_h, w, h, dx, dy);
 	return true;
 }
 
@@ -355,6 +511,8 @@ void vng_tabs_free (void)
 	while (p) {
 		VNG_TAB *n = p->next;
 		if (p->tex) SDL_DestroyTexture(p->tex);
+		draw_buffers_free(p);
+		undo_free(p->undo);
 		SDL_free(p->pixels);
 		SDL_free(p->path);
 		SDL_free(p);

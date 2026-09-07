@@ -9,6 +9,7 @@ ifeq ($(OS),Windows_NT)
     # the del/copy recipes below would break in a way that depends on who is compiling.
     SHELL      = cmd.exe
     OUT        = vangopix.exe
+    TEST_OUT   = undo_test.exe
     SDL3      ?= C:/SDL3
     SDL3IMG   ?= C:/SDL3_image
     SDL_CFLAGS = -I$(SDL3)/include -I$(SDL3IMG)/include
@@ -18,6 +19,7 @@ ifeq ($(OS),Windows_NT)
     RES        = icon/recicon.res
 else
     OUT        = vangopix
+    TEST_OUT   = undo_test
     # pkg-config rather than hardcoded paths: on Linux and macOS the libraries come from
     # a package manager that already knows where it put them, and hardcoding would be
     # wrong on every distribution and on both homebrew prefixes.
@@ -53,7 +55,8 @@ LFLAGS  = $(SDL_LIBS)
 # To come:
 #   tool.c     the tools: pencil, bucket, eyedropper
 #   file.c     save, and the two system dialogs that go with it
-SRC = src/main.c src/vangopix.c src/core.c src/keys.c src/tabs.c src/tabbar.c src/view.c src/resize.c src/project.c src/sidebar.c src/prompt.c src/file.c src/text.c
+#   undo.c     the undo stack: pixel carries and resizes, per document
+SRC = src/main.c src/vangopix.c src/core.c src/keys.c src/tabs.c src/tabbar.c src/view.c src/resize.c src/project.c src/sidebar.c src/prompt.c src/file.c src/undo.c src/text.c
 DEP = $(wildcard src/*.h)
 
 all: $(OUT) run
@@ -66,6 +69,17 @@ $(OUT): $(SRC) $(DEP) $(RES)
 
 run: $(OUT)
 	./$(OUT)
+
+# The one thing in this program that can be checked without a hand on the mouse: undo has
+# an answer that is either right or wrong, and a resize undone has to give back pixels a
+# shrink destroyed. It links the same sources minus main.c, opens a hidden window because
+# a document owns a texture, and prints PASS or FAIL per claim.
+#
+# NOT part of `all`: a build should not open a window every time it succeeds.
+TEST_SRC = $(filter-out src/main.c,$(SRC))
+test: test/undo_test.c $(TEST_SRC) $(DEP)
+	$(CC) $(CFLAGS) test/undo_test.c $(TEST_SRC) -o $(TEST_OUT) $(LFLAGS)
+	./$(TEST_OUT)
 
 # -mwindows drops the console, and only on Windows does that mean anything. It stays OUT
 # of the normal build on purpose: while developing, SDL_Log is the only window into the
@@ -97,6 +111,7 @@ dll:
 
 clean:
 	@if exist $(OUT) del $(OUT)
+	@if exist $(TEST_OUT) del $(TEST_OUT)
 	@if exist $(subst /,\,$(RES)) del $(subst /,\,$(RES))
 
 else
@@ -105,8 +120,11 @@ dll:
 	@echo "dll: nothing to do - shared libraries come from the package manager here"
 
 clean:
-	rm -f $(OUT)
+	rm -f $(OUT) $(TEST_OUT)
 
 endif
 
-.PHONY: all clean run release dll
+# `test` is also the name of a DIRECTORY. Without it on this list make finds the
+# directory, decides the target is up to date and runs nothing - reporting success for a
+# suite it never built.
+.PHONY: all clean run release dll test

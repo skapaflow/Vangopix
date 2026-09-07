@@ -25,11 +25,12 @@ image gets before a brush touches it — opening, viewing, framing, sizing and s
 | canvas | resize by the corner grips, with an optional 8 pixel grid |
 | files | open and save through the system's own dialogs; the format follows the extension |
 | keyboard | one owner at a time, so a field being open silences every shortcut |
+| undo | per document, made of pixel carries and resizes rather than snapshots |
 | transparency | checkerboard behind the sheet, black frame around it |
 | text | one atlas, packed by stb_truetype |
 
-Next is what a pencil needs before it can exist: the three buffers a stroke is drawn
-over, and per-pixel undo. Then the pencil, a palette, and a colour to draw with.
+Next is the pencil itself: the three buffers it draws over and the undo behind them are
+already here, so what is left is the tool, a palette, and a colour to draw with.
 
 ## Building
 
@@ -84,6 +85,8 @@ drawing near the border.
 | `CTRL+O` | open one or more files |
 | `CTRL+S` | save — asks where, the first time |
 | `CTRL+SHIFT+S` | save as |
+| `CTRL+Z` | undo |
+| `CTRL+SHIFT+Z` / `CTRL+Y` | redo |
 | `CTRL+W` | close the tab — asks if that would lose work |
 | `CTRL+TAB` / `CTRL+SHIFT+TAB` | walk through the tabs |
 | `ESC` | show and hide the tab bar |
@@ -143,6 +146,23 @@ language. The format comes from the extension you type — png, jpg, webp, avif,
 Closing a document with unsaved work asks first, and so does quitting. Both are the
 system's message box, so they are drawn outside the window and cost no pixels here.
 
+### Undo
+
+`CTRL+Z` and `CTRL+SHIFT+Z` (or `CTRL+Y`). It is not made of snapshots — a snapshot of a
+4000x4000 sheet is 64MB and an afternoon is a hundred strokes. A step carries only the
+pixels that changed, old colour and new, so a pencil line costs a few kilobytes.
+
+**Resizing the canvas is undone too**, and that was a decision rather than an extra: an
+undo that took back a brush stroke and shrugged at a corner grip is one people learn not
+to trust. The buffer a resize throws away becomes the undo record itself, so recording one
+costs nothing — and it is the only way back, since shrinking a canvas destroys pixels that
+nothing can recompute.
+
+The star in the title bar follows the stack: undo back to the point where the file was
+last saved and it goes away.
+
+`make test` runs the checks for all of this.
+
 ### Who has the keyboard
 
 The mouse is routed by layer — whatever is drawn on top answers a click first, because a
@@ -181,6 +201,7 @@ src/
   keys.c/.h     who has the keyboard
   prompt.c/.h   one line of text, asked for and gone
   file.c/.h     save, and the two system dialogs that go with it
+  undo.c/.h     the undo stack, per document
   tabs.c/.h     the tabs, which ARE the documents
   tabbar.c/.h   the tab bar: the only file that draws a tab
   project.c/.h  the project folders and projects.vngproj

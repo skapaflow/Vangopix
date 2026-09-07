@@ -1,4 +1,5 @@
 #include "file.h"
+#include "undo.h"
 
 /*
  * THE CALLBACK DOES NOT RUN ON THE MAIN THREAD, AND EVERYTHING HERE FOLLOWS FROM THAT.
@@ -101,8 +102,11 @@ static bool save_to (VNG_TAB *t, const char *path)
 	if (!write_file(t, path)) return false;
 
 	vng_tab_set_path(t, path);
-	t->dirty = false;
-	vng_tab_title();
+
+	/* Not a bare `dirty = false`: the star belongs to the undo stack now, so that
+	 * undoing back to this exact point clears it again instead of leaving a mark on a
+	 * document that matches its file byte for byte. */
+	undo_mark_saved(t);
 	return true;
 }
 
