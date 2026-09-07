@@ -28,6 +28,11 @@ extern bool sidebar_visible (void);
 /* Returns true when the sidebar consumed the event. */
 extern bool sidebar_event (const SDL_Event *e);
 
+/* How far the panel reaches into the window right now: its right edge while it is in or
+   sliding, 0 while it is out. What anything asking "is the pointer over the panel?" needs
+   without learning the panel's width - the same shape as tabbar_height. */
+extern float sidebar_edge (void);
+
 extern void sidebar_draw (void);
 
 #endif

@@ -9,7 +9,7 @@ ifeq ($(OS),Windows_NT)
     # the del/copy recipes below would break in a way that depends on who is compiling.
     SHELL      = cmd.exe
     OUT        = vangopix.exe
-    TEST_OUT   = undo_test.exe
+    TEST_OUT   = checks.exe
     SDL3      ?= C:/SDL3
     SDL3IMG   ?= C:/SDL3_image
     SDL_CFLAGS = -I$(SDL3)/include -I$(SDL3IMG)/include
@@ -19,7 +19,7 @@ ifeq ($(OS),Windows_NT)
     RES        = icon/recicon.res
 else
     OUT        = vangopix
-    TEST_OUT   = undo_test
+    TEST_OUT   = checks
     # pkg-config rather than hardcoded paths: on Linux and macOS the libraries come from
     # a package manager that already knows where it put them, and hardcoding would be
     # wrong on every distribution and on both homebrew prefixes.
@@ -50,13 +50,11 @@ LFLAGS  = $(SDL_LIBS)
 #   resize.c   the corner grips that resize the canvas
 #   project.c  the project folders and projects.vngproj (the model)
 #   sidebar.c  the project panel (the pixels)
-#   text.c     glyphs packed into one atlas by stb_truetype
-#
-# To come:
-#   tool.c     the tools: pencil, bucket, eyedropper
 #   file.c     save, and the two system dialogs that go with it
 #   undo.c     the undo stack: pixel carries and resizes, per document
-SRC = src/main.c src/vangopix.c src/core.c src/keys.c src/tabs.c src/tabbar.c src/view.c src/resize.c src/project.c src/sidebar.c src/prompt.c src/file.c src/undo.c src/text.c
+#   tool.c     the pencil: the only file that changes a pixel
+#   text.c     glyphs packed into one atlas by stb_truetype
+SRC = src/main.c src/vangopix.c src/core.c src/keys.c src/tabs.c src/tabbar.c src/view.c src/resize.c src/project.c src/sidebar.c src/prompt.c src/file.c src/undo.c src/tool.c src/text.c
 DEP = $(wildcard src/*.h)
 
 all: $(OUT) run
@@ -70,15 +68,16 @@ $(OUT): $(SRC) $(DEP) $(RES)
 run: $(OUT)
 	./$(OUT)
 
-# The one thing in this program that can be checked without a hand on the mouse: undo has
-# an answer that is either right or wrong, and a resize undone has to give back pixels a
-# shrink destroyed. It links the same sources minus main.c, opens a hidden window because
-# a document owns a texture, and prints PASS or FAIL per claim.
+# The parts of this program with an answer that is right or wrong without a hand on the
+# mouse: a resize undone has to give back the pixels a shrink destroyed, and a pencil
+# stroke has to join its samples instead of coming out dotted. It links the same sources
+# minus main.c, opens a hidden window because a document owns a texture, and prints PASS
+# or FAIL per claim.
 #
 # NOT part of `all`: a build should not open a window every time it succeeds.
 TEST_SRC = $(filter-out src/main.c,$(SRC))
-test: test/undo_test.c $(TEST_SRC) $(DEP)
-	$(CC) $(CFLAGS) test/undo_test.c $(TEST_SRC) -o $(TEST_OUT) $(LFLAGS)
+test: test/checks.c $(TEST_SRC) $(DEP)
+	$(CC) $(CFLAGS) test/checks.c $(TEST_SRC) -o $(TEST_OUT) $(LFLAGS)
 	./$(TEST_OUT)
 
 # -mwindows drops the console, and only on Windows does that mean anything. It stays OUT

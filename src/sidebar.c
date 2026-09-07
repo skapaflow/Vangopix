@@ -82,6 +82,8 @@ void sidebar_toggle (void)
  * must not be toggled back out. */
 bool sidebar_visible (void) { return visible; }
 
+float sidebar_edge (void) { return anim > 0.0f ? slide() + BAR_W : 0.0f; }
+
 static float row_h (void)
 {
 	float h = text_line_height(vng_text);

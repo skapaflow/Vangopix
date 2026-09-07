@@ -13,8 +13,8 @@ middle for drawing and surrounds it with tools; Vangopix reserves nothing.
 
 ## Status
 
-Early, and honest about it: **there is no drawing yet.** What works is everything an
-image gets before a brush touches it — opening, viewing, framing, sizing and saving.
+Early, but **it draws now.** A pencil, undo behind it, and everything an image gets around
+that — opening, viewing, framing, sizing and saving.
 
 | | |
 | --- | --- |
@@ -26,11 +26,13 @@ image gets before a brush touches it — opening, viewing, framing, sizing and s
 | files | open and save through the system's own dialogs; the format follows the extension |
 | keyboard | one owner at a time, so a field being open silences every shortcut |
 | undo | per document, made of pixel carries and resizes rather than snapshots |
+| drawing | a pencil: left draws, right rubs out to transparent |
 | transparency | checkerboard behind the sheet, black frame around it |
 | text | one atlas, packed by stb_truetype |
 
-Next is the pencil itself: the three buffers it draws over and the undo behind them are
-already here, so what is left is the tool, a palette, and a colour to draw with.
+Next is a colour to draw with. The pencil is black until there is a palette, and the
+palette is the point at which a tool window earns its place — drawn by VagrantUI, on
+demand, gone when it is done.
 
 ## Building
 
@@ -58,13 +60,18 @@ gif, tga, qoi, ico, pcx, svg, xcf.
 
 ## Fonts
 
-The program looks beside the executable for `font/lucon.ttf` first, then
+The program looks beside the executable for `font/DejaVuSansMono.ttf` first, then
 `font/FreeSans.ttf`, and runs without text if it finds neither.
 
-`FreeSans.ttf` is [GNU FreeFont](https://www.gnu.org/software/freefont/) and ships with
-the repository so a fresh clone works. `lucon.ttf` is Lucida Console, which comes with
-Windows and is **not redistributable** — it is git-ignored, and present only on machines
-that already have it.
+**DejaVu Sans Mono** ships with the repository, under the Bitstream Vera / DejaVu licence,
+which permits redistribution and asks that the notice travel with the font —
+`font/LICENSE_DEJAVU.txt`. It is monospaced, which matters beyond taste: VagrantUI asks for
+one fixed character cell and lays its content out in columns from it, so a proportional face
+makes every column drift.
+
+`FreeSans.ttf` is [GNU FreeFont](https://www.gnu.org/software/freefont/) and stays as the
+one behind it — proportional, so not the right answer, but a corrupt first file should cost
+a nicer face and not the ability to read anything on screen.
 
 ## Transparency
 
@@ -97,6 +104,8 @@ drawing near the border.
 | `CTRL+0` / `CTRL+1` | fit the sheet / go to 1:1 |
 | drag a corner grip | resize the canvas |
 | `SHIFT` while dragging a grip | put the corner on the 8 pixel grid |
+| left drag on the sheet | draw |
+| right drag on the sheet | rub out, to transparent |
 | drag a file in | open it in a new tab |
 | drag a folder in | add it as a project |
 | `ENTER` / `ESC` in a field | accept / cancel |
@@ -145,6 +154,22 @@ language. The format comes from the extension you type — png, jpg, webp, avif,
 
 Closing a document with unsaved work asks first, and so does quitting. Both are the
 system's message box, so they are drawn outside the window and cost no pixels here.
+
+### The pencil
+
+Left drag draws, right drag rubs out — to **transparent**, not to white, which is what the
+checkerboard behind the sheet is for: in a program that keeps alpha, white is a colour
+somebody chose and nothing is the absence of one.
+
+There is no key to select it and no tool window, because with one tool a key that selects
+it does nothing. It shows itself two ways instead, neither of them a panel: the **cursor**
+becomes a crosshair over the sheet and an arrow everywhere else — the system draws that, at
+whatever size and theme you set — and the **pixel under the pointer is outlined** on the
+sheet from 2x zoom up, which is the signal that matters in a pixel editor. It tells you
+*which pixel*, not which tool.
+
+A stroke joins its samples, so a fast hand draws a line and not a row of dots. One stroke
+is one undo.
 
 ### Undo
 
@@ -202,6 +227,7 @@ src/
   prompt.c/.h   one line of text, asked for and gone
   file.c/.h     save, and the two system dialogs that go with it
   undo.c/.h     the undo stack, per document
+  tool.c/.h     the pencil: the only file that changes a pixel
   tabs.c/.h     the tabs, which ARE the documents
   tabbar.c/.h   the tab bar: the only file that draws a tab
   project.c/.h  the project folders and projects.vngproj

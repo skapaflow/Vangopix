@@ -1,7 +1,37 @@
-/* Headless exercise of the undo stack: resize both ways, strokes, and the dirty mark. */
+/*
+ * Headless checks: the undo stack (resize both ways, strokes, the dirty mark) and the
+ * pencil (that a stroke joins its samples instead of coming out dotted).
+ *
+ * A hidden window is opened because a document owns a texture. Nothing here needs a hand
+ * on the mouse - the pencil is driven with synthetic events, positioned through the real
+ * view_world_to_screen so the test does not carry its own idea of where a pixel is.
+ */
 #include "vangopix.h"
 #include "tabs.h"
 #include "undo.h"
+#include "tool.h"
+#include "view.h"
+
+/* Drives the tool the way core.c does: one synthetic event at the screen point that the
+ * camera says a document pixel is under. */
+static void mouse (VNG_TAB *t, Uint32 type, Uint8 btn, float px, float py)
+{
+	SDL_FPoint s = view_world_to_screen(t, px + 0.5f, py + 0.5f);
+
+	SDL_Event e;
+	SDL_zero(e);
+	e.type = type;
+
+	if (type == SDL_EVENT_MOUSE_MOTION) {
+		e.motion.x = s.x;
+		e.motion.y = s.y;
+	} else {
+		e.button.button = btn;
+		e.button.x = s.x;
+		e.button.y = s.y;
+	}
+	tool_event(&e, t);
+}
 
 static int fails = 0;
 
@@ -103,6 +133,51 @@ int main (void)
 	ok("nothing left to undo", undo_undo(t) == false);
 	ok("but redo still walks forward", undo_redo(t));
 	ok("and then stops", undo_redo(t) == false);
+
+	/* ---- the pencil ---- */
+	VNG_TAB *p = vng_tab_new(16, 16);
+	if (!p) { SDL_Log("no second tab"); return 2; }
+
+	view_sheet_rect(p);            /* frames the camera, as the first draw would */
+	undo_mark_saved(p);
+
+	Uint32 blank[16 * 16];
+	SDL_memcpy(blank, p->pixels, sizeof blank);
+
+	/* One press and ONE motion event jumping five pixels away. A tool that painted only
+	 * where the events landed would leave two dots and four holes. */
+	mouse(p, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT,  2, 2);
+	mouse(p, SDL_EVENT_MOUSE_MOTION,      0,                7, 7);
+	mouse(p, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT,  7, 7);
+
+	int gaps = 0;
+	for (int i = 2; i <= 7; i++)
+		if (p->pixels[i * 16 + i] != 0xFF000000u) gaps++;
+	ok("THE STROKE JOINED ITS SAMPLES (no dotted line)", gaps == 0);
+	ok("and did not paint beside the line", p->pixels[2 * 16 + 3] == blank[2 * 16 + 3]);
+	ok("dirty after drawing", p->dirty == true);
+
+	ok("one stroke is one undo step", undo_undo(p));
+	ok("the whole line came back out", SDL_memcmp(p->pixels, blank, sizeof blank) == 0);
+	ok("clean again", p->dirty == false);
+	undo_redo(p);
+
+	/* Right button rubs out to TRANSPARENT, not to white: in a program that keeps alpha,
+	 * white is a colour somebody chose. */
+	mouse(p, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_RIGHT, 4, 4);
+	mouse(p, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_RIGHT, 4, 4);
+	ok("right button erases to transparent", p->pixels[4 * 16 + 4] == 0x00000000u);
+
+	/* A press that starts off the paper is not a drawing gesture, and must fall through
+	 * to whatever else may want it. */
+	SDL_FPoint off = view_world_to_screen(p, -4.0f, -4.0f);
+	SDL_Event e;
+	SDL_zero(e);
+	e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+	e.button.button = SDL_BUTTON_LEFT;
+	e.button.x = off.x;
+	e.button.y = off.y;
+	ok("a press outside the sheet is not consumed", tool_event(&e, p) == false);
 
 	vng_tabs_free();
 	SDL_DestroyRenderer(vng_ren);

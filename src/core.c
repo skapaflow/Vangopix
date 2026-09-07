@@ -10,6 +10,7 @@
 #include "prompt.h"
 #include "file.h"
 #include "undo.h"
+#include "tool.h"
 
 /*
  * The desk: a grey checkerboard, the size and the two greys taken from what the first
@@ -173,8 +174,14 @@ void vangopix_input (void)
 			continue;
 
 		/* Then the camera. It answers the wheel and the pan drag; anything it does not
-		 * want falls through to the keys below, and one day to the drawing tools. */
+		 * want falls through to the tool and then to the keys below. */
 		if (view_event(&e, vng_tab))
+			continue;
+
+		/* AND LAST, THE TOOL. It comes after everything that can claim the same button -
+		 * a tab, a folder, a corner grip, the space-pan - because a stray pixel is the
+		 * one mistake in this chain that lands in the artwork and stays there. */
+		if (tool_event(&e, vng_tab))
 			continue;
 
 		switch (e.type) {
@@ -357,6 +364,7 @@ void vangopix_core (void)
 	VNG_TAB *t = vng_tab;
 	if (t) {
 		draw_sheet(t);
+		tool_draw(t);      /* the pixel outline, on the sheet and under the panels */
 		resize_draw(t);
 		if (overlay) draw_overlay(t, t->zoom);
 		sidebar_draw();

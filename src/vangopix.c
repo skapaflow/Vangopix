@@ -3,6 +3,7 @@
 #include "core.h"
 #include "project.h"
 #include "file.h"
+#include "tool.h"
 
 SDL_Window   *vng_win   = NULL;
 SDL_Renderer *vng_ren   = NULL;
@@ -17,20 +18,24 @@ float         vng_dt    = 0.0f;
  * different place, and only the executable's own directory is the same in all three.
  * SDL_GetBasePath is what makes that identical on Windows, Linux and macOS.
  *
- * THE ORDER IS A LICENSING DECISION AS MUCH AS A TYPOGRAPHIC ONE.
+ * THE ORDER WAS A LICENSING PROBLEM, AND IT IS SETTLED.
  *
- * Lucida Console is monospaced, which is what VagrantUI needs - it asks for one fixed
- * char_w/char_h and lays its content out in columns from it, so a proportional face
- * makes every column drift. But it is Bigelow & Holmes, shipped with Windows, and is
- * NOT redistributable: it is git-ignored, present only on machines that already have
- * it. FreeSans is the committed fallback so that a fresh clone runs; it is GNU
- * FreeFont, and it is proportional, so it is right for an overlay and wrong for
- * VagrantUI. Replacing it with a permissively licensed monospaced face (SIL OFL:
- * DejaVu Sans Mono, JetBrains Mono, Liberation Mono) closes both gaps at once, and is
- * a one-line change here. */
+ * It used to ask for Lucida Console first, which is monospaced and therefore right for
+ * VagrantUI - and Bigelow & Holmes property, shipped with Windows, never redistributable
+ * from a public repository. FreeSans was the committed fallback so a fresh clone would
+ * run at all, and it is proportional, which is wrong for a UI laid out in columns.
+ *
+ * DejaVu Sans Mono is both things at once: monospaced, and under the Bitstream Vera /
+ * DejaVu licence, which permits redistribution outright. It is committed, with its
+ * licence text beside it as that licence requires, so a clone runs with the same face
+ * the author sees and text_cell() finally means what it says.
+ *
+ * FreeSans stays as the one behind it. Not because it is a good answer - it is
+ * proportional - but because a missing or corrupt first file should cost a nicer face
+ * and not the ability to read anything on screen. */
 static const char *const vng_fonts[] = {
-	"font/lucon.ttf",     /* monospaced, local only  */
-	"font/FreeSans.ttf",  /* proportional, committed */
+	"font/DejaVuSansMono.ttf",  /* monospaced, redistributable, committed */
+	"font/FreeSans.ttf",        /* proportional; only if the first is gone */
 };
 #define VNG_FONT_SIZE 16.0f
 
@@ -74,6 +79,9 @@ bool vangopix_init (int argc, char **argv)
 	if (!vng_text)
 		SDL_Log("running without text: no font found beside the executable");
 
+	tool_init();   /* not fatal either: without the cursors the pointer keeps whatever
+	                * shape the system gave it, and drawing works the same */
+
 	file_init();   /* not fatal: without it save-as cannot deliver its answer, and the
 	                * log says so - everything else in the program still works */
 
@@ -93,6 +101,7 @@ bool vangopix_init (int argc, char **argv)
 
 void vangopix_quit (void)
 {
+	tool_free();
 	vng_tabs_free();
 	project_free();
 	vangopix_core_free();

@@ -53,8 +53,9 @@ void text_fit (TextSystem *ts, char *dst, size_t cap, const char *src, float max
  *
  * ONLY MEANINGFUL FOR A MONOSPACED FACE. It exists because VagrantUI asks for a fixed
  * char_w/char_h through vui_font() and lays its content out in columns from it; give it
- * the cell of a proportional face and every column drifts. Whoever wires that up must
- * check the face first. */
+ * the cell of a proportional face and every column drifts. The face Vangopix ships is
+ * monospaced (DejaVu Sans Mono), so this is now true by default - but the fallback in
+ * vangopix.c is not, and whoever wires VagrantUI up should still know which one loaded. */
 void text_cell (TextSystem *ts, float *out_w, float *out_h);
 
 /* Distance between the baselines of two consecutive lines. */
