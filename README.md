@@ -139,10 +139,16 @@ src/
   core.c/.h     the frame: input, draw, present
   tabs.c/.h     the tabs, which ARE the documents
   tabbar.c/.h   the tab bar: the only file that draws a tab
+  project.c/.h  the project folders and projects.vngproj
+  sidebar.c/.h  the project panel: the only file that draws a folder
   view.c/.h     the camera: stepped zoom at the cursor, and pan
   resize.c/.h   the corner grips that resize the canvas
   text.c/.h     glyphs packed into one atlas
 ```
+
+The pairs are deliberate: `tabs`/`tabbar` and `project`/`sidebar` each split a model
+from the pixels that draw it. The model knows nothing about the screen, and the panel
+knows nothing about what it is listing.
 
 One file per responsibility, never per size. `CLAUDE.md` carries the decisions behind
 these files and the reasoning that produced them.
