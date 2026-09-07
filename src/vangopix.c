@@ -1,5 +1,6 @@
 #include "vangopix.h"
 #include "tabs.h"
+#include "core.h"
 
 SDL_Window   *vng_win   = NULL;
 SDL_Renderer *vng_ren   = NULL;
@@ -85,6 +86,7 @@ bool vangopix_init (int argc, char **argv)
 void vangopix_quit (void)
 {
 	vng_tabs_free();
+	vangopix_core_free();
 	text_free(vng_text);
 	if (vng_ren) SDL_DestroyRenderer(vng_ren);
 	if (vng_win) SDL_DestroyWindow(vng_win);

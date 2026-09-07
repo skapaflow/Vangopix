@@ -50,6 +50,17 @@ the repository so a fresh clone works. `lucon.ttf` is Lucida Console, which come
 Windows and is **not redistributable** — it is git-ignored, and present only on machines
 that already have it.
 
+## Transparency
+
+The sheet sits on a grey checkerboard - the size and the two greys are the ones the
+first Vangopix had settled on. Nothing is drawn under the sheet, so a transparent pixel
+shows the board through it; white paper underneath would make an empty image and a white
+image look identical.
+
+A black frame is drawn just outside the sheet. An image that is mostly alpha has no
+visible edge of its own, and those bounds are what a person needs while resizing or
+drawing near the border.
+
 ## Keys
 
 | | |

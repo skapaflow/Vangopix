@@ -5,6 +5,66 @@
 #include "view.h"
 #include "resize.h"
 
+/*
+ * The desk: a grey checkerboard, the size and the two greys taken from what the first
+ * Vangopix had settled on in its config.ini.
+ *
+ * It is drawn in SCREEN space, not document space - it is the table the paper lies on,
+ * so it must not slide when the camera pans, or it would read as part of the artwork.
+ */
+#define CHECK       6
+/* 0xAARRGGBB, to match the ARGB8888 the texture is created with. The first Vangopix
+ * wrote these as 0xRRGGBBAA in its config.ini, and transcribing that shape straight into
+ * an RGBA32 texture is how this first came out red: RGBA32 orders the BYTES R,G,B,A, so
+ * a little endian machine reads 0x252525FF back as red 0xFF with alpha 0x25. */
+#define CHECK_A     0xFF252525
+#define CHECK_B     0xFF303030
+
+static SDL_Texture *checker = NULL;
+
+/* One tile of 2x2 squares, uploaded once and repeated by the GPU.
+ *
+ * The obvious way - a filled rect per square - is about thirteen thousand draw calls a
+ * frame at 800x600, every frame, for a backdrop that never changes. One tiled texture is
+ * a single call, and it stays a single call at any window size. */
+static bool checker_make (void)
+{
+	const int n = CHECK * 2;
+	Uint32 px[CHECK * 2 * CHECK * 2];
+
+	for (int y = 0; y < n; y++)
+		for (int x = 0; x < n; x++)
+			px[y * n + x] = ((x < CHECK) == (y < CHECK)) ? CHECK_A : CHECK_B;
+
+	checker = SDL_CreateTexture(vng_ren, SDL_PIXELFORMAT_ARGB8888,
+	                            SDL_TEXTUREACCESS_STATIC, n, n);
+	if (!checker) {
+		SDL_Log("checker: %s", SDL_GetError());
+		return false;
+	}
+	/* Nearest, or the seam between two tiles blurs into a grey line at the joins. */
+	SDL_SetTextureScaleMode(checker, SDL_SCALEMODE_NEAREST);
+	SDL_UpdateTexture(checker, NULL, px, n * (int)sizeof(Uint32));
+	return true;
+}
+
+static void draw_desk (void)
+{
+	if (!checker && !checker_make()) {
+		SDL_SetRenderDrawColor(vng_ren, 0x25, 0x25, 0x25, 0xFF);
+		SDL_RenderClear(vng_ren);
+		return;
+	}
+	SDL_FRect all = { 0.0f, 0.0f, (float)vng_win_w, (float)vng_win_h };
+	SDL_RenderTextureTiled(vng_ren, checker, NULL, 1.0f, &all);
+}
+
+void vangopix_core_free (void)
+{
+	if (checker) SDL_DestroyTexture(checker);
+	checker = NULL;
+}
+
 /* The overlay is OFF by default and it is not chrome: it occupies no space when it is
  * not asked for. F1 toggles it. */
 static bool overlay = false;
@@ -100,12 +160,18 @@ static void draw_sheet (VNG_TAB *t)
 	SDL_SetTextureScaleMode(t->tex, z >= 1.0f ? SDL_SCALEMODE_NEAREST
 	                                          : SDL_SCALEMODE_LINEAR);
 
-	/* The white paper UNDER the image: it is what gives transparency a body without
-	 * inventing a checkerboard. A checkerboard is interface decoration; here the
-	 * sheet is white. */
-	SDL_SetRenderDrawColor(vng_ren, 0xFF, 0xFF, 0xFF, 0xFF);
-	SDL_RenderFillRect(vng_ren, &dst);
+	/* NOTHING is drawn under the sheet. What shows through a transparent pixel is the
+	 * checkerboard, which is the whole point of having one - white paper underneath
+	 * would make an empty image and a white image look identical. */
 	SDL_RenderTexture(vng_ren, t->tex, NULL, &dst);
+
+	/* A black frame just OUTSIDE the sheet, never on it. An image that is mostly alpha
+	 * has no visible edge of its own, and its bounds are exactly what a person needs to
+	 * see while resizing or drawing near the border. Outside by one pixel so it never
+	 * hides the outermost row of the artwork - the same rule the corner grips follow. */
+	SDL_FRect edge = { dst.x - 1.0f, dst.y - 1.0f, dst.w + 2.0f, dst.h + 2.0f };
+	SDL_SetRenderDrawColor(vng_ren, 0x00, 0x00, 0x00, 0xFF);
+	SDL_RenderRect(vng_ren, &edge);
 
 }
 
@@ -123,10 +189,9 @@ void vangopix_core (void)
 {
 	SDL_GetWindowSize(vng_win, &vng_win_w, &vng_win_h);
 
-	/* The background is dark grey, not white: it is the desk under the paper. A white
-	 * background would make the sheet vanish, and the sheet is the whole interface. */
-	SDL_SetRenderDrawColor(vng_ren, 0x1E, 0x1E, 0x1E, 0xFF);
+	SDL_SetRenderDrawColor(vng_ren, 0x25, 0x25, 0x25, 0xFF);
 	SDL_RenderClear(vng_ren);
+	draw_desk();
 
 	VNG_TAB *t = vng_tab;
 	if (t) {

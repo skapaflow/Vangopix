@@ -51,6 +51,11 @@ static bool tab_make_texture (VNG_TAB *t)
 		SDL_Log("SDL_CreateTexture: %s", SDL_GetError());
 		return false;
 	}
+	/* Without this the alpha in the buffer is carried to the GPU and then ignored: the
+	 * default for a new texture is no blending, so a half transparent pixel would draw
+	 * as fully opaque and the checkerboard behind it would never show. */
+	SDL_SetTextureBlendMode(t->tex, SDL_BLENDMODE_BLEND);
+
 	t->tex_dirty = true;
 	return true;
 }
