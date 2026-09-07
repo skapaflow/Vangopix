@@ -13,8 +13,20 @@ middle for drawing and surrounds it with tools; Vangopix reserves nothing.
 
 ## Status
 
-Early. The window, the sheet, the tab model and text rendering exist. Drawing does not
-yet.
+Early, and honest about it: **there is no drawing yet.** What works is everything an
+image gets before a brush touches it — opening, viewing, framing and sizing.
+
+| | |
+| --- | --- |
+| documents | tabs that carry their own camera, reorderable by dragging |
+| formats | anything SDL3_image reads: png, webp, avif, tiff, gif, jpg, tga, qoi, ico, pcx, svg, xcf |
+| camera | stepped zoom at the cursor, pan, fit and 1:1 |
+| canvas | resize by the corner grips, with an optional 8 pixel grid |
+| transparency | checkerboard behind the sheet, black frame around it |
+| text | one atlas, packed by stb_truetype |
+
+Next is the pencil, and then the things a pencil needs: undo, a palette, and a colour to
+draw with.
 
 ## Building
 
@@ -74,24 +86,28 @@ drawing near the border.
 | middle drag, or `SPACE` + left drag | pan |
 | `CTRL+0` / `CTRL+1` | fit the sheet / go to 1:1 |
 | drag a corner grip | resize the canvas |
-| `SHIFT` while dragging | put the corner on the 8 pixel grid |
-
-The four small blue squares sit just outside the corners of the sheet, touching it only
-at the corner point so they never cover the artwork. Dragging one moves that corner and
-leaves the opposite one anchored; the outline and the size readout follow the hand, and
-the pixels are only rebuilt on release.
-
-Holding `SHIFT` lands the dragged corner on the nearest multiple of eight - it does not
-step by eight, so a canvas of 53 snaps straight to 56 however the drag arrived there.
-The readout shows `[8]` while it is on.
-
-While the bar is up: click a tab to select it, drag it sideways to reorder, click its
-`x` to close it, click `+` for a new sheet. The bar floats over the sheet and takes no
-space when it is down.
-| drag a file in | opens it in a new tab |
+| `SHIFT` while dragging a grip | put the corner on the 8 pixel grid |
+| drag a file in | open it in a new tab |
 
 Files named on the command line each open in their own tab, so Vangopix can be
 associated with an image extension and handed a whole selection at once.
+
+### The tab bar
+
+`TAB` raises it and `TAB` puts it away. Click a tab to select it, drag it sideways to
+reorder, click its `x` to close it, click `+` for a new sheet. It floats over the sheet
+rather than pushing it down, so it takes no space at all when it is down.
+
+### The corner grips
+
+Four small blue squares sit just outside the corners of the sheet, touching it only at
+the corner point so they never cover the artwork. Dragging one moves that corner and
+leaves the opposite one anchored; the outline and the size readout follow the hand, and
+the pixels are only rebuilt on release.
+
+Holding `SHIFT` lands the dragged corner on the nearest multiple of eight — it does not
+step by eight, so a canvas of 53 snaps straight to 56 however the drag arrived there.
+The readout shows `[8]` while it is on.
 
 ## Layout
 
