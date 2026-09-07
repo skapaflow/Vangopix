@@ -1,6 +1,7 @@
 #include "core.h"
 #include "vangopix.h"
 #include "tabs.h"
+#include "tabbar.h"
 
 /* The desk around the paper: without it the white touches the window edge and the eye
  * loses where the document ends. */
@@ -46,6 +47,13 @@ void vangopix_input (void)
 	SDL_Event e;
 
 	while (SDL_PollEvent(&e)) {
+
+		/* The bar gets first refusal while it is up. It floats OVER the sheet, so
+		 * without this a click meant for a tab would also land on the drawing
+		 * underneath - and once tools exist, that is a stray pixel every time. */
+		if (tabbar_event(&e))
+			continue;
+
 		switch (e.type) {
 
 		case SDL_EVENT_QUIT:
@@ -63,6 +71,14 @@ void vangopix_input (void)
 
 			if (e.key.key == SDLK_F1) {
 				overlay = !overlay;
+				break;
+			}
+
+			/* Bare TAB shows and hides the bar; CTRL+TAB below still walks between
+			 * documents. One key, two jobs, told apart by the modifier - and the
+			 * word is the same in both languages. */
+			if (e.key.key == SDLK_TAB && !(e.key.mod & SDL_KMOD_CTRL)) {
+				tabbar_toggle();
 				break;
 			}
 
@@ -136,6 +152,7 @@ void vangopix_core (void)
 		float zoom = 1.0f;
 		draw_sheet(t, &zoom);
 		if (overlay) draw_overlay(t, zoom);
+		tabbar_draw();   /* last, so it floats over the sheet instead of under it */
 	}
 
 	SDL_RenderPresent(vng_ren);

@@ -57,7 +57,12 @@ that already have it.
 | `CTRL+N` | new sheet in a new tab |
 | `CTRL+W` | close the tab |
 | `CTRL+TAB` / `CTRL+SHIFT+TAB` | walk through the tabs |
+| `TAB` | show and hide the tab bar |
 | `F1` | toggle the document overlay |
+
+While the bar is up: click a tab to select it, drag it sideways to reorder, click its
+`x` to close it, click `+` for a new sheet. The bar floats over the sheet and takes no
+space when it is down.
 | drag a file in | opens it in a new tab |
 
 Files named on the command line each open in their own tab, so Vangopix can be
@@ -71,6 +76,7 @@ src/
   vangopix.c/.h the program: globals, window, renderer, font, argv
   core.c/.h     the frame: input, draw, present
   tabs.c/.h     the tabs, which ARE the documents
+  tabbar.c/.h   the tab bar: the only file that draws a tab
   text.c/.h     glyphs packed into one atlas
 ```
 

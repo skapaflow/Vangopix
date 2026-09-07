@@ -186,6 +186,43 @@ void vng_tab_step (int dir)
 	vng_tab_title();
 }
 
+/*
+ * Pulls t out of the row and puts it back at index (0-based, clamped).
+ *
+ * The list is the ORDER - there is no separate array of positions to keep in step with
+ * it, which is the whole reason reordering is a relink and not a sort. Costly only in
+ * pointer writes, and a person can only drag one tab at a time.
+ */
+void vng_tab_move (VNG_TAB *t, int index)
+{
+	if (!t) return;
+
+	int n = vng_tab_count();
+	if (index < 0)  index = 0;
+	if (index >= n) index = n - 1;
+	if (index == vng_tab_index(t) - 1) return;   /* vng_tab_index is 1-based */
+
+	/* unlink */
+	if (t->prev) t->prev->next = t->next; else vng_tabs = t->next;
+	if (t->next) t->next->prev = t->prev; else tail     = t->prev;
+	t->prev = t->next = NULL;
+
+	/* relink before the tab currently sitting at index */
+	VNG_TAB *at = vng_tabs;
+	for (int i = 0; i < index && at; i++) at = at->next;
+
+	if (!at) {                       /* dropped past the end */
+		t->prev = tail;
+		if (tail) tail->next = t; else vng_tabs = t;
+		tail = t;
+	} else {
+		t->next = at;
+		t->prev = at->prev;
+		if (at->prev) at->prev->next = t; else vng_tabs = t;
+		at->prev = t;
+	}
+}
+
 int vng_tab_count (void)
 {
 	int n = 0;

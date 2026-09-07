@@ -42,6 +42,7 @@ extern VNG_TAB *vng_tab_new   (int w, int h);
 extern VNG_TAB *vng_tab_open  (const char *path);
 extern void     vng_tab_close (VNG_TAB *t);
 extern void     vng_tab_step  (int dir);
+extern void     vng_tab_move  (VNG_TAB *t, int index);
 extern int      vng_tab_count (void);
 extern int      vng_tab_index (VNG_TAB *t);
 extern void     vng_tab_title (void);
