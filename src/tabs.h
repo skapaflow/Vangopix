@@ -43,6 +43,12 @@ extern VNG_TAB *vng_tab_open  (const char *path);
 extern void     vng_tab_close (VNG_TAB *t);
 extern void     vng_tab_step  (int dir);
 extern void     vng_tab_move  (VNG_TAB *t, int index);
+
+/* Resizes the canvas. (dx, dy) is where the OLD origin lands inside the new buffer, so
+   growing to the left is dx > 0 and growing to the right is dx == 0 - one call serves
+   all four corners. Uncovered area comes out white. Returns false and changes nothing
+   if the allocation fails. */
+extern bool     vng_tab_resize (VNG_TAB *t, int w, int h, int dx, int dy);
 extern int      vng_tab_count (void);
 extern int      vng_tab_index (VNG_TAB *t);
 extern void     vng_tab_title (void);

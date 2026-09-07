@@ -226,6 +226,52 @@ void vng_tab_move (VNG_TAB *t, int index)
 	}
 }
 
+/*
+ * Resizing is a NEW buffer plus a copy, never a realloc.
+ *
+ * A realloc keeps the bytes in order and the bytes are the wrong shape: the pixel at
+ * (x, y) sits at y * w + x, so changing w moves every row but the first. The copy walks
+ * rows precisely because the stride changes underneath it.
+ *
+ * The new buffer is filled white first, so any area the old image does not cover comes
+ * out as paper rather than as whatever the allocator had lying there.
+ */
+bool vng_tab_resize (VNG_TAB *t, int w, int h, int dx, int dy)
+{
+	if (!t || w < 1 || h < 1) return false;
+
+	Uint32 *buf = (Uint32 *) SDL_malloc((size_t)w * h * sizeof(Uint32));
+	if (!buf) return false;
+
+	for (int i = 0; i < w * h; i++)
+		buf[i] = 0xFFFFFFFFu;
+
+	/* The overlap of the old rectangle placed at (dx, dy) with the new one. Computed
+	 * once instead of testing every pixel: a 4000x4000 canvas is sixteen million
+	 * bounds checks otherwise, and the loop is a memcpy per row without them. */
+	int x0 = dx > 0 ? dx : 0;
+	int y0 = dy > 0 ? dy : 0;
+	int x1 = dx + t->w < w ? dx + t->w : w;
+	int y1 = dy + t->h < h ? dy + t->h : h;
+
+	for (int y = y0; y < y1; y++)
+		SDL_memcpy(buf + (size_t)y * w + x0,
+		           t->pixels + (size_t)(y - dy) * t->w + (x0 - dx),
+		           (size_t)(x1 - x0) * sizeof(Uint32));
+
+	SDL_free(t->pixels);
+	t->pixels = buf;
+	t->w = w;
+	t->h = h;
+
+	/* A texture has a fixed size from creation, so the size change forces a new one. */
+	if (!tab_make_texture(t)) return false;
+
+	t->dirty = true;
+	vng_tab_title();
+	return true;
+}
+
 int vng_tab_count (void)
 {
 	int n = 0;

@@ -3,6 +3,7 @@
 #include "tabs.h"
 #include "tabbar.h"
 #include "view.h"
+#include "resize.h"
 
 /* The overlay is OFF by default and it is not chrome: it occupies no space when it is
  * not asked for. F1 toggles it. */
@@ -18,6 +19,12 @@ void vangopix_input (void)
 		 * without this a click meant for a tab would also land on the drawing
 		 * underneath - and once tools exist, that is a stray pixel every time. */
 		if (tabbar_event(&e))
+			continue;
+
+		/* Then the canvas grips, BEFORE the camera: they answer the left button, and
+		 * so does the space-pan. Whichever runs first wins the drag, and grabbing a
+		 * corner has to mean resizing it. */
+		if (resize_event(&e, vng_tab))
 			continue;
 
 		/* Then the camera. It answers the wheel and the pan drag; anything it does not
@@ -124,6 +131,7 @@ void vangopix_core (void)
 	VNG_TAB *t = vng_tab;
 	if (t) {
 		draw_sheet(t);
+		resize_draw(t);
 		if (overlay) draw_overlay(t, t->zoom);
 		tabbar_draw();   /* last, so it floats over the sheet instead of under it */
 	}

@@ -62,6 +62,12 @@ that already have it.
 | wheel | zoom in steps, centred on the cursor |
 | middle drag, or `SPACE` + left drag | pan |
 | `CTRL+0` / `CTRL+1` | fit the sheet / go to 1:1 |
+| drag a corner grip | resize the canvas |
+
+The four small blue squares sit just outside the corners of the sheet, touching it only
+at the corner point so they never cover the artwork. Dragging one moves that corner and
+leaves the opposite one anchored; the outline and the size readout follow the hand, and
+the pixels are only rebuilt on release.
 
 While the bar is up: click a tab to select it, drag it sideways to reorder, click its
 `x` to close it, click `+` for a new sheet. The bar floats over the sheet and takes no
@@ -81,6 +87,7 @@ src/
   tabs.c/.h     the tabs, which ARE the documents
   tabbar.c/.h   the tab bar: the only file that draws a tab
   view.c/.h     the camera: stepped zoom at the cursor, and pan
+  resize.c/.h   the corner grips that resize the canvas
   text.c/.h     glyphs packed into one atlas
 ```
 
