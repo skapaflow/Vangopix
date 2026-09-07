@@ -18,6 +18,7 @@ image gets before a brush touches it — opening, viewing, framing and sizing.
 
 | | |
 | --- | --- |
+| projects | folders in a sidebar, listing only images, remembered in `projects.vngproj` |
 | documents | tabs that carry their own camera, reorderable by dragging |
 | formats | anything SDL3_image reads: png, webp, avif, tiff, gif, jpg, tga, qoi, ico, pcx, svg, xcf |
 | camera | stepped zoom at the cursor, pan, fit and 1:1 |
@@ -87,10 +88,26 @@ drawing near the border.
 | `CTRL+0` / `CTRL+1` | fit the sheet / go to 1:1 |
 | drag a corner grip | resize the canvas |
 | `SHIFT` while dragging a grip | put the corner on the 8 pixel grid |
+| `CTRL+ALT` | show and hide the project sidebar |
 | drag a file in | open it in a new tab |
+| drag a folder in | add it as a project |
 
 Files named on the command line each open in their own tab, so Vangopix can be
 associated with an image extension and handed a whole selection at once.
+
+### The project sidebar
+
+Drop a folder on the window and it becomes a project. `CTRL+ALT` — tapped together,
+nothing else in between — raises and hides the panel. Click a folder to expand it, click
+an image to open it in a tab, click a root's `x` to forget it.
+
+Only images are listed, along with the folders that might contain them. Dot files and
+dot folders are skipped, so a `.git` beside the artwork stays out of the way. Folders are
+read the first time they are expanded, not when they are added, so dropping a large tree
+in is instant.
+
+The list of roots lives in `projects.vngproj` beside the executable: one absolute path
+per line, `#` for comments. Paths that no longer exist are dropped on load.
 
 ### The tab bar
 

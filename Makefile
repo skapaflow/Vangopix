@@ -44,12 +44,14 @@ LFLAGS  = $(SDL_LIBS)
 #   tabbar.c   the tab bar: the only file that draws a tab
 #   view.c     the camera: stepped zoom at the cursor, and pan
 #   resize.c   the corner grips that resize the canvas
+#   project.c  the project folders and projects.vngproj (the model)
+#   sidebar.c  the project panel (the pixels)
 #   text.c     glyphs packed into one atlas by stb_truetype
 #
 # To come:
 #   tool.c     the tools: pencil, bucket, eyedropper
 #   io.c       open and save
-SRC = src/main.c src/vangopix.c src/core.c src/tabs.c src/tabbar.c src/view.c src/resize.c src/text.c
+SRC = src/main.c src/vangopix.c src/core.c src/tabs.c src/tabbar.c src/view.c src/resize.c src/project.c src/sidebar.c src/text.c
 DEP = $(wildcard src/*.h)
 
 all: $(OUT) run

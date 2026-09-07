@@ -4,6 +4,8 @@
 #include "tabbar.h"
 #include "view.h"
 #include "resize.h"
+#include "sidebar.h"
+#include "project.h"
 
 /*
  * The desk: a grey checkerboard, the size and the two greys taken from what the first
@@ -69,6 +71,20 @@ void vangopix_core_free (void)
  * not asked for. F1 toggles it. */
 static bool overlay = false;
 
+/* CTRL+ALT tapped together, with nothing else pressed in between, toggles the sidebar.
+ *
+ * A shortcut made only of modifiers cannot be recognised on the way DOWN - at that
+ * moment it is indistinguishable from the start of CTRL+ALT+something. So it is
+ * recognised on the way up: arm when both are held, disarm the moment any other key or
+ * any mouse button is used, and fire when the first of the two is released while still
+ * armed. */
+static bool chord = false;
+
+static bool is_mod_key (SDL_Keycode k)
+{
+	return k == SDLK_LCTRL || k == SDLK_RCTRL || k == SDLK_LALT || k == SDLK_RALT;
+}
+
 void vangopix_input (void)
 {
 	SDL_Event e;
@@ -78,7 +94,17 @@ void vangopix_input (void)
 		/* The bar gets first refusal while it is up. It floats OVER the sheet, so
 		 * without this a click meant for a tab would also land on the drawing
 		 * underneath - and once tools exist, that is a stray pixel every time. */
+		/* Any mouse button disarms the chord: CTRL+ALT with a click is a click. */
+		if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+			chord = false;
+
 		if (tabbar_event(&e))
+			continue;
+
+		/* The sidebar sits under the tab bar and over everything else, and its claim is
+		 * the same as the bar's: it floats over the sheet, so a click inside it must
+		 * not also reach the drawing underneath. */
+		if (sidebar_event(&e))
 			continue;
 
 		/* Then the canvas grips, BEFORE the camera: they answer the left button, and
@@ -100,12 +126,39 @@ void vangopix_input (void)
 
 		/* Dropping a file opens it in a new tab - the gesture that lets Vangopix act
 		 * as the machine's image viewer without owning a File menu. */
-		case SDL_EVENT_DROP_FILE:
-			vng_tab_open(e.drop.data);
+		/* A FOLDER becomes a project, a FILE becomes a tab. One gesture, and which one
+		 * it is comes from the path itself rather than from a mode the person has to
+		 * remember being in. */
+		case SDL_EVENT_DROP_FILE: {
+			SDL_PathInfo info;
+			if (SDL_GetPathInfo(e.drop.data, &info) &&
+			    info.type == SDL_PATHTYPE_DIRECTORY) {
+				if (project_add(e.drop.data) && !sidebar_visible())
+					sidebar_toggle();   /* show what just arrived, or the drop looks
+					                     * like it did nothing */
+			} else {
+				vng_tab_open(e.drop.data);
+			}
+			break;
+		}
+
+		case SDL_EVENT_KEY_UP:
+			if (is_mod_key(e.key.key) && chord) {
+				chord = false;
+				sidebar_toggle();
+			}
 			break;
 
 		case SDL_EVENT_KEY_DOWN:
 			if (e.key.repeat) break;
+
+			if (is_mod_key(e.key.key)) {
+				SDL_Keymod m = SDL_GetModState();
+				if ((m & SDL_KMOD_CTRL) && (m & SDL_KMOD_ALT))
+					chord = true;
+				break;
+			}
+			chord = false;   /* the modifiers are being used for something else */
 
 			if (e.key.key == SDLK_F1) {
 				overlay = !overlay;
@@ -198,6 +251,7 @@ void vangopix_core (void)
 		draw_sheet(t);
 		resize_draw(t);
 		if (overlay) draw_overlay(t, t->zoom);
+		sidebar_draw();
 		tabbar_draw();   /* last, so it floats over the sheet instead of under it */
 	}
 

@@ -1,6 +1,7 @@
 #include "vangopix.h"
 #include "tabs.h"
 #include "core.h"
+#include "project.h"
 
 SDL_Window   *vng_win   = NULL;
 SDL_Renderer *vng_ren   = NULL;
@@ -71,6 +72,8 @@ bool vangopix_init (int argc, char **argv)
 	if (!vng_text)
 		SDL_Log("running without text: no font found beside the executable");
 
+	project_load();
+
 	/* Every path on the command line becomes a tab. This is what lets Vangopix be
 	 * associated with an image extension and handed a whole selection at once. */
 	for (int i = 1; i < argc; i++)
@@ -86,6 +89,7 @@ bool vangopix_init (int argc, char **argv)
 void vangopix_quit (void)
 {
 	vng_tabs_free();
+	project_free();
 	vangopix_core_free();
 	text_free(vng_text);
 	if (vng_ren) SDL_DestroyRenderer(vng_ren);

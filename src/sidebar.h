@@ -1,0 +1,26 @@
+#ifndef VANGOPIX_SIDEBAR_H
+#define VANGOPIX_SIDEBAR_H
+
+#include "vangopix.h"
+
+/*
+ * The project sidebar: the only file that draws a folder.
+ *
+ * Separate from project.c the same way tabbar.c is separate from tabs.c - the model
+ * knows about directories and file names, this knows about pixels and the mouse.
+ *
+ * It FLOATS over the sheet rather than pushing it aside, which is where it differs from
+ * the code editor it is modelled on. A docked panel is exactly the permanent chrome this
+ * program exists without, and the sidebar is summoned and dismissed like everything else
+ * here. Making it push instead would be a change to one rectangle.
+ */
+
+extern void sidebar_toggle  (void);
+extern bool sidebar_visible (void);
+
+/* Returns true when the sidebar consumed the event. */
+extern bool sidebar_event (const SDL_Event *e);
+
+extern void sidebar_draw (void);
+
+#endif
