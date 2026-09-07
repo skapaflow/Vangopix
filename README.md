@@ -27,12 +27,13 @@ that — opening, viewing, framing, sizing and saving.
 | keyboard | one owner at a time, so a field being open silences every shortcut |
 | undo | per document, made of pixel carries and resizes rather than snapshots |
 | drawing | a pencil: left draws, right rubs out to transparent |
+| colour | `CTRL` absorbs the colour under the pointer, with a hex readout |
 | transparency | checkerboard behind the sheet, black frame around it |
 | text | one atlas, packed by stb_truetype |
 
-Next is a colour to draw with. The pencil is black until there is a palette, and the
-palette is the point at which a tool window earns its place — drawn by VagrantUI, on
-demand, gone when it is done.
+Next: a line-art glyph per tool for the pointer, offset from the aim point the way the first
+Vangopix did it, and then a summoned palette for the colours that are not on the sheet yet —
+drawn by VagrantUI, gone when it is done.
 
 ## Building
 
@@ -106,6 +107,7 @@ drawing near the border.
 | `SHIFT` while dragging a grip | put the corner on the 8 pixel grid |
 | left drag on the sheet | draw |
 | right drag on the sheet | rub out, to transparent |
+| hold `CTRL` over the sheet | absorb that colour — no click, hex follows the pointer |
 | drag a file in | open it in a new tab |
 | drag a folder in | add it as a project |
 | `ENTER` / `ESC` in a field | accept / cancel |
@@ -174,6 +176,15 @@ sheet from 2x zoom up, which is the signal that matters in a pixel editor. It te
 
 A stroke joins its samples, so a fast hand draws a line and not a row of dots. One stroke
 is one undo.
+
+**Hold `CTRL` and the colour under the pointer is absorbed — no click.** It follows the hand
+while the key is down, and a bar beside the pointer shows the value as `RRGGBBAA`. Let go
+when you have the one you want, and draw with it.
+
+That is the whole colour interface for now, and it is deliberate: a pixel artist settles on
+eight to sixteen colours and then picks from the drawing constantly, so **the image is the
+palette**. A window of coloured tiles is for colours that are not on the sheet yet, and it
+will be summoned like everything else here rather than parked down the side.
 
 ### Undo
 

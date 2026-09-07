@@ -180,6 +180,48 @@ int main (void)
 	e.button.y = off.y;
 	ok("a press outside the sheet is not consumed", tool_event(&e, p) == false);
 
+	/* ---- the eyedropper, and the byte order of what it reports ----
+	 *
+	 * The document is 0xAARRGGBB and the readout is RRGGBBAA. Those two orders being
+	 * different is precisely how the checkerboard once came out red, so the conversion is
+	 * pinned here rather than trusted.
+	 */
+	{
+		char hex[16];
+
+		tool_hex(0xFF4080FFu, hex, sizeof hex);
+		ok("ARGB 0xFF4080FF reads as RRGGBBAA 4080FFFF",
+		   SDL_strcmp(hex, "4080FFFF") == 0);
+
+		tool_hex(0x00000000u, hex, sizeof hex);
+		ok("nothing reads as 00000000", SDL_strcmp(hex, "00000000") == 0);
+
+		tool_hex(0x80FF0000u, hex, sizeof hex);
+		ok("half transparent red keeps its alpha last",
+		   SDL_strcmp(hex, "FF000080") == 0);
+
+		p->pixels[3 * 16 + 5] = 0xFF123456u;
+		tool_pick(p, 5, 3);
+		ok("the pick absorbs the pixel under it", tool_colour() == 0xFF123456u);
+
+		Uint32 held = tool_colour();
+		tool_pick(p, 99, 99);
+		ok("a pick outside the sheet changes nothing", tool_colour() == held);
+
+		/* The colour outlives a stroke: it belongs to the pencil, not to the drag. */
+		mouse(p, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 9, 9);
+		mouse(p, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 9, 9);
+		ok("a stroke draws with the picked colour",
+		   p->pixels[9 * 16 + 9] == 0xFF123456u);
+		ok("and the colour survives the stroke", tool_colour() == 0xFF123456u);
+
+		/* The right button still rubs out, and does not become the picked colour. */
+		mouse(p, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_RIGHT, 9, 9);
+		mouse(p, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_RIGHT, 9, 9);
+		ok("the right button rubs out whatever the colour is",
+		   p->pixels[9 * 16 + 9] == 0x00000000u);
+	}
+
 	/* ---- what a save dialog's answer means ----
 	 *
 	 * Filter 0 is PNG and filter 1 is "jpg;jpeg" in file.c's list. -1 is a platform that
