@@ -169,6 +169,28 @@ void text_measure (TextSystem *ts, const char *text, float *out_w, float *out_h)
 	if (out_h) *out_h = (float)lines * ts->line_height;
 }
 
+void text_fit (TextSystem *ts, char *dst, size_t cap, const char *src, float max_w)
+{
+	if (!dst || cap == 0) return;
+
+	SDL_strlcpy(dst, src ? src : "", cap);
+	if (!ts) return;
+
+	float w, h;
+	text_measure(ts, dst, &w, &h);
+	if (w <= max_w) return;
+
+	/* One character shorter each pass, with the new last column replaced rather than
+	 * appended - appending would make the string grow back to the width just rejected. */
+	size_t len = SDL_strlen(dst);
+	while (len > 1) {
+		dst[--len]   = '\0';
+		dst[len - 1] = '~';
+		text_measure(ts, dst, &w, &h);
+		if (w <= max_w) return;
+	}
+}
+
 void text_cell (TextSystem *ts, float *out_w, float *out_h)
 {
 	if (!ts) {

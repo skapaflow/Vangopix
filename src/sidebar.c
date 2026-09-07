@@ -224,13 +224,23 @@ void sidebar_draw (void)
 			SDL_RenderFillRect(vng_ren, &r);
 		}
 
+		/* How much room the name has before it would run under the panel edge - or
+		 * under the [x], on a root. The [x] only appears on hover, but the space is
+		 * reserved whether it is showing or not: a name that fits until the pointer
+		 * arrives and then gets overwritten is worse than a name that is always cut. */
+		float name_x = ind + 12.0f;
+		float room   = BAR_W - PAD - name_x - (rows[i].depth == 0 ? CLOSE_W + PAD : 0.0f);
+
+		char label[160];
+		text_fit(vng_text, label, sizeof label, n->name, room);
+
 		if (n->is_dir) {
 			text_print(vng_text, ind, y + 1.0f, 0x707070FF, n->open ? "v" : ">");
-			text_print(vng_text, ind + 12.0f, y + 1.0f,
-			           rows[i].depth == 0 ? 0xDCDCDCFF : 0xB4B4B4FF, "%s", n->name);
+			text_print(vng_text, name_x, y + 1.0f,
+			           rows[i].depth == 0 ? 0xDCDCDCFF : 0xB4B4B4FF, "%s", label);
 		} else {
-			text_print(vng_text, ind + 12.0f, y + 1.0f,
-			           current ? 0xFFFFFFFF : 0x909090FF, "%s", n->name);
+			text_print(vng_text, name_x, y + 1.0f,
+			           current ? 0xFFFFFFFF : 0x909090FF, "%s", label);
 		}
 
 		if (rows[i].depth == 0 && hot) {

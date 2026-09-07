@@ -101,6 +101,10 @@ Drop a folder on the window and it becomes a project. `CTRL+ALT` — tapped toge
 nothing else in between — raises and hides the panel. Click a folder to expand it, click
 an image to open it in a tab, click a root's `x` to forget it.
 
+A name too long for the panel is cut and its last column becomes a `~`, the same mark
+VagrantUI uses when content overruns its width. The room a name gets accounts for its
+own indent, so a deeply nested file is cut shorter than one at the root.
+
 Only images are listed, along with the folders that might contain them. Dot files and
 dot folders are skipped, so a `.git` beside the artwork stays out of the way. Folders are
 read the first time they are expanded, not when they are added, so dropping a large tree

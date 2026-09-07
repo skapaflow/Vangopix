@@ -67,29 +67,6 @@ static bool on_plus (float x, float y)
 	return x >= x0 && x < x0 + PLUS_W;
 }
 
-/*
- * Copies src into dst, shortened until it fits max_w, with the last column turned into
- * a tilde. The tilde rather than an ellipsis because that is what VagrantUI does when
- * content overruns its width, and two truncation marks in one program read as two
- * different kinds of truncation.
- */
-static void fit_text (char *dst, size_t cap, const char *src, float max_w)
-{
-	SDL_strlcpy(dst, src, cap);
-
-	float w, h;
-	text_measure(vng_text, dst, &w, &h);
-	if (w <= max_w) return;
-
-	size_t len = SDL_strlen(dst);
-	while (len > 1) {
-		dst[--len] = '\0';
-		dst[len - 1] = '~';
-		text_measure(vng_text, dst, &w, &h);
-		if (w <= max_w) return;
-	}
-}
-
 bool tabbar_event (const SDL_Event *e)
 {
 	if (!visible) return false;
@@ -235,7 +212,7 @@ void tabbar_draw (void)
 		}
 
 		char label[80];
-		fit_text(label, sizeof label, p->name, w - CLOSE_W - PAD * 2.0f);
+		text_fit(vng_text, label, sizeof label, p->name, w - CLOSE_W - PAD * 2.0f);
 		text_print(vng_text, x + PAD, 5.0f,
 		           active ? 0xFFFFFFFF : 0x909090FF, "%s", label);
 

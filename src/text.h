@@ -2,6 +2,7 @@
 #define VANGOPIX_TEXT_H
 
 #include <stdint.h>
+#include <stddef.h>
 
 /*
  * Text rendering, adapted from the text module of the Skyonara engine (SKNE_CORE).
@@ -36,6 +37,17 @@ void text_print_center (TextSystem *ts, float x, float y, uint32_t color,
 
 /* Width and height text would occupy, without drawing it. */
 void text_measure (TextSystem *ts, const char *text, float *out_w, float *out_h);
+
+/* Copies src into dst, shortened until it fits max_w, with the last column turned into
+ * a tilde.
+ *
+ * A TILDE AND NOT AN ELLIPSIS, because that is what VagrantUI does when content overruns
+ * its width, and two truncation marks in one program read as two different kinds of
+ * truncation. It lives here rather than in each panel for the same reason: the tab bar
+ * and the sidebar must cut a long name the same way.
+ *
+ * dst always ends up NUL terminated, and is safe to draw even when max_w is absurd. */
+void text_fit (TextSystem *ts, char *dst, size_t cap, const char *src, float max_w);
 
 /* The cell of one character, measured on 'M'.
  *
