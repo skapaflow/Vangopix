@@ -5,99 +5,95 @@
 #include "tabs.h"
 
 /*
- * The pencil, and the first thing in this program that changes a pixel.
+ * The tools, and the only file that changes a pixel.
  *
- * IT IS ALWAYS THE ACTIVE TOOL, AND THERE IS NO KEY TO SELECT IT. With one tool, a key
- * that selects it does nothing, and a mode nobody can leave is not a mode. The letter
- * shortcuts arrive with the second tool, which is also when they start teaching anything.
+ * THE EIGHT KEYS ARE THE FIRST VANGOPIX'S OWN, and they are a 2x4 block under the left
+ * hand with the right hand on the mouse - which is why they are these eight letters and
+ * not the initials of the tool names:
  *
- * HOW IT SHOWS ITSELF, WHICH COSTS NO CHROME AT ALL:
+ *      Q  pencil     W  line       E  rect      R  ellipse
+ *      A  eraser     S  bucket     D  spray     F  change-colours
  *
- *   - the CURSOR is a crosshair over the sheet and an arrow everywhere else. The shape is
- *     the mode indicator, and it lives outside the window's pixels entirely - the system
- *     draws it, at the size and theme the person configured.
- *   - the PIXEL UNDER THE POINTER is outlined on the sheet, which is the signal that
- *     actually matters in a pixel editor: it says which pixel, not which tool.
+ * A KEY IS ONLY A TOOL KEY WHEN IT IS BARE. CTRL+S saves and S is the bucket; the two are
+ * told apart by asking whether ANY modifier is down, not by asking about the one modifier
+ * that happens to collide today. See core.c.
  *
- * ONE GLYPH CAN SERVE BOTH THE PALETTE AND THE POINTER, and the objection to it was
- * answered before it was raised. It looks like it cannot: a tool icon under the hand
- * covers the pixel being aimed at. The first Vangopix solved that twice over - the glyph
- * sat a few pixels OFF the hot spot, and being drawn as LINES rather than as a filled
- * shape it never hid the colours underneath. Both halves are recorded here because they
- * are the whole reason the idea works, and because the readout below follows the same
- * rule: whatever reports what you are pointing at must not stand on it.
+ * EACH TOOL REMEMBERS ITS OWN SIZE, and SHIFT+wheel changes it. Per tool because an eraser
+ * wants to be twenty pixels across and a pencil wants to be one, and having to re-dial the
+ * size at every switch is what makes people stop switching.
  *
- * The crosshair is what is here today. A line-art glyph per tool is the next step, and it
- * is SDL_CreateColorCursor with the hot spot at the aim point - not a redesign.
+ * THE STEP IS PER TOOL TOO, and it is the detail worth carrying over: 1 for the pencil, the
+ * line, the rectangle and the ellipse, 5 for the eraser, 3 for the spray and the
+ * change-colours. The precise tools step one pixel at a time because a pixel is what they
+ * are for; the broad ones would take twenty notches to get anywhere at that rate.
  *
- * TWO COLOURS, ONE PER MOUSE BUTTON, AND CTRL+CLICK FILLS THEM.
- *
- * Left button draws colour 1, right button draws colour 2. CTRL held turns both buttons
- * into the eyedropper: CTRL+left absorbs into 1, CTRL+right into 2. The button that takes
- * a colour is the button that will lay it down, so there is nothing to remember about
- * which slot was filled.
- *
- * COLOUR 2 STARTS TRANSPARENT, which is what makes the right button an eraser without an
- * eraser existing. It is not a special case bolted on - in a program that keeps alpha,
- * rubbing out IS drawing with nothing, and the secondary colour is where nothing lives
- * until somebody puts something there.
- *
- * THE PICK IS ON THE PRESS, not on hover. Hovering was tried and it is wrong: the hand
- * rests, drifts and travels across the sheet on its way to somewhere, and a colour that
- * changes under all of that is a colour nobody chose. The first Vangopix asked for the
- * press and it was right to.
- *
- * What hover does instead is PREVIEW. While CTRL is held a bar follows the pointer with
- * the colour under it and its value as RRGGBBAA - the answer to "what would I get", which
- * is what makes a deliberate press worth making. It sits OFFSET from the aim point, for
- * the same reason the first Vangopix offset its tool glyph: whatever reports what you are
- * pointing at must not stand on it.
- *
- * The two loaded colours are shown in the same kind of bar, at the bottom left, and they
- * step aside when the project sidebar comes in.
- *
- * THEY ARE ALWAYS THERE, AND THAT IS A READOUT RATHER THAN CHROME. A toolbar is commands
- * parked on screen in case they are wanted; a swatch answers "which colour lands if I press
- * the left MOUSE button now" - the state of the thing in your hand, not an entry in a menu.
- * There is no other way to know what each side of the mouse is holding, and that is not a
- * question a person should have to press a key to ask.
- *
- * A pixel artist settles on eight to sixteen colours and picks from the drawing constantly -
- * THE IMAGE IS THE PALETTE - so what has to be on screen is not a grid of tiles but the two
- * colours currently in hand.
- *
- * IT IS LAST IN THE INPUT CHAIN, after everything that can claim the same button - the
- * bar, the panel, the corner grips and the camera's space-pan. That order is in core.c
- * and it is load-bearing.
+ * HOW A TOOL SHOWS ITSELF, and none of it is a panel: the cursor is a crosshair over the
+ * sheet, a line-art glyph hangs up and to the right of it saying which tool, and the tip is
+ * outlined on the sheet so its size and shape can be seen before it is used.
  */
 
-/* Builds the two cursors. Not fatal: without them the pointer keeps whatever shape the
-   system gave it, and drawing works exactly the same. */
+typedef enum {
+	T_PENCIL = 0,
+	T_LINE,
+	T_RECT,
+	T_ELLIPSE,
+	T_ERASER,
+	T_BUCKET,
+	T_SPRAY,
+	T_CHANGE,
+	T_LOT
+} TOOL;
+
+/* Builds the cursors. Not fatal: without them the pointer keeps whatever shape the system
+   gave it, and drawing works exactly the same. */
 extern bool tool_init (void);
 extern void tool_free (void);
 
 /* Returns true when the tool consumed the event. */
 extern bool tool_event (const SDL_Event *e, VNG_TAB *t);
 
-/* Slot 0 is the left button's colour, slot 1 the right button's. Anything else reads as
-   slot 0 rather than reading out of bounds. The palette, when it exists, works here. */
+/* Work measured in TIME rather than in events - the spray, which goes on spraying while the
+   button is held and the hand is still. Called once a frame, before the sheet is drawn, so
+   what it lays down appears in the same frame. */
+extern void tool_frame (VNG_TAB *t);
+
+/* The tip outline, the glyph, the hex readout and the two loaded colours. */
+extern void tool_draw (VNG_TAB *t);
+
+extern TOOL tool_current (void);
+extern int  tool_tip_size (void);   /* of the current tool */
+
+/*
+ * TWO COLOURS, ONE PER MOUSE BUTTON. Slot 0 is the left button's, slot 1 the right
+ * button's. Anything else reads as slot 0 rather than reading out of bounds.
+ *
+ * COLOUR 2 STARTS AS NOTHING, which is what makes the right button rub out without an
+ * eraser being involved: in a program that keeps alpha, rubbing out IS drawing with
+ * nothing. Put a colour in slot 2 and the right button draws with it.
+ */
 extern Uint32 tool_colour (int slot);
 
-/* Absorbs the colour at that document pixel into a slot. Out of bounds changes nothing. */
+/*
+ * CTRL+CLICK IS THE EYEDROPPER, AND THE PICK IS ON THE PRESS.
+ *
+ * Hover was tried and it is wrong: the hand rests, drifts and travels across the sheet on
+ * its way somewhere, and a colour that changes under all of that is a colour nobody chose.
+ * The first Vangopix asked for the press. Held and dragged, it goes on absorbing.
+ *
+ * The button that takes a colour is the button that lays it down, so there is nothing to
+ * remember about which slot was filled.
+ */
 extern void tool_pick (VNG_TAB *t, int x, int y, int slot);
 
 /*
  * A colour as a person reads it: RRGGBBAA, eight hex digits, no prefix.
  *
  * NOT the 0xAARRGGBB the code uses. The internal shape matches the ARGB8888 texture and
- * must stay that way; the shape on screen is the one that can be pasted into another
- * editor or a web tool, and it is the shape the first Vangopix wrote in its own config.
- * The two orders being different is exactly how the checkerboard once came out red, so the
+ * must stay that way; the shape on screen is the one that can be pasted into another editor
+ * or a web tool, and it is the shape the first Vangopix wrote in its own config. The two
+ * orders being different is exactly how the checkerboard once came out red, so the
  * conversion lives in one named place and its byte order is pinned by test/checks.c.
  */
 extern void tool_hex (Uint32 argb, char *dst, size_t cap);
-
-/* The pixel outline, and the cursor shape for where the pointer is now. */
-extern void tool_draw (VNG_TAB *t);
 
 #endif

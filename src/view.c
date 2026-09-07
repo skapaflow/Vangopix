@@ -155,6 +155,11 @@ bool view_event (const SDL_Event *e, VNG_TAB *t)
 		 * delivers fractions - and (int)0.4f is zero, so casting y would make the zoom
 		 * simply not respond on a macOS trackpad. SDL accumulates the fractions into
 		 * whole ticks for us. */
+		/* SHIFT+wheel is the TOOL'S, not the camera's: it sizes the tip. Handing it over
+		 * rather than claiming it is what lets the tool sit at the end of the chain and
+		 * still answer a gesture that arrives before it. */
+		if (keys_mods() & SDL_KMOD_SHIFT) return false;
+
 		int notches = e->wheel.integer_y;
 		if (e->wheel.direction == SDL_MOUSEWHEEL_FLIPPED)
 			notches = -notches;

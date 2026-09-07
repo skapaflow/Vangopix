@@ -13,6 +13,17 @@
 #include "view.h"
 #include "file.h"
 
+/* A bare key press, the way core.c hands one to the tool. */
+static bool key (VNG_TAB *t, SDL_Keycode k, SDL_Keymod mod)
+{
+	SDL_Event e;
+	SDL_zero(e);
+	e.type     = SDL_EVENT_KEY_DOWN;
+	e.key.key  = k;
+	e.key.mod  = mod;
+	return tool_event(&e, t);
+}
+
 /* Drives the tool the way core.c does: one synthetic event at the screen point that the
  * camera says a document pixel is under. */
 static void mouse (VNG_TAB *t, Uint32 type, Uint8 btn, float px, float py)
@@ -237,6 +248,77 @@ int main (void)
 		   p->pixels[9 * 16 + 9] == 0xFFABCDEFu);
 		ok("colour 1 was not touched by any of that",
 		   tool_colour(0) == 0xFF123456u);
+	}
+
+	/* ---- the eight tools ---- */
+	{
+		ok("Q selects the pencil", key(p, SDLK_Q, SDL_KMOD_NONE) && tool_current() == T_PENCIL);
+		ok("W the line",           key(p, SDLK_W, SDL_KMOD_NONE) && tool_current() == T_LINE);
+		ok("E the rect",           key(p, SDLK_E, SDL_KMOD_NONE) && tool_current() == T_RECT);
+		ok("R the ellipse",        key(p, SDLK_R, SDL_KMOD_NONE) && tool_current() == T_ELLIPSE);
+		ok("A the eraser",         key(p, SDLK_A, SDL_KMOD_NONE) && tool_current() == T_ERASER);
+		ok("S the bucket",         key(p, SDLK_S, SDL_KMOD_NONE) && tool_current() == T_BUCKET);
+		ok("D the spray",          key(p, SDLK_D, SDL_KMOD_NONE) && tool_current() == T_SPRAY);
+		ok("F change-colours",     key(p, SDLK_F, SDL_KMOD_NONE) && tool_current() == T_CHANGE);
+
+		/* CTRL+S is the save, not the bucket. A tool key only counts bare. */
+		key(p, SDLK_Q, SDL_KMOD_NONE);
+		ok("CTRL+S is not the bucket",
+		   key(p, SDLK_S, SDL_KMOD_CTRL) == false && tool_current() == T_PENCIL);
+		ok("SHIFT+A is not the eraser either",
+		   key(p, SDLK_A, SDL_KMOD_SHIFT) == false && tool_current() == T_PENCIL);
+	}
+
+	/* ---- a shape is REDRAWN from its anchor, never accumulated ---- */
+	{
+		VNG_TAB *c = vng_tab_new(24, 24);
+		view_sheet_rect(c);
+		undo_mark_saved(c);
+
+		Uint32 blank[24 * 24];
+		SDL_memcpy(blank, c->pixels, sizeof blank);
+
+		key(c, SDLK_W, SDL_KMOD_NONE);   /* line */
+
+		/* Press at (2,2), drag out to (2,20), then back to (2,6) and release. The middle
+		 * position must leave no trace: only the last line drawn is the line. */
+		mouse(c, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 2, 2);
+		mouse(c, SDL_EVENT_MOUSE_MOTION,      0,               2, 20);
+		mouse(c, SDL_EVENT_MOUSE_MOTION,      0,               2, 6);
+		mouse(c, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 2, 6);
+
+		int drawn = 0;
+		for (int i = 2; i <= 6; i++) if (c->pixels[i * 24 + 2] != blank[0]) drawn++;
+		ok("the line landed where the drag ENDED", drawn == 5);
+		ok("AND NOWHERE THE DRAG PASSED THROUGH",
+		   c->pixels[12 * 24 + 2] == blank[0] && c->pixels[20 * 24 + 2] == blank[0]);
+		ok("the whole drag is one undo",
+		   undo_undo(c) && SDL_memcmp(c->pixels, blank, sizeof blank) == 0);
+
+		/* The rectangle is an outline: its corners are set and its middle is not. */
+		key(c, SDLK_E, SDL_KMOD_NONE);
+		mouse(c, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 4, 4);
+		mouse(c, SDL_EVENT_MOUSE_MOTION,      0,               10, 10);
+		mouse(c, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 10, 10);
+		ok("the rect drew its four corners",
+		   c->pixels[4 * 24 + 4]  != blank[0] && c->pixels[4 * 24 + 10] != blank[0] &&
+		   c->pixels[10 * 24 + 4] != blank[0] && c->pixels[10 * 24 + 10] != blank[0]);
+		ok("and left its middle alone", c->pixels[7 * 24 + 7] == blank[0]);
+		undo_undo(c);
+
+		/* The bucket fills the region it was dropped in, and only that region. */
+		key(c, SDLK_Q, SDL_KMOD_NONE);
+		for (int i = 0; i < 24; i++) c->pixels[12 * 24 + i] = 0xFF00FF00u;  /* a wall */
+
+		key(c, SDLK_S, SDL_KMOD_NONE);
+		mouse(c, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 3, 3);
+		mouse(c, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 3, 3);
+
+		ok("the bucket filled above the wall",  c->pixels[0 * 24 + 0]  == tool_colour(0));
+		ok("did not cross it",                 c->pixels[20 * 24 + 0] == blank[0]);
+		ok("and did not paint the wall",       c->pixels[12 * 24 + 5] == 0xFF00FF00u);
+		ok("one bucket is one undo",           undo_undo(c));
+		ok("which put the region back",        c->pixels[0] == blank[0]);
 	}
 
 	/* ---- what a save dialog's answer means ----

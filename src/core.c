@@ -128,6 +128,12 @@ static void new_sheet_ask (void)
 		vng_tab_new(VNG_NEW_W, VNG_NEW_H);
 }
 
+/* No modifier at all - see the comment where this is used. */
+static bool bare (SDL_Keymod m)
+{
+	return (m & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT | SDL_KMOD_ALT | SDL_KMOD_GUI)) == 0;
+}
+
 void vangopix_input (void)
 {
 	SDL_Event e;
@@ -215,20 +221,19 @@ void vangopix_input (void)
 		case SDL_EVENT_KEY_DOWN:
 			if (e.key.repeat) break;
 
-			if (e.key.key == SDLK_F1) {
-				overlay = !overlay;
-				break;
-			}
-
-			if (e.key.key == SDLK_ESCAPE) {
-				tabbar_toggle();
-				break;
-			}
-
-			/* Bare TAB raises the sidebar; CTRL+TAB below still walks the documents. */
-			if (e.key.key == SDLK_TAB && !(e.key.mod & SDL_KMOD_CTRL)) {
-				sidebar_toggle();
-				break;
+			/*
+			 * A BARE SHORTCUT IS ONE WITH NO MODIFIER AT ALL, and asking it that way is
+			 * the fix for a real bug: the sidebar used to ask "is CTRL down?" when the
+			 * question was "is this key bare?", so SHIFT+TAB - which belongs to the
+			 * change-colours limiter - raised the project panel as well.
+			 *
+			 * Testing for the one modifier that happens to collide today is how every
+			 * later collision gets built in. There is only one right question.
+			 */
+			if (bare(e.key.mod)) {
+				if (e.key.key == SDLK_F1)     { overlay = !overlay; break; }
+				if (e.key.key == SDLK_ESCAPE) { tabbar_toggle();    break; }
+				if (e.key.key == SDLK_TAB)    { sidebar_toggle();   break; }
 			}
 
 			if (e.key.mod & SDL_KMOD_CTRL) {
@@ -363,8 +368,12 @@ void vangopix_core (void)
 
 	VNG_TAB *t = vng_tab;
 	if (t) {
+		/* Before the sheet is drawn, because what the spray lays down this frame has to
+		 * reach the texture in the same frame. */
+		tool_frame(t);
+
 		draw_sheet(t);
-		tool_draw(t);      /* the pixel outline, on the sheet and under the panels */
+		tool_draw(t);      /* the tip outline and the glyph, under the panels */
 		resize_draw(t);
 		if (overlay) draw_overlay(t, t->zoom);
 		sidebar_draw();

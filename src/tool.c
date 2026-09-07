@@ -9,22 +9,22 @@
  * The two colours a fresh program starts with. 0xAARRGGBB, matching the ARGB8888 the
  * document is.
  *
- * COLOUR 2 IS NOTHING, and that is what makes the right button an eraser without an eraser
- * existing. In a program that keeps alpha, rubbing out IS drawing with nothing - and white
- * would be a colour somebody chose, which is the whole reason the desk is a checkerboard.
+ * COLOUR 2 IS NOTHING, and that is what makes the right button rub out without an eraser
+ * being involved. In a program that keeps alpha, rubbing out IS drawing with nothing - and
+ * white would be a colour somebody chose, which is the whole reason the desk is a
+ * checkerboard.
  */
 #define START_1  0xFF000000u
 #define START_2  0x00000000u
 
-/* Below this the outline would cover more of the sheet than it points at - at 1:1 a pixel
- * is one screen pixel and a box around it swallows its eight neighbours. Under it the
- * crosshair is the only signal, which is right: at that scale the image is being LOOKED
- * at, not drawn on. */
+/* Below this the tip outline covers more of the sheet than it points at - at 1:1 a pixel is
+ * one screen pixel and a box around it swallows its eight neighbours. Under it the crosshair
+ * is the only signal, which is right: at that scale the image is being LOOKED at. A tip
+ * bigger than one pixel is outlined at any zoom, because its SIZE is what has to be visible
+ * before it is used. */
 #define OUTLINE_ZOOM  2.0f
 
-/* How far off the pointer the readout sits, and the padding inside its bar. Offset for the
- * same reason the first Vangopix offset its tool glyph: a thing that reports what you are
- * pointing at must not stand on it. */
+/* How far off the pointer the hex readout sits, and the padding inside its bar. */
 #define READ_OFF_X  14.0f
 #define READ_OFF_Y  16.0f
 #define READ_PAD     4.0f
@@ -33,9 +33,9 @@
  * WHERE THE TOOL GLYPH HANGS, AND THE NUMBERS ARE THE FIRST VANGOPIX'S OWN:
  * (mouse.x + 16, mouse.y - 16), from tool_show_icons in its src/tool/tool_misc.c.
  *
- * Up and to the right, because that is the quadrant a right-handed hand is not covering
- * with the mouse itself, and sixteen because the glyphs are drawn on a grid of about
- * -12..+10 - any less and the outline would reach back over the pixel it is reporting on.
+ * Up and to the right, because that is the quadrant a right-handed hand is not covering with
+ * the mouse itself, and sixteen because the glyphs are drawn on a grid of about -12..+10 -
+ * any less and the outline would reach back over the pixel it is reporting on.
  */
 #define GLYPH_OFF_X   16.0f
 #define GLYPH_OFF_Y  -16.0f
@@ -45,27 +45,57 @@
 #define SLOT_MARGIN  8.0f
 #define SLOT_GAP     6.0f
 
+/* The largest tip. Past this a stroke is not a brush any more, and the outline stops meaning
+ * anything on screen. */
+#define TIP_MAX  256
+
 static SDL_Cursor *cur_cross = NULL;
 static SDL_Cursor *cur_arrow = NULL;
 static SDL_Cursor *cur_now   = NULL;   /* what is on screen, so the OS is not asked twice */
 
-/* The two loaded colours SURVIVE a stroke - they are the pencil's, not the drag's.
- * `laying` is what the current drag is putting down, copied at the press so that picking
- * mid-stroke could never change the colour of a line already begun. */
+/* The two loaded colours SURVIVE a stroke - they are the tool's, not the drag's. `laying` is
+ * what the current drag puts down, copied at the press so that picking mid-stroke could
+ * never change the colour of a line already begun. */
 static Uint32 colour[2] = { START_1, START_2 };
 static Uint32 laying    = START_1;
 
+static TOOL current = T_PENCIL;
+
+/* Sizes and steps, both the first Vangopix's: vng_tool.tool_size in its tool_core.c, and the
+ * scale_step it sets per case in the same switch. */
+static int size[T_LOT] = { 1, 1, 1, 1, 20, 1, 20, 1 };
+
+static const int step[T_LOT] = { 1, 1, 1, 1,  5, 1,  3, 3 };
+
+/*
+ * The change-colours limiter: 0 the whole sheet, 1 a circle, 2 a square. SHIFT+TAB swaps
+ * between the circle and the square; at size 1 it is the whole sheet and there is no shape
+ * to choose. The original used bare TAB, which is the project sidebar's here.
+ */
+static int limiter = 0;
+
 static bool   drawing = false;
-static Uint8  button  = 0;             /* the one that started the stroke */
-static int    last_x  = 0, last_y = 0;
+static Uint8  button  = 0;                  /* the one that started the stroke */
+static int    last_x = 0, last_y = 0;       /* where the previous sample landed */
+static int    anchor_x = 0, anchor_y = 0;   /* where a shape was begun */
 
 /* True while a CTRL press is being dragged across the sheet, absorbing as it goes. */
 static bool   picking = false;
 static int    pick_slot = 0;
 
-/* Which slot a button owns. The button that takes a colour is the button that lays it
- * down, so there is nothing to remember about where a pick landed. */
+/* Which slot a button owns. The button that takes a colour is the button that lays it down,
+ * so there is nothing to remember about where a pick landed. */
 static int slot_of (Uint8 btn) { return btn == SDL_BUTTON_RIGHT ? 1 : 0; }
+
+/* A shape is anchored: press, drag, release, with the preview redrawn from the anchor on
+ * every motion rather than accumulated. */
+static bool anchored (TOOL t) { return t == T_LINE || t == T_RECT || t == T_ELLIPSE; }
+
+/* These do their whole job on the press and have nothing to add on the way out. */
+static bool instant (TOOL t) { return t == T_BUCKET || t == T_CHANGE; }
+
+TOOL tool_current  (void) { return current; }
+int  tool_tip_size (void) { return size[current]; }
 
 Uint32 tool_colour (int slot) { return colour[slot == 1 ? 1 : 0]; }
 
@@ -73,8 +103,8 @@ void tool_pick (VNG_TAB *t, int x, int y, int slot)
 {
 	if (!t || x < 0 || y < 0 || x >= t->w || y >= t->h) return;
 
-	/* From the document and never from the preview: what is absorbed is a colour that is
-	 * IN the drawing, not one still on its way in. */
+	/* From the document and never from the preview: what is absorbed is a colour that is IN
+	 * the drawing, not one still on its way in. */
 	colour[slot == 1 ? 1 : 0] = t->pixels[(size_t)y * t->w + x];
 }
 
@@ -103,8 +133,7 @@ bool tool_init (void)
 
 void tool_free (void)
 {
-	/* The cursor on screen is destroyed with the rest, so the system is put back on its
-	 * own before either of ours goes away. */
+	/* The system is put back on its own cursor before either of ours is destroyed. */
 	if (cur_arrow) SDL_SetCursor(cur_arrow);
 
 	if (cur_cross) SDL_DestroyCursor(cur_cross);
@@ -115,9 +144,9 @@ void tool_free (void)
 /*
  * Screen point to document pixel.
  *
- * SDL_floorf and NOT a cast to int: a cast truncates toward zero, so a world coordinate
- * of -0.5 - the pointer just off the left edge - comes out as pixel 0 instead of -1, and
- * a stroke leaving the sheet on that side would smear along the first column instead of
+ * SDL_floorf and NOT a cast to int: a cast truncates toward zero, so a world coordinate of
+ * -0.5 - the pointer just off the left edge - comes out as pixel 0 instead of -1, and a
+ * stroke leaving the sheet on that side would smear along the first column instead of
  * leaving.
  */
 static void pixel_of (VNG_TAB *t, float sx, float sy, int *px, int *py)
@@ -132,30 +161,94 @@ static bool inside (VNG_TAB *t, int x, int y)
 	return x >= 0 && y >= 0 && x < t->w && y < t->h;
 }
 
+static void put (VNG_TAB *t, int x, int y)
+{
+	/* The touched check is what the mask is FOR. With an opaque colour it changes nothing,
+	 * but a half transparent tip passing over its own output inside one stroke would blend
+	 * onto itself and saturate the transparency into opacity - the detail the first Vangopix
+	 * documents at the top of its main.c. */
+	if (!vng_tab_touched(t, x, y))
+		vng_tab_put(t, x, y, laying);
+}
+
+/* --------------------------------------------------------------------------- the tip */
+
+/*
+ * THE SMALL TIPS ARE DRAWN BY HAND, NOT BY A CIRCLE FORMULA, and this is the piece of the
+ * first Vangopix most easily lost in a rewrite (its tool_circle_fill).
+ *
+ * A mathematical circle of radius 2 or 3 comes out as a lopsided smudge - there are not
+ * enough pixels in it for the formula to mean anything, and every pixel artist already knows
+ * what those brushes are supposed to look like. So sizes 2 to 5 are five-by-five bitmaps
+ * placed by eye, size 1 is exactly one pixel, and only from 6 up is a circle computed.
+ */
+static const Uint8 tip_small[4][25] = {
+	{ 0,0,0,0,0,  0,1,1,0,0,  0,1,1,0,0,  0,0,0,0,0,  0,0,0,0,0 },   /* 2: a square   */
+	{ 0,0,0,0,0,  0,0,1,0,0,  0,1,1,1,0,  0,0,1,0,0,  0,0,0,0,0 },   /* 3: a diamond  */
+	{ 0,1,1,0,0,  1,1,1,1,0,  1,1,1,1,0,  0,1,1,0,0,  0,0,0,0,0 },   /* 4: a round 4  */
+	{ 0,1,1,1,0,  1,1,1,1,1,  1,1,1,1,1,  1,1,1,1,1,  0,1,1,1,0 },   /* 5: a round 5  */
+};
+
+/* The round tip: pencil, line, rect, ellipse. */
+static void tip_round (VNG_TAB *t, int cx, int cy, int r)
+{
+	if (r <= 1) { put(t, cx, cy); return; }
+
+	if (r <= 5) {
+		for (int y = 0; y < 5; y++)
+			for (int x = 0; x < 5; x++)
+				if (tip_small[r - 2][y * 5 + x])
+					put(t, cx + x - 2, cy + y - 2);
+		return;
+	}
+
+	for (int y = -r; y <= r; y++)
+		for (int x = -r; x <= r; x++)
+			if (x * x + y * y <= r * r)
+				put(t, cx + x, cy + y);
+}
+
+/* The eraser is a SQUARE, and deliberately not the round tip: rubbing out is about clearing
+ * an area, and a square is the shape whose edges a person can predict. Odd sizes only, so
+ * there is a centre pixel to aim with. */
+static void tip_square (VNG_TAB *t, int cx, int cy, int n)
+{
+	if (n < 1) n = 1;
+	if ((n & 1) == 0) n++;
+
+	int h = n / 2;
+	for (int y = -h; y <= h; y++)
+		for (int x = -h; x <= h; x++)
+			put(t, cx + x, cy + y);
+}
+
+/* The tip of whatever tool is current. */
+static void tip (VNG_TAB *t, int x, int y)
+{
+	if (current == T_ERASER) tip_square(t, x, y, size[current]);
+	else                     tip_round (t, x, y, size[current]);
+}
+
+/* -------------------------------------------------------------------- the primitives */
+
 /*
  * Bresenham between two samples, and it is not a refinement.
  *
  * A hand moving at any speed outruns the motion events: the pointer arrives eight pixels
- * from where it was, and a tool that paints only where the events land draws a dotted
- * line. Every pixel editor joins the samples, and this is that join.
- *
- * The touched check is what the mask is FOR. With an opaque ink it changes nothing, but a
- * half transparent brush passing over its own line inside one stroke would blend onto its
- * own output and saturate the transparency into opacity - the detail the first Vangopix
- * documents at the top of its main.c.
+ * from where it was, and a tool that stamps only where the events land draws a dotted line.
+ * Every pixel editor joins the samples, and this is that join.
  */
-static void line (VNG_TAB *t, int x0, int y0, int x1, int y1)
+static void plot_line (VNG_TAB *t, int x0, int y0, int x1, int y1)
 {
 	int dx =  SDL_abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
 	int dy = -SDL_abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
 	int err = dx + dy;
 
 	for (;;) {
-		/* No bounds test here on purpose: a stroke that runs off the sheet and comes
-		 * back is ONE stroke, and the line between two samples outside it still has to
-		 * be walked. vng_tab_put clips, so the part that lands is the part that lands. */
-		if (!vng_tab_touched(t, x0, y0))
-			vng_tab_put(t, x0, y0, laying);
+		/* No bounds test: a stroke that runs off the sheet and comes back is ONE stroke,
+		 * and the line between two samples outside it still has to be walked. vng_tab_put
+		 * clips, so the part that lands is the part that lands. */
+		tip(t, x0, y0);
 
 		if (x0 == x1 && y0 == y1) break;
 
@@ -165,11 +258,272 @@ static void line (VNG_TAB *t, int x0, int y0, int x1, int y1)
 	}
 }
 
+static void plot_rect (VNG_TAB *t, int x0, int y0, int x1, int y1)
+{
+	plot_line(t, x0, y0, x1, y0);
+	plot_line(t, x1, y0, x1, y1);
+	plot_line(t, x1, y1, x0, y1);
+	plot_line(t, x0, y1, x0, y0);
+}
+
+/*
+ * Midpoint ellipse, inscribed in the dragged rectangle rather than centred on the press.
+ * Dragging a box and getting the ellipse that fits it is what every editor does, and it is
+ * the only reading where both corners mean something.
+ */
+static void plot_ellipse (VNG_TAB *t, int x0, int y0, int x1, int y1)
+{
+	int left = x0 < x1 ? x0 : x1, right  = x0 < x1 ? x1 : x0;
+	int top  = y0 < y1 ? y0 : y1, bottom = y0 < y1 ? y1 : y0;
+
+	long a = (right - left) / 2, b = (bottom - top) / 2;
+	long cx = left + a, cy = top + b;
+
+	/* Degenerate in one axis is a line, and drawing it as one beats drawing nothing. */
+	if (a == 0 || b == 0) { plot_line(t, x0, y0, x1, y1); return; }
+
+	long a2 = a * a, b2 = b * b;
+	long x = 0, y = b;
+	long sigma = 2 * b2 + a2 * (1 - 2 * b);
+
+	while (b2 * x <= a2 * y) {
+		tip(t, (int)(cx + x), (int)(cy + y));
+		tip(t, (int)(cx - x), (int)(cy + y));
+		tip(t, (int)(cx + x), (int)(cy - y));
+		tip(t, (int)(cx - x), (int)(cy - y));
+		if (sigma >= 0) { sigma += 4 * a2 * (1 - y); y--; }
+		sigma += b2 * (4 * x + 6);
+		x++;
+	}
+
+	x = a; y = 0;
+	sigma = 2 * a2 + b2 * (1 - 2 * a);
+
+	while (a2 * y <= b2 * x) {
+		tip(t, (int)(cx + x), (int)(cy + y));
+		tip(t, (int)(cx - x), (int)(cy + y));
+		tip(t, (int)(cx + x), (int)(cy - y));
+		tip(t, (int)(cx - x), (int)(cy - y));
+		if (sigma >= 0) { sigma += 4 * b2 * (1 - x); x--; }
+		sigma += a2 * (4 * y + 6);
+		y++;
+	}
+}
+
+/*
+ * Flood fill, by SCANLINE and not by recursion.
+ *
+ * The obvious four-way recursion runs the C stack out on a large fill - a 4000x4000 sheet
+ * filled corner to corner is sixteen million frames deep. Filling whole spans and pushing
+ * only the starts of the spans above and below keeps the stack proportional to the HEIGHT of
+ * the region rather than to its area.
+ *
+ * THE MASK IS THE VISITED SET, and that is free: a pixel already marked in this stroke is a
+ * pixel already filled, so nothing else has to remember where the fill has been.
+ */
+static void plot_flood (VNG_TAB *t, int sx, int sy)
+{
+	if (!inside(t, sx, sy)) return;
+
+	Uint32 target = t->pixels[(size_t)sy * t->w + sx];
+	if (target == laying) return;   /* filling a colour with itself is a no-op with a cost */
+
+	/* Two ints per span start. One entry per row is the worst case, and a few rows of slack
+	 * cost nothing beside the buffers a document already carries. */
+	int  cap   = t->h * 4 + 64;
+	int *stack = (int *) SDL_malloc((size_t)cap * 2 * sizeof(int));
+	if (!stack) return;
+
+	int top = 0;
+	stack[0] = sx; stack[1] = sy; top = 1;
+
+	while (top > 0) {
+		top--;
+		int x = stack[top * 2], y = stack[top * 2 + 1];
+
+		if (!inside(t, x, y)) continue;
+
+		size_t row = (size_t)y * t->w;
+		if (t->mask[row + x] || t->pixels[row + x] != target) continue;
+
+		int x0 = x;
+		while (x0 > 0 && !t->mask[row + x0 - 1] && t->pixels[row + x0 - 1] == target) x0--;
+
+		int x1 = x;
+		while (x1 < t->w - 1 && !t->mask[row + x1 + 1] && t->pixels[row + x1 + 1] == target)
+			x1++;
+
+		for (int i = x0; i <= x1; i++)
+			vng_tab_put(t, i, y, laying);
+
+		/* One push per RUN on each neighbouring row, not one per pixel. */
+		for (int dy = -1; dy <= 1; dy += 2) {
+			int ny = y + dy;
+			if (ny < 0 || ny >= t->h) continue;
+
+			size_t nrow = (size_t)ny * t->w;
+			bool   run  = false;
+
+			for (int i = x0; i <= x1; i++) {
+				bool match = !t->mask[nrow + i] && t->pixels[nrow + i] == target;
+				if (match && !run && top < cap) {
+					stack[top * 2] = i; stack[top * 2 + 1] = ny; top++;
+				}
+				run = match;
+			}
+		}
+	}
+
+	SDL_free(stack);
+}
+
+/*
+ * The spray: random points inside a circle, the grain and the count from the first
+ * Vangopix's tool_spray. It is measured in TIME - held still, it goes on building up, which
+ * is the whole behaviour of a spray can and the reason this one tool has a per-frame job.
+ */
+#define SPRAY_GRAIN 5
+
+static void plot_spray (VNG_TAB *t, int cx, int cy, int r)
+{
+	if (r < 1) r = 1;
+
+	for (int i = 0; i < r; i++) {
+		for (int j = 0; j < r; j++) {
+			int dx = SDL_rand(SPRAY_GRAIN * r + 1) - r;
+			int dy = SDL_rand(SPRAY_GRAIN * r + 1) - r;
+
+			if (dx * dx + dy * dy < r * r)
+				put(t, cx + dx, cy + dy);
+		}
+	}
+}
+
+/*
+ * Change-colours: every pixel of the colour under the pointer becomes the current colour.
+ *
+ * THE LIMITER IS WHAT MAKES IT A TOOL RATHER THAN A MENU COMMAND. The whole sheet at size
+ * one, or only inside a circle or a square when there is a size to work with: replacing one
+ * shade of a sprite everywhere is one gesture, and replacing it only where a shadow falls is
+ * the same gesture with a shape around it.
+ */
+static void plot_change (VNG_TAB *t, int cx, int cy)
+{
+	if (!inside(t, cx, cy)) return;
+
+	Uint32 target = t->pixels[(size_t)cy * t->w + cx];
+	if (target == laying) return;
+
+	int r = size[T_CHANGE];
+
+	int x0 = 0, y0 = 0, x1 = t->w - 1, y1 = t->h - 1;
+	if (limiter != 0) {
+		x0 = cx - r; x1 = cx + r;
+		y0 = cy - r; y1 = cy + r;
+		if (x0 < 0) x0 = 0;
+		if (y0 < 0) y0 = 0;
+		if (x1 > t->w - 1) x1 = t->w - 1;
+		if (y1 > t->h - 1) y1 = t->h - 1;
+	}
+
+	for (int y = y0; y <= y1; y++) {
+		for (int x = x0; x <= x1; x++) {
+			if (limiter == 1) {
+				int dx = x - cx, dy = y - cy;
+				if (dx * dx + dy * dy > r * r) continue;
+			}
+			if (t->pixels[(size_t)y * t->w + x] == target)
+				put(t, x, y);
+		}
+	}
+}
+
+/* Everything a press or a drag lays down, in one place, so the event handler stays a list of
+ * gestures instead of a list of tools. */
+static void apply (VNG_TAB *t, int x, int y)
+{
+	switch (current) {
+	case T_PENCIL:
+	case T_ERASER:  plot_line(t, last_x, last_y, x, y);        break;
+	case T_SPRAY:   plot_spray(t, x, y, size[T_SPRAY]);        break;
+	case T_LINE:    plot_line(t, anchor_x, anchor_y, x, y);    break;
+	case T_RECT:    plot_rect(t, anchor_x, anchor_y, x, y);    break;
+	case T_ELLIPSE: plot_ellipse(t, anchor_x, anchor_y, x, y); break;
+	case T_BUCKET:  plot_flood(t, x, y);                       break;
+	case T_CHANGE:  plot_change(t, x, y);                      break;
+	default: break;
+	}
+}
+
+/* ------------------------------------------------------------------------ the events */
+
+/* Q W E R / A S D F, the first Vangopix's own block under the left hand. */
+static bool tool_key (SDL_Keycode k, TOOL *out)
+{
+	switch (k) {
+	case SDLK_Q: *out = T_PENCIL;  return true;
+	case SDLK_W: *out = T_LINE;    return true;
+	case SDLK_E: *out = T_RECT;    return true;
+	case SDLK_R: *out = T_ELLIPSE; return true;
+	case SDLK_A: *out = T_ERASER;  return true;
+	case SDLK_S: *out = T_BUCKET;  return true;
+	case SDLK_D: *out = T_SPRAY;   return true;
+	case SDLK_F: *out = T_CHANGE;  return true;
+	default: return false;
+	}
+}
+
 bool tool_event (const SDL_Event *e, VNG_TAB *t)
 {
 	if (!t) return false;
 
 	switch (e->type) {
+
+	case SDL_EVENT_KEY_DOWN: {
+		if (e->key.repeat) return false;
+
+		SDL_Keymod m = e->key.mod;
+		bool bare = (m & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT | SDL_KMOD_ALT | SDL_KMOD_GUI)) == 0;
+
+		/* A TOOL KEY ONLY COUNTS BARE. CTRL+S saves and S is the bucket; the two are told
+		 * apart by asking whether ANY modifier is down, not by asking about the one that
+		 * happens to collide today. */
+		TOOL want;
+		if (bare && tool_key(e->key.key, &want)) {
+			current = want;
+			return true;
+		}
+
+		/*
+		 * SHIFT+TAB swaps the change-colours limiter between a circle and a square. The
+		 * first Vangopix used bare TAB; bare TAB raises the project sidebar here, and a
+		 * shortcut only one tool answers must not take a key the whole program can see.
+		 */
+		if (e->key.key == SDLK_TAB && (m & SDL_KMOD_SHIFT) && !(m & SDL_KMOD_CTRL)) {
+			if (current == T_CHANGE && size[T_CHANGE] > 1) {
+				limiter = (limiter == 1) ? 2 : 1;
+				return true;
+			}
+			return false;
+		}
+		return false;
+	}
+
+	case SDL_EVENT_MOUSE_WHEEL: {
+		/* SHIFT+wheel is the tip size, per tool and by that tool's own step. The plain wheel
+		 * is the camera's, and view.c hands this one over rather than zooming. */
+		if (!(keys_mods() & SDL_KMOD_SHIFT)) return false;
+
+		size[current] += e->wheel.integer_y * step[current];
+		if (size[current] < 1)       size[current] = 1;
+		if (size[current] > TIP_MAX) size[current] = TIP_MAX;
+
+		/* At size one there is no shape to limit with: it is the whole sheet. */
+		if (current == T_CHANGE)
+			limiter = (size[T_CHANGE] == 1) ? 0 : (limiter ? limiter : 1);
+
+		return true;
+	}
 
 	case SDL_EVENT_MOUSE_BUTTON_DOWN: {
 		if (e->button.button != SDL_BUTTON_LEFT &&
@@ -178,15 +532,14 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 		int x, y;
 		pixel_of(t, e->button.x, e->button.y, &x, &y);
 
-		/* A press that starts OUTSIDE the sheet is not a drawing gesture - it is a click
-		 * on the desk, and one day it will be a selection. Only presses on the paper
-		 * begin a stroke, or a pick. */
+		/* A press that starts OUTSIDE the sheet is not a drawing gesture - it is a click on
+		 * the desk, and one day it will be a selection. */
 		if (!inside(t, x, y)) return false;
 
-		/* CTRL turns both buttons into the eyedropper, and while it is held neither is
-		 * the pencil's: a press that also drew would smear the colour being sampled
-		 * across the very pixels being read. A drag already running is left alone - the
-		 * stroke owns it, and CTRL pressed halfway through a line must not cut it. */
+		/* CTRL turns both buttons into the eyedropper, and while it is held neither is the
+		 * tool's: a press that also drew would smear the colour being sampled across the
+		 * very pixels being read. A drag already running is left alone - the stroke owns it,
+		 * and CTRL pressed halfway through a line must not cut it. */
 		if (!drawing && (keys_mods() & SDL_KMOD_CTRL)) {
 			pick_slot = slot_of(e->button.button);
 			picking   = true;
@@ -195,9 +548,9 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 			return true;
 		}
 
-		/* A stroke already open means its button-up never arrived - the pointer was
-		 * released somewhere this program never heard about. Commit it rather than merge
-		 * the two: those pixels were drawn and the person watched them appear. */
+		/* A stroke already open means its button-up never arrived - the pointer was released
+		 * somewhere this program never heard about. Commit it rather than merge the two:
+		 * those pixels were drawn and the person watched them appear. */
 		if (drawing) {
 			drawing = false;
 			vng_tab_stroke_close(t);
@@ -205,24 +558,32 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 
 		if (!vng_tab_stroke_open(t)) return true;   /* no memory for it; still ours */
 
-		button  = e->button.button;
-		laying  = colour[slot_of(button)];
-		drawing = true;
-		last_x  = x;
-		last_y  = y;
+		button   = e->button.button;
+		laying   = (current == T_ERASER) ? 0u : colour[slot_of(button)];
+		drawing  = true;
+		last_x   = anchor_x = x;
+		last_y   = anchor_y = y;
 
-		vng_tab_put(t, x, y, laying);
+		if (current == T_PENCIL || current == T_ERASER) tip(t, x, y);
+		else                                            apply(t, x, y);
+
+		/* The bucket and the change do their whole job here. Leaving the stroke open would
+		 * make a drag across the sheet refill on every motion event. */
+		if (instant(current)) {
+			drawing = false;
+			vng_tab_stroke_close(t);
+		}
 		return true;
 	}
 
 	case SDL_EVENT_MOUSE_MOTION: {
-		/* A held pick keeps absorbing as it travels, which is what "picking constantly"
-		 * actually looks like: press, drag across the colours, release on the one you
-		 * meant. Nothing is written to the document, so there is nothing to undo. */
+		/* A held pick keeps absorbing as it travels, which is what picking constantly looks
+		 * like: press, drag across the colours, release on the one you meant. Nothing is
+		 * written to the document, so there is nothing to undo. */
 		if (picking) {
-			int x, y;
-			pixel_of(t, e->motion.x, e->motion.y, &x, &y);
-			tool_pick(t, x, y, pick_slot);
+			int px, py;
+			pixel_of(t, e->motion.x, e->motion.y, &px, &py);
+			tool_pick(t, px, py, pick_slot);
 			return true;
 		}
 
@@ -231,7 +592,15 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 		int x, y;
 		pixel_of(t, e->motion.x, e->motion.y, &x, &y);
 
-		line(t, last_x, last_y, x, y);
+		/* A SHAPE IS REDRAWN, NOT ACCUMULATED. The line being dragged is the line from the
+		 * anchor to here, and the one from the previous motion event never existed. Throwing
+		 * the preview away first is what makes that true - and the undo step stays open
+		 * across it, so the whole drag is still one undo. */
+		if (anchored(current))
+			vng_tab_stroke_reset(t);
+
+		apply(t, x, y);
+
 		last_x = x;
 		last_y = y;
 		return true;
@@ -257,10 +626,21 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 	}
 }
 
-/* The panels float OVER the sheet, so the pointer can be on the paper and on a panel at
- * the same time. Their own events already settle a click - they consume it before this
- * file sees it - but the cursor SHAPE is decided every frame, from where the pointer is,
- * and it has to agree with who would actually get the click. */
+void tool_frame (VNG_TAB *t)
+{
+	/* The spray is the one tool measured in time rather than in events: held still, it goes
+	 * on building up, which is what a spray can does. Everything else has already happened
+	 * by the time this runs. */
+	if (t && drawing && current == T_SPRAY)
+		plot_spray(t, last_x, last_y, size[T_SPRAY]);
+}
+
+/* ------------------------------------------------------------------------ the pixels */
+
+/* The panels float OVER the sheet, so the pointer can be on the paper and on a panel at the
+ * same time. Their own events already settle a click - they consume it before this file sees
+ * it - but the cursor SHAPE is decided every frame, from where the pointer is, and it has to
+ * agree with who would actually get the click. */
 static bool over_panel (float mx, float my)
 {
 	return my < tabbar_height() || mx < sidebar_edge();
@@ -273,17 +653,13 @@ static void set_cursor (SDL_Cursor *want)
 	cur_now = want;
 }
 
-/* White just outside the pixel and black one further out. Two rects because one is not
- * enough: the sheet can be any colour and the desk behind it is grey, so a single tone
- * disappears against something. Outside and never on the pixel - the same rule the corner
- * grips and the sheet's own frame follow, and here it is the whole point, since a box
- * drawn ON a pixel hides the colour it is asking about. */
-static void outline (VNG_TAB *t, int px, int py)
+/* White just inside, black one further out. Two rects because one is not enough: the sheet
+ * can be any colour and the desk behind it is grey, so a single tone disappears against
+ * something. Outside the pixels themselves - the same rule the corner grips and the sheet's
+ * own frame follow, and here it is the whole point, since a box drawn ON a pixel hides the
+ * colour it is asking about. */
+static void box (SDL_FRect in)
 {
-	SDL_FPoint a = view_world_to_screen(t, (float)px,       (float)py);
-	SDL_FPoint b = view_world_to_screen(t, (float)px + 1.0f, (float)py + 1.0f);
-
-	SDL_FRect in  = { a.x - 1.0f, a.y - 1.0f, b.x - a.x + 2.0f, b.y - a.y + 2.0f };
 	SDL_FRect out = { in.x - 1.0f, in.y - 1.0f, in.w + 2.0f, in.h + 2.0f };
 
 	SDL_SetRenderDrawColor(vng_ren, 0x00, 0x00, 0x00, 0xC0);
@@ -292,17 +668,62 @@ static void outline (VNG_TAB *t, int px, int py)
 	SDL_RenderRect(vng_ren, &in);
 }
 
+/* A circle in SCREEN space, for the change-colours limiter. Screen space and not document
+ * space on purpose: it is an annotation about the tool, not something being drawn, so it
+ * stays a smooth ring at any zoom instead of turning into a staircase. */
+static void ring (float cx, float cy, float r)
+{
+	enum { SEG = 48 };
+	SDL_FPoint p[SEG + 1];
+
+	for (int i = 0; i <= SEG; i++) {
+		float a = (float)i * (2.0f * SDL_PI_F / SEG);
+		p[i].x = cx + SDL_cosf(a) * r + 1.0f;
+		p[i].y = cy + SDL_sinf(a) * r + 1.0f;
+	}
+
+	SDL_SetRenderDrawColor(vng_ren, 0x00, 0x00, 0x00, 0xC0);
+	SDL_RenderLines(vng_ren, p, SEG + 1);
+
+	for (int i = 0; i <= SEG; i++) { p[i].x -= 1.0f; p[i].y -= 1.0f; }
+	SDL_SetRenderDrawColor(vng_ren, 0xFF, 0xFF, 0xFF, 0xE0);
+	SDL_RenderLines(vng_ren, p, SEG + 1);
+}
+
 /*
- * The hex readout, up only while CTRL is held.
+ * The tip, outlined where it would land. This is what makes a size worth having: a tip whose
+ * extent cannot be seen until it is used is a tip nobody trusts.
  *
- * THE SWATCH IS FILLED OPAQUE EVEN WHEN THE COLOUR IS NOT. A transparent pick drawn at its
- * own alpha is an invisible bar, which reports nothing; the alpha is in the text, where it
- * can be read - and reading `...00` is how a person learns they just absorbed nothing.
- *
- * The text is black or white BY LUMINANCE, not by inverting the swatch. Inverting is the
- * obvious trick and it fails exactly in the middle, which is where a great deal of pixel
- * art lives: the inverse of 0x808080 is 0x7F7F7F, one step from the background it is meant
- * to stand out from.
+ * The change-colours limiter is drawn as its actual SHAPE, circle or square, because
+ * SHIFT+TAB swaps between the two and a swap nobody can see is a swap nobody will use.
+ */
+static void outline (VNG_TAB *t, int px, int py)
+{
+	int r = size[current];
+
+	SDL_FPoint a = view_world_to_screen(t, (float)px, (float)py);
+	SDL_FPoint b = view_world_to_screen(t, (float)px + 1.0f, (float)py + 1.0f);
+	float cell = b.x - a.x;
+
+	if (current == T_CHANGE && limiter == 1) {
+		ring(a.x + cell * 0.5f, a.y + cell * 0.5f, (float)r * cell);
+		return;
+	}
+
+	/* One pixel, or the square the tip covers. The eraser is odd-sized by definition, and
+	 * the round tips are measured the same way, so the box says how far each reaches. */
+	float half = (r <= 1) ? 0.0f : (float)r;
+	if (current == T_ERASER) half = (float)((size[T_ERASER] | 1) / 2);
+
+	SDL_FRect in = { a.x - half * cell, a.y - half * cell,
+	                 cell * (half * 2.0f + 1.0f), cell * (half * 2.0f + 1.0f) };
+	box(in);
+}
+
+/*
+ * One bar: a colour with its value written inside it. Used for the readout that follows the
+ * pointer and for the two loaded colours at the bottom, because they are the same question
+ * asked about different colours.
  */
 static void bar_draw (SDL_FRect bar, Uint32 argb)
 {
@@ -312,8 +733,8 @@ static void bar_draw (SDL_FRect bar, Uint32 argb)
 	Uint8 b = (Uint8)( argb        & 0xFF);
 
 	/* Two tones behind it, then the colour over them at its REAL alpha - the desk's own
-	 * trick. It is what makes "nothing" look like nothing instead of looking like black,
-	 * and a bar filled at alpha zero would simply not be there. */
+	 * trick. It is what makes "nothing" look like nothing instead of looking like black, and
+	 * a bar filled at alpha zero would simply not be there. */
 	SDL_FRect half = { bar.x, bar.y, bar.w * 0.5f, bar.h };
 	SDL_SetRenderDrawColor(vng_ren, 0x25, 0x25, 0x25, 0xFF);
 	SDL_RenderFillRect(vng_ren, &bar);
@@ -323,7 +744,6 @@ static void bar_draw (SDL_FRect bar, Uint32 argb)
 	SDL_SetRenderDrawColor(vng_ren, r, g, b, a);
 	SDL_RenderFillRect(vng_ren, &bar);
 
-	/* A border, or a white swatch on a pale drawing is no bar at all. */
 	SDL_SetRenderDrawColor(vng_ren, 0x00, 0x00, 0x00, 0xB0);
 	SDL_RenderRect(vng_ren, &bar);
 
@@ -332,13 +752,12 @@ static void bar_draw (SDL_FRect bar, Uint32 argb)
 	/*
 	 * Black or white BY LUMINANCE, not by inverting the colour. Inverting is the obvious
 	 * trick and it fails exactly in the middle, where a great deal of pixel art lives: the
-	 * inverse of 0x808080 is 0x7F7F7F, one step from the background it is meant to stand
-	 * out from.
+	 * inverse of 0x808080 is 0x7F7F7F, one step from the background it is meant to stand out
+	 * from.
 	 *
-	 * Measured on the colour AS COMPOSITED over the tones behind it, so a transparent slot
-	 * is judged against the grey actually there and not against a colour nobody can see.
-	 * Rec. 601 and not the average of the three channels, because an average calls
-	 * saturated blue bright and saturated green dim.
+	 * Measured on the colour AS COMPOSITED over the tones behind it, so a transparent slot is
+	 * judged against the grey actually there. Rec. 601 and not the average of the three
+	 * channels, because an average calls saturated blue bright and saturated green dim.
 	 */
 	int er = (r * a + 0x2C * (255 - a)) / 255;
 	int eg = (g * a + 0x2C * (255 - a)) / 255;
@@ -352,8 +771,8 @@ static void bar_draw (SDL_FRect bar, Uint32 argb)
 	           luma > 140 ? 0x000000FF : 0xFFFFFFFF, "%s", hex);
 }
 
-/* What a bar has to be to hold eight hex digits. Measured on the widest digits rather than
- * assumed, so it still fits if the face is ever swapped again. */
+/* What a bar has to be to hold eight hex digits. Measured rather than assumed, so it still
+ * fits if the face is ever swapped again. */
 static void bar_size (float *w, float *h)
 {
 	float tw = 64.0f, th = 15.0f;
@@ -416,8 +835,8 @@ void tool_draw (VNG_TAB *t)
 	pixel_of(t, mx, my, &x, &y);
 
 	/* While a stroke is running the pointer owns the sheet wherever it has wandered to,
-	 * including over a panel: letting the cursor flicker back to an arrow mid-stroke
-	 * would report that the drawing had stopped, which it has not. */
+	 * including over a panel: letting the cursor flicker back to an arrow mid-stroke would
+	 * report that the drawing had stopped, which it has not. */
 	bool on = drawing || (inside(t, x, y) && !over_panel(mx, my));
 
 	/* keys_mods reports nothing while a text field owns the keyboard, so typing a CTRL
@@ -427,31 +846,33 @@ void tool_draw (VNG_TAB *t)
 
 	set_cursor(on ? cur_cross : cur_arrow);
 
-	if (on && t->zoom >= OUTLINE_ZOOM && inside(t, x, y))
+	/* A tip bigger than one pixel is outlined at any zoom, because its SIZE is what has to be
+	 * visible before it is used. A single pixel needs the zoom to be worth outlining. */
+	if (on && inside(t, x, y) && (t->zoom >= OUTLINE_ZOOM || size[current] > 1))
 		outline(t, x, y);
 
 	/*
 	 * The tool glyph, which says WHICH tool without standing on the pixel. The system
-	 * crosshair stays where it is and marks the aim point; the glyph hangs off it. The
-	 * first Vangopix had both at once for the same reason - one answers "where", the other
-	 * answers "what".
+	 * crosshair stays where it is and marks the aim point; the glyph hangs off it. The first
+	 * Vangopix had both at once for the same reason - one answers "where", the other answers
+	 * "what".
 	 *
-	 * It flips below the pointer near the top of the window, where hanging upward would
-	 * put it off screen or behind the tab bar. The original did not bother; a window can
-	 * be small enough that it matters.
+	 * It flips below the pointer near the top of the window, where hanging upward would put
+	 * it off screen or behind the tab bar. The original did not bother; a window can be small
+	 * enough that it matters.
 	 */
 	if (on) {
 		float gy = my + GLYPH_OFF_Y;
 		if (gy - GLYPH_REACH < tabbar_height())
 			gy = my - GLYPH_OFF_Y;
 
-		glyph_draw((eyedropper || picking) ? GLYPH_PICK : GLYPH_PENCIL,
+		glyph_draw((eyedropper || picking) ? GLYPH_PICK : (GLYPH)current,
 		           mx + GLYPH_OFF_X, gy, 1.0f, 0xFFFFFFFF);
 	}
 
-	/* Over the outline: the value being read matters more than the box saying which pixel
-	 * it came from. A pick being dragged keeps the preview up, showing what was just
-	 * absorbed - the same pixel either way. */
+	/* Over the outline: the value being read matters more than the box saying which pixel it
+	 * came from. A pick being dragged keeps the readout up, showing what was just absorbed -
+	 * the same pixel either way. */
 	if ((eyedropper || picking) && inside(t, x, y))
 		preview(t->pixels[(size_t)y * t->w + x], mx, my);
 

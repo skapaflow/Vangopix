@@ -13,8 +13,8 @@ middle for drawing and surrounds it with tools; Vangopix reserves nothing.
 
 ## Status
 
-Early, but **it draws now.** A pencil, undo behind it, and everything an image gets around
-that — opening, viewing, framing, sizing and saving.
+Early, but **it draws now.** Eight tools, undo behind them, and everything an image gets
+around that — opening, viewing, framing, sizing and saving.
 
 | | |
 | --- | --- |
@@ -26,7 +26,7 @@ that — opening, viewing, framing, sizing and saving.
 | files | open and save through the system's own dialogs; the format follows the extension |
 | keyboard | one owner at a time, so a field being open silences every shortcut |
 | undo | per document, made of pixel carries and resizes rather than snapshots |
-| drawing | a pencil: left draws, right rubs out to transparent |
+| drawing | eight tools on `Q W E R / A S D F`, each with its own tip size |
 | colour | two, one per mouse button, filled by `CTRL`+click and shown as hex |
 | transparency | checkerboard behind the sheet, black frame around it |
 | text | one atlas, packed by stb_truetype |
@@ -105,6 +105,10 @@ drawing near the border.
 | `CTRL+0` / `CTRL+1` | fit the sheet / go to 1:1 |
 | drag a corner grip | resize the canvas |
 | `SHIFT` while dragging a grip | put the corner on the 8 pixel grid |
+| `Q` `W` `E` `R` | pencil, line, rect, ellipse |
+| `A` `S` `D` `F` | eraser, bucket, spray, change-colours |
+| `SHIFT` + wheel | tip size, per tool |
+| `SHIFT`+`TAB` | change-colours: circle or square limiter |
 | left drag on the sheet | draw |
 | right drag on the sheet | draw colour 2 — transparent to begin with, so it rubs out |
 | `CTRL` + left / right click | absorb that colour into 1 or 2; drag to keep absorbing |
@@ -161,26 +165,45 @@ PNG selected means webp. If neither says anything, it is png.
 Closing a document with unsaved work asks first, and so does quitting. Both are the
 system's message box, so they are drawn outside the window and cost no pixels here.
 
-### The pencil
+### The tools
 
-Left drag draws, right drag rubs out — to **transparent**, not to white, which is what the
-checkerboard behind the sheet is for: in a program that keeps alpha, white is a colour
-somebody chose and nothing is the absence of one.
+Eight of them, on a 2x4 block under the left hand while the right hand is on the mouse —
+the first Vangopix's own layout, and the reason it is these letters and not the initials of
+the names:
 
-There is no key to select it and no tool window, because with one tool a key that selects it
-does nothing. It shows itself three ways instead, none of them a panel: the **cursor**
-becomes a crosshair over the sheet and an arrow everywhere else; the **pixel under the
-pointer is outlined** on the sheet from 2x zoom up, which tells you *which pixel*; and a
-**line-art glyph hangs up and to the right of the pointer** saying which tool — a pencil, or
-an eyedropper while `CTRL` is held.
+| | | | |
+| --- | --- | --- | --- |
+| `Q` pencil | `W` line | `E` rect | `R` ellipse |
+| `A` eraser | `S` bucket | `D` spray | `F` change-colours |
 
-The glyph is an outline and not a filled icon, so the artwork shows through the middle of
-it, and it hangs sixteen pixels off the aim point so it never stands on the pixel it is
-reporting about. Both of those are the first Vangopix's answers, carried over vertex for
-vertex.
+Left button draws colour 1, right button draws colour 2. The line, the rectangle and the
+ellipse are dragged: press where it starts, drag, release where it ends, and what you see
+while dragging is the shape you will get — the whole drag is one undo. The bucket fills the
+region it is dropped in. The spray keeps building while you hold it, even standing still,
+because that is what a spray can does. Change-colours turns every pixel of the colour under
+the pointer into your colour — across the whole sheet, or only inside a circle or a square:
+`SHIFT`+`TAB` swaps the shape.
 
-A stroke joins its samples, so a fast hand draws a line and not a row of dots. One stroke
-is one undo.
+**`SHIFT` + wheel sizes the tip, and each tool remembers its own.** An eraser wants to be
+twenty across and a pencil wants to be one, so they are not the same number. The step is per
+tool too: one pixel at a time for the pencil, line, rect and ellipse, because a pixel is what
+they are for, and 5 or 3 for the eraser and the spray, which would otherwise take twenty
+notches to get anywhere.
+
+The small tips are drawn by hand rather than computed. A circle of radius 2 or 3 from a
+formula is a lopsided smudge; sizes 2 to 5 are bitmaps placed by eye, and size 1 is exactly
+one pixel.
+
+There is no tool window. Each tool shows itself three ways, none of them a panel: the
+**cursor** is a crosshair over the sheet; the **tip is outlined** where it would land, so its
+size and shape are visible before it is used; and a **line-art glyph hangs up and to the
+right of the pointer** saying which tool it is. The glyph is an outline, not a filled icon,
+so the artwork shows through the middle of it, and it hangs clear of the aim point so it
+never stands on the pixel it is reporting about — both of those are the first Vangopix's
+answers, carried over vertex for vertex.
+
+A stroke joins its samples, so a fast hand draws a line and not a row of dots. One stroke is
+one undo.
 
 ### Two colours, one per mouse button
 

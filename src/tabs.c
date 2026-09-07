@@ -149,6 +149,35 @@ void vng_tab_put (VNG_TAB *t, int x, int y, Uint32 argb)
 	if (y + 1 > t->sy1) t->sy1 = y + 1;
 }
 
+/* Clears the touched rectangle in both buffers and puts the same rectangle back on the GPU,
+ * so the preview texture is transparent everywhere again - the invariant the partial upload
+ * during a stroke depends on. */
+static void preview_wipe (VNG_TAB *t)
+{
+	if (t->sx1 <= t->sx0 || t->sy1 <= t->sy0) return;
+
+	for (int y = t->sy0; y < t->sy1; y++) {
+		size_t row = (size_t)y * t->w;
+		SDL_memset(t->pixels_preview + row + t->sx0, 0,
+		           (size_t)(t->sx1 - t->sx0) * sizeof(Uint32));
+		SDL_memset(t->mask + row + t->sx0, 0, (size_t)(t->sx1 - t->sx0));
+	}
+
+	SDL_Rect r = { t->sx0, t->sy0, t->sx1 - t->sx0, t->sy1 - t->sy0 };
+	SDL_UpdateTexture(t->tex_preview, &r,
+	                  t->pixels_preview + (size_t)r.y * t->w + r.x,
+	                  t->w * (int)sizeof(Uint32));
+
+	t->sx0 = t->w; t->sy0 = t->h;
+	t->sx1 = 0;    t->sy1 = 0;
+}
+
+void vng_tab_stroke_reset (VNG_TAB *t)
+{
+	if (!t || !t->stroke) return;
+	preview_wipe(t);
+}
+
 void vng_tab_stroke_close (VNG_TAB *t)
 {
 	if (!t || !t->stroke) return;

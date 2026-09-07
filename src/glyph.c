@@ -3,22 +3,64 @@
 /* The points come from the first Vangopix's src/gui/gui_main_tool.c, vertex for vertex.
  * They are hand placed on a grid of roughly -12..+10 around the origin, which is what lets
  * a 16 pixel offset put the whole glyph clear of the point being aimed at. */
-static const SDL_FPoint pencil[] = {
-	{ 6,-3},{ 4,-5},{ 2,-3},{ 4,-1},{ 2,-3},{ 1,-2},{ 3, 0},{ 1,-2},{-4, 3},
-	{-2, 5},{-4, 3},{-6, 6},{-5, 7},{-6, 6},{-7, 8},{-5, 7},{-2, 5}
+static const SDL_FPoint vpencil[] = {
+	{  6, -3},{  4, -5},{  2, -3},{  4, -1},{  2, -3},{  1, -2},{  3,  0},{  1, -2},{ -4,  3},
+	{ -2,  5},{ -4,  3},{ -6,  6},{ -5,  7},{ -6,  6},{ -7,  8},{ -5,  7},{ -2,  5}
 };
 
-static const SDL_FPoint pick[] = {
-	{ 1,-3},{ 4, 0},{ 1,-3},{-4, 2},{-6, 4},{-7, 6},{-7, 8},{-5, 8},{-3, 7},
-	{-1, 5},{ 4, 0},{ 5, 1},{ 6, 0},{ 6,-1},{ 2,-5},{ 6,-1},{ 8,-3},{ 9,-4},
-	{ 9,-6},{ 8,-7},{ 7,-8},{ 5,-8},{ 4,-7},{ 2,-5},{ 1,-5},{ 0,-4}
+static const SDL_FPoint vline[] = {
+	{ -6,  6},{ -6,  7},{ -5,  7},{  6, -4},{  6, -5},{  5, -5}
+};
+
+static const SDL_FPoint vrect[] = {
+	{ -7, -4},{ -7,  6},{  7,  6},{  7, -4}
+};
+
+static const SDL_FPoint vellipse[] = {
+	{  5, -4},{  7, -1},{  7,  3},{  5,  6},{  2,  8},{ -2,  8},{ -5,  6},{ -7,  3},{ -7, -1},
+	{ -5, -4},{ -2, -6},{  2, -6}
+};
+
+static const SDL_FPoint veraser[] = {
+	{ -8,  3},{  0, -3},{  8, -3},{  0,  3},{ -8,  3},{ -8,  6},{  0,  6},{  8,  0},{  8, -3},
+	{  0,  3}
+};
+
+static const SDL_FPoint vbucket[] = {
+	{  0, -6},{  1, -4},{  3, -3},{ -4,  4},{  3, -3},{  6,  0},{ -1,  7},{  6,  0},{  7,  1},
+	{  0,  8},{ -2,  6},{ -4,  4},{ -5,  2},{ -7,  1},{ -7,  9},{ -8,  8},{ -9,  6},{ -9,  1},
+	{ -8, -1},{ -6, -2},{ -4, -2},{ -7,  1},{ -4, -2}
+};
+
+static const SDL_FPoint vspray[] = {
+	{ -2,  2},{  2, -2},{ -2,  2},{  3,  7},{  7,  3},{  2, -2},{ -1, -2},{ -2, -3},{ -3, -2},
+	{ -7, -7},{ -7,  3},{ -3, -2},{ -2, -1},{ -1, -2},{ -2, -1}
+};
+
+static const SDL_FPoint vchange[] = {
+	{ -6,  7},{  1,  7},{  6,  7},{  6, -5},{  1, -5},{  6, -5},{  6,  7},{  1,  7},{  1,  3},
+	{ -1,  3},{ -1,  5},{ -5,  1},{ -1, -3},{ -1, -1},{  1, -1},{  1, -5},{ -6, -5}
+};
+
+static const SDL_FPoint vpick[] = {
+	{  1, -3},{  4,  0},{  1, -3},{ -4,  2},{ -6,  4},{ -7,  6},{ -7,  8},{ -5,  8},{ -3,  7},
+	{ -1,  5},{  4,  0},{  5,  1},{  6,  0},{  6, -1},{  2, -5},{  6, -1},{  8, -3},{  9, -4},
+	{  9, -6},{  8, -7},{  7, -8},{  5, -8},{  4, -7},{  2, -5},{  1, -5},{  0, -4}
 };
 
 typedef struct { const SDL_FPoint *pt; int lot; } SHAPE;
 
+/* The order is the TOOL order, so a tool indexes its own glyph with no table between. */
 static const SHAPE shapes[GLYPH_LOT] = {
-	{ pencil, (int)SDL_arraysize(pencil) },
-	{ pick,   (int)SDL_arraysize(pick)   },
+	{ vpencil,  (int)SDL_arraysize(vpencil)  },
+	{ vline,    (int)SDL_arraysize(vline)    },
+	{ vrect,    (int)SDL_arraysize(vrect)    },
+	{ vellipse, (int)SDL_arraysize(vellipse) },
+	{ veraser,  (int)SDL_arraysize(veraser)  },
+	{ vbucket,  (int)SDL_arraysize(vbucket)  },
+	{ vspray,   (int)SDL_arraysize(vspray)   },
+	{ vchange,  (int)SDL_arraysize(vchange)  },
+	{ vpick,    (int)SDL_arraysize(vpick)    },
 };
 
 /* One more than the longest glyph, because the path is closed by repeating its first point.

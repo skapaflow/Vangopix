@@ -23,8 +23,17 @@
  * whatever is underneath. The first Vangopix does exactly this in draw_wireframe_entity.
  */
 
+/* IN TOOL ORDER, so a tool is its own glyph index and there is no table in between. Every
+ * shape is the first Vangopix's, vertex for vertex, from its src/gui/gui_main_tool.c. */
 typedef enum {
 	GLYPH_PENCIL = 0,
+	GLYPH_LINE,
+	GLYPH_RECT,
+	GLYPH_ELLIPSE,
+	GLYPH_ERASER,
+	GLYPH_BUCKET,
+	GLYPH_SPRAY,
+	GLYPH_CHANGE,
 	GLYPH_PICK,
 	GLYPH_LOT
 } GLYPH;

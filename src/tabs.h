@@ -77,12 +77,17 @@ extern VNG_TAB *vng_tab;    /* the one on screen */
  *          asks before it blends, so it never blends onto its own output.
  *   put    writes one pixel into the preview and marks it. The colour is final; the
  *          tool has already decided what blending means for it.
+ *   reset  throws the preview away WITHOUT closing the step, which is what a shape tool
+ *          does on every motion: a line being dragged is redrawn from its anchor each
+ *          time, not accumulated. The undo step stays open across it, so the whole drag
+ *          is still one undo.
  *   close  merges every marked pixel into the document, records every one of them, and
  *          leaves the preview empty for the next stroke.
  */
 extern bool vng_tab_stroke_open  (VNG_TAB *t);
 extern bool vng_tab_touched      (VNG_TAB *t, int x, int y);
 extern void vng_tab_put          (VNG_TAB *t, int x, int y, Uint32 argb);
+extern void vng_tab_stroke_reset (VNG_TAB *t);
 extern void vng_tab_stroke_close (VNG_TAB *t);
 
 extern VNG_TAB *vng_tab_new   (int w, int h);
