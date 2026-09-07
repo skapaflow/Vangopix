@@ -1,4 +1,5 @@
 #include "view.h"
+#include "keys.h"
 
 /* The desk around the paper when the sheet is framed: without it the white touches the
  * window edge and the eye loses where the document ends. It applies to view_reset only
@@ -136,8 +137,9 @@ static bool pan_button (const SDL_Event *e)
 	 * even though the middle button already pans: a trackpad has no middle button, and
 	 * this program is meant to build on three platforms. */
 	if (e->button.button == SDL_BUTTON_LEFT) {
-		const bool *keys = SDL_GetKeyboardState(NULL);
-		return keys && keys[SDL_SCANCODE_SPACE];
+		/* Through keys_held and not SDL_GetKeyboardState: while a text field owns the
+		 * keyboard, a space typed into it is a space, not a pan. */
+		return keys_held(SDL_SCANCODE_SPACE);
 	}
 	return false;
 }

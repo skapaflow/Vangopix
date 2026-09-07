@@ -13,9 +13,16 @@
  * the code editor it is modelled on. A docked panel is exactly the permanent chrome this
  * program exists without, and the sidebar is summoned and dismissed like everything else
  * here. Making it push instead would be a change to one rectangle.
+ *
+ * It slides in and out rather than appearing: a panel that covers a third of the window
+ * between two frames leaves nothing on screen to say where it came from.
  */
 
 extern void sidebar_toggle  (void);
+
+/* Where the panel is HEADED, not where it is - true from the moment it starts sliding
+ * in. What asks is deciding whether to summon it, and one already on its way must not
+ * be toggled straight back out. */
 extern bool sidebar_visible (void);
 
 /* Returns true when the sidebar consumed the event. */

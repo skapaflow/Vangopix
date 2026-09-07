@@ -1,4 +1,5 @@
 #include "tabbar.h"
+#include "file.h"
 #include "tabs.h"
 
 #define BAR_H     26.0f
@@ -26,6 +27,7 @@ static VNG_TAB *close_armed = NULL;
 
 void tabbar_toggle  (void) { visible = !visible; }
 bool tabbar_visible (void) { return visible; }
+float tabbar_height (void) { return visible ? BAR_H : 0.0f; }
 
 static float tab_w (void)
 {
@@ -150,7 +152,9 @@ bool tabbar_event (const SDL_Event *e)
 			bool on_close = false;
 			VNG_TAB *t = tab_at(e->button.x, e->button.y, NULL, &on_close);
 			if (t == close_armed && on_close)
-				vng_tab_close(close_armed);
+				/* Through file_close_tab and not vng_tab_close: the question about
+				 * unsaved work is asked in one place, whichever way the tab is shut. */
+				file_close_tab(close_armed);
 			close_armed = NULL;
 		}
 

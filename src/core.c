@@ -6,6 +6,9 @@
 #include "resize.h"
 #include "sidebar.h"
 #include "project.h"
+#include "keys.h"
+#include "prompt.h"
+#include "file.h"
 
 /*
  * The desk: a grey checkerboard, the size and the two greys taken from what the first
@@ -71,18 +74,56 @@ void vangopix_core_free (void)
  * not asked for. F1 toggles it. */
 static bool overlay = false;
 
-/* CTRL+ALT tapped together, with nothing else pressed in between, toggles the sidebar.
+/*
+ * THE TWO PANELS ARE ONE KEY EACH, AND BOTH ARE BARE.
  *
- * A shortcut made only of modifiers cannot be recognised on the way DOWN - at that
- * moment it is indistinguishable from the start of CTRL+ALT+something. So it is
- * recognised on the way up: arm when both are held, disarm the moment any other key or
- * any mouse button is used, and fire when the first of the two is released while still
- * armed. */
-static bool chord = false;
+ * TAB raises the project sidebar and ESC raises the tab bar. TAB went to the sidebar
+ * because that is the panel a hand reaches for while working - it is the file list, and
+ * it is opened and closed all day.
+ *
+ * It replaces a CTRL+ALT chord, and why that had to go is worth keeping: a shortcut made
+ * only of modifiers cannot be recognised on the way DOWN, because while CTRL+ALT are
+ * going down they are indistinguishable from the start of CTRL+ALT+something. So it
+ * armed when both were held, disarmed on any other key or any mouse button, and fired
+ * when the first of the two came back up while still armed. Three states and a disarm
+ * list, for what a bare key does in one line.
+ *
+ * ESC took the tab bar because it is the key already on the way to the top left, and
+ * because nothing here cancels: this program has no modal state to escape from, so ESC
+ * was a key spent on nothing.
+ *
+ * CTRL+TAB still walks between documents. One key, two jobs, told apart by the modifier.
+ */
 
-static bool is_mod_key (SDL_Keycode k)
+/*
+ * CTRL+N asks for a size instead of always making 64x64. It is the first thing in the
+ * program that needs the keyboard to belong to something other than the shortcuts, which
+ * is what keys.c is for.
+ */
+static void new_sheet (const char *text)
 {
-	return k == SDLK_LCTRL || k == SDLK_RCTRL || k == SDLK_LALT || k == SDLK_RALT;
+	int w = 0, h = 0;
+
+	/* Whitespace in the format skips any, and the suppressed scanset takes the
+	 * separator, so "64x64", "64 x 64", "64X64" and "64*64" all read. */
+	int n = SDL_sscanf(text, "%d %*[xX*] %d", &w, &h);
+
+	if (n == 1) h = w;    /* one number is a square, which is what one number means */
+	else if (n != 2) return;
+
+	/* Nothing is said about a refusal on purpose: the answer is on screen, so a person
+	 * who typed 0 sees no new tab and types again. An error box would be a second
+	 * window to dismiss for a mistake that costs nothing. */
+	if (w < 1 || h < 1 || w > VNG_MAX_SIDE || h > VNG_MAX_SIDE) return;
+
+	vng_tab_new(w, h);
+}
+
+static void new_sheet_ask (void)
+{
+	/* No font, no field - and then CTRL+N is what it always was rather than nothing. */
+	if (!prompt_open("new sheet:  width x height", "64x64", new_sheet))
+		vng_tab_new(VNG_NEW_W, VNG_NEW_H);
 }
 
 void vangopix_input (void)
@@ -94,9 +135,26 @@ void vangopix_input (void)
 		/* The bar gets first refusal while it is up. It floats OVER the sheet, so
 		 * without this a click meant for a tab would also land on the drawing
 		 * underneath - and once tools exist, that is a stray pixel every time. */
-		/* Any mouse button disarms the chord: CTRL+ALT with a click is a click. */
-		if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
-			chord = false;
+		/* RUNG 0, AND IT IS NOT PART OF THE LAYER CHAIN BELOW.
+		 *
+		 * The layers under this line are ordered by what is on top of the screen,
+		 * because a click has a position and the thing drawn over another one has to
+		 * answer for it first. A key has no position: nothing about TAB says whether it
+		 * belongs to the sidebar or to a name being typed. So the keyboard is routed by
+		 * OWNERSHIP instead, and an owner beats every layer - including view.c, whose
+		 * space-pan would otherwise fire on a space typed into a field.
+		 *
+		 * Only keyboard events are offered here; everything else falls straight
+		 * through, which is what leaves the mouse untouched by a field being open. */
+		if (keys_event(&e))
+			continue;
+
+		/* Also outside the layer chain, and for a related reason: this one does not come
+		 * from a person at all. It is the file dialog's answer, pushed from whatever
+		 * thread the OS ran it on, and it belongs to whoever asked - not to whatever
+		 * happens to be on top of the screen now. */
+		if (file_event(&e))
+			continue;
 
 		if (tabbar_event(&e))
 			continue;
@@ -121,7 +179,11 @@ void vangopix_input (void)
 		switch (e.type) {
 
 		case SDL_EVENT_QUIT:
-			vng_loop = false;
+			/* The window's X and ALT+F4 arrive here, and neither is a keyboard event -
+			 * so they still work while a field owns the keyboard, which is what keeps a
+			 * modal from being a way to trap somebody in the program. */
+			if (file_confirm_quit())
+				vng_loop = false;
 			break;
 
 		/* Dropping a file opens it in a new tab - the gesture that lets Vangopix act
@@ -142,41 +204,37 @@ void vangopix_input (void)
 			break;
 		}
 
-		case SDL_EVENT_KEY_UP:
-			if (is_mod_key(e.key.key) && chord) {
-				chord = false;
-				sidebar_toggle();
-			}
-			break;
-
 		case SDL_EVENT_KEY_DOWN:
 			if (e.key.repeat) break;
-
-			if (is_mod_key(e.key.key)) {
-				SDL_Keymod m = SDL_GetModState();
-				if ((m & SDL_KMOD_CTRL) && (m & SDL_KMOD_ALT))
-					chord = true;
-				break;
-			}
-			chord = false;   /* the modifiers are being used for something else */
 
 			if (e.key.key == SDLK_F1) {
 				overlay = !overlay;
 				break;
 			}
 
-			/* Bare TAB shows and hides the bar; CTRL+TAB below still walks between
-			 * documents. One key, two jobs, told apart by the modifier - and the
-			 * word is the same in both languages. */
-			if (e.key.key == SDLK_TAB && !(e.key.mod & SDL_KMOD_CTRL)) {
+			if (e.key.key == SDLK_ESCAPE) {
 				tabbar_toggle();
+				break;
+			}
+
+			/* Bare TAB raises the sidebar; CTRL+TAB below still walks the documents. */
+			if (e.key.key == SDLK_TAB && !(e.key.mod & SDL_KMOD_CTRL)) {
+				sidebar_toggle();
 				break;
 			}
 
 			if (e.key.mod & SDL_KMOD_CTRL) {
 				switch (e.key.key) {
-				case SDLK_N: vng_tab_new(VNG_NEW_W, VNG_NEW_H); break;
-				case SDLK_W: vng_tab_close(vng_tab);            break;
+				case SDLK_N: new_sheet_ask();                   break;
+				case SDLK_W: file_close_tab(vng_tab);           break;
+				case SDLK_O: file_open_ask();                   break;
+
+				/* CTRL+S writes, CTRL+SHIFT+S always asks where. The standard pair,
+				 * and the ask is the system's own dialog - see file.c. */
+				case SDLK_S:
+					if (e.key.mod & SDL_KMOD_SHIFT) file_save_as(vng_tab);
+					else                            file_save(vng_tab);
+					break;
 				/* CTRL+TAB walks forward, with SHIFT it walks back. Not the arrow
 				 * keys: those belong to drawing, and a key has one owner. */
 				case SDLK_TAB:
@@ -238,8 +296,29 @@ static void draw_overlay (VNG_TAB *t, float zoom)
 	           vng_tab_index(t), vng_tab_count());
 }
 
+/* The frame clock. It lives here because the frame does, and it is handed to the rest of
+ * the program as vng_dt so that nothing else has to start a clock of its own.
+ *
+ * The first frame reports zero rather than the whole time init took, and any frame longer
+ * than a tenth of a second is clamped: dragging or resizing the window blocks this loop
+ * on Windows for as long as the hand holds it, and an animation fed that gap would jump
+ * to its end instead of resuming. */
+#define DT_MAX 0.1f
+
+static void frame_clock (void)
+{
+	static Uint64 last = 0;
+
+	Uint64 now = SDL_GetTicksNS();
+	vng_dt = last ? (float)((double)(now - last) / 1e9) : 0.0f;
+	last   = now;
+
+	if (vng_dt > DT_MAX) vng_dt = DT_MAX;
+}
+
 void vangopix_core (void)
 {
+	frame_clock();
 	SDL_GetWindowSize(vng_win, &vng_win_w, &vng_win_h);
 
 	SDL_SetRenderDrawColor(vng_ren, 0x25, 0x25, 0x25, 0xFF);
@@ -252,8 +331,13 @@ void vangopix_core (void)
 		resize_draw(t);
 		if (overlay) draw_overlay(t, t->zoom);
 		sidebar_draw();
-		tabbar_draw();   /* last, so it floats over the sheet instead of under it */
+		tabbar_draw();   /* last of the layers, so it floats over the sheet */
 	}
+
+	/* OUTSIDE the block: the field holds the keyboard, and a keyboard captured with no
+	 * caret on screen is a program that has stopped answering. It does not depend on
+	 * there being a document, and it draws over everything that does. */
+	prompt_draw();
 
 	SDL_RenderPresent(vng_ren);
 }

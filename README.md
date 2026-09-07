@@ -14,7 +14,7 @@ middle for drawing and surrounds it with tools; Vangopix reserves nothing.
 ## Status
 
 Early, and honest about it: **there is no drawing yet.** What works is everything an
-image gets before a brush touches it — opening, viewing, framing and sizing.
+image gets before a brush touches it — opening, viewing, framing, sizing and saving.
 
 | | |
 | --- | --- |
@@ -23,11 +23,13 @@ image gets before a brush touches it — opening, viewing, framing and sizing.
 | formats | anything SDL3_image reads: png, webp, avif, tiff, gif, jpg, tga, qoi, ico, pcx, svg, xcf |
 | camera | stepped zoom at the cursor, pan, fit and 1:1 |
 | canvas | resize by the corner grips, with an optional 8 pixel grid |
+| files | open and save through the system's own dialogs; the format follows the extension |
+| keyboard | one owner at a time, so a field being open silences every shortcut |
 | transparency | checkerboard behind the sheet, black frame around it |
 | text | one atlas, packed by stb_truetype |
 
-Next is the pencil, and then the things a pencil needs: undo, a palette, and a colour to
-draw with.
+Next is what a pencil needs before it can exist: the three buffers a stroke is drawn
+over, and per-pixel undo. Then the pencil, a palette, and a colour to draw with.
 
 ## Building
 
@@ -78,28 +80,36 @@ drawing near the border.
 
 | | |
 | --- | --- |
-| `CTRL+N` | new sheet in a new tab |
-| `CTRL+W` | close the tab |
+| `CTRL+N` | new sheet — asks for `w x h` |
+| `CTRL+O` | open one or more files |
+| `CTRL+S` | save — asks where, the first time |
+| `CTRL+SHIFT+S` | save as |
+| `CTRL+W` | close the tab — asks if that would lose work |
 | `CTRL+TAB` / `CTRL+SHIFT+TAB` | walk through the tabs |
-| `TAB` | show and hide the tab bar |
+| `ESC` | show and hide the tab bar |
+| `TAB` | show and hide the project sidebar |
 | `F1` | toggle the document overlay |
 | wheel | zoom in steps, centred on the cursor |
 | middle drag, or `SPACE` + left drag | pan |
 | `CTRL+0` / `CTRL+1` | fit the sheet / go to 1:1 |
 | drag a corner grip | resize the canvas |
 | `SHIFT` while dragging a grip | put the corner on the 8 pixel grid |
-| `CTRL+ALT` | show and hide the project sidebar |
 | drag a file in | open it in a new tab |
 | drag a folder in | add it as a project |
+| `ENTER` / `ESC` in a field | accept / cancel |
 
 Files named on the command line each open in their own tab, so Vangopix can be
 associated with an image extension and handed a whole selection at once.
 
 ### The project sidebar
 
-Drop a folder on the window and it becomes a project. `CTRL+ALT` — tapped together,
-nothing else in between — raises and hides the panel. Click a folder to expand it, click
-an image to open it in a tab, click a root's `x` to forget it.
+Drop a folder on the window and it becomes a project. `TAB` raises and hides the panel,
+which slides in from the left rather than appearing: a panel that covers a third of the
+window between two frames leaves nothing on screen to say where it came from. Click a
+folder to expand it, click an image to open it in a tab, click a root's `x` to forget it.
+
+While the tab bar is up the sidebar starts below it. Both float over the sheet and both
+claim the same corner, and the bar is the one that spans the whole width.
 
 A name too long for the panel is cut and its last column becomes a `~`, the same mark
 VagrantUI uses when content overruns its width. The room a name gets accounts for its
@@ -115,9 +125,40 @@ per line, `#` for comments. Paths that no longer exist are dropped on load.
 
 ### The tab bar
 
-`TAB` raises it and `TAB` puts it away. Click a tab to select it, drag it sideways to
+`ESC` raises it and `ESC` puts it away. Click a tab to select it, drag it sideways to
 reorder, click its `x` to close it, click `+` for a new sheet. It floats over the sheet
 rather than pushing it down, so it takes no space at all when it is down.
+
+### Opening and saving
+
+`CTRL+O` opens files — several at once, if you pick several. It is the fourth way in and
+the only one that does not need a file manager already open: the others are dropping a
+file on the window, naming it on the command line, and clicking it in the project sidebar.
+
+`CTRL+S` writes, `CTRL+SHIFT+S` always asks where. There is no menu bar and there is no
+file browser drawn in this window: **where to save is asked with the system's own dialog**,
+which arrives already knowing how to browse a disk, confirm an overwrite and speak your
+language. The format comes from the extension you type — png, jpg, webp, avif, bmp, tga.
+
+Closing a document with unsaved work asks first, and so does quitting. Both are the
+system's message box, so they are drawn outside the window and cost no pixels here.
+
+### Who has the keyboard
+
+The mouse is routed by layer — whatever is drawn on top answers a click first, because a
+click has a position. A key has none: nothing about `TAB` says whether it belongs to the
+sidebar or to a name being typed. So the keyboard has an **owner**, at most one at a time,
+and while something owns it the shortcuts are silent. `CTRL+N` opens the first field in
+the program: type `128x96`, or one number for a square, `ENTER` to accept and `ESC` to
+cancel.
+
+That gate covers more than the shortcuts. `SPACE`+left drag pans and `SHIFT` snaps a grip
+to the grid, and both of those read the keyboard *live* rather than waiting for an event —
+so both go through the same owner and go quiet while a field is open. A space typed into a
+name is a space, not a pan.
+
+The mouse is deliberately left alone: clicking a tab while a field is open still switches
+tabs, and the field keeps the keyboard.
 
 ### The corner grips
 
@@ -137,6 +178,9 @@ src/
   main.c        the pipeline, and nothing else
   vangopix.c/.h the program: globals, window, renderer, font, argv
   core.c/.h     the frame: input, draw, present
+  keys.c/.h     who has the keyboard
+  prompt.c/.h   one line of text, asked for and gone
+  file.c/.h     save, and the two system dialogs that go with it
   tabs.c/.h     the tabs, which ARE the documents
   tabbar.c/.h   the tab bar: the only file that draws a tab
   project.c/.h  the project folders and projects.vngproj
@@ -149,6 +193,10 @@ src/
 The pairs are deliberate: `tabs`/`tabbar` and `project`/`sidebar` each split a model
 from the pixels that draw it. The model knows nothing about the screen, and the panel
 knows nothing about what it is listing.
+
+`keys`/`prompt` is the same split one more time: `keys` says who the keyboard belongs to,
+`prompt` is the first thing to ask for it. `file` is the only module that writes to disk,
+and the only one that talks to a dialog the OS draws.
 
 One file per responsibility, never per size. `CLAUDE.md` carries the decisions behind
 these files and the reasoning that produced them.

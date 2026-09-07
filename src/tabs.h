@@ -16,6 +16,7 @@
  */
 typedef struct _vng_tab_ {
 	/* identity */
+	Uint32  id;                /* monotonic; see vng_tab_by_id                   */
 	char   *path;              /* path on disk; NULL until the document is saved */
 	char    name[64];          /* what the window title shows                    */
 	bool    dirty;             /* modified since the last save                   */
@@ -49,6 +50,22 @@ extern void     vng_tab_move  (VNG_TAB *t, int index);
    all four corners. Uncovered area comes out white. Returns false and changes nothing
    if the allocation fails. */
 extern bool     vng_tab_resize (VNG_TAB *t, int w, int h, int dx, int dy);
+/*
+ * The tab with that id, or NULL if it has been closed.
+ *
+ * THE POINTER IS STILL THE IDENTITY - everywhere inside one frame, on one thread. The
+ * id exists for the one thing a pointer cannot do: cross a thread and a frame boundary
+ * and still be checkable. SDL's file dialog answers on whatever thread the OS gives it,
+ * possibly frames later, and by then the tab that asked may have been closed and its
+ * memory handed to a new one at the same address. Comparing a pointer against the list
+ * would not catch that; an id that is never reused does.
+ */
+extern VNG_TAB *vng_tab_by_id (Uint32 id);
+
+/* Points the tab at a file: takes a copy of the path and renames the tab from it. What
+   save-as calls once the person has chosen where the document lives. */
+extern void     vng_tab_set_path (VNG_TAB *t, const char *path);
+
 extern int      vng_tab_count (void);
 extern int      vng_tab_index (VNG_TAB *t);
 extern void     vng_tab_title (void);

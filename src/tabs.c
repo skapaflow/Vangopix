@@ -16,6 +16,10 @@ static VNG_TAB *tail = NULL;
  */
 static unsigned untitled_seq = 1;
 
+/* Never reused, never wrapped in practice: one per document opened, so a person would
+ * have to open four billion of them in one session to see it come round. */
+static Uint32 id_seq = 1;
+
 /* The name shown in the title: the file only, no directories.
  *
  * THE EXTENSION STAYS. The previous Vangopix stripped it (cutpath then cutpoint),
@@ -65,6 +69,7 @@ static VNG_TAB *tab_alloc (int w, int h)
 	VNG_TAB *t = (VNG_TAB *) SDL_calloc(1, sizeof *t);
 	if (!t) return NULL;
 
+	t->id = id_seq++;
 	t->w = w;
 	t->h = h;
 	t->pixels = (Uint32 *) SDL_malloc((size_t)w * h * sizeof(Uint32));
@@ -275,6 +280,27 @@ bool vng_tab_resize (VNG_TAB *t, int w, int h, int dx, int dy)
 	t->dirty = true;
 	vng_tab_title();
 	return true;
+}
+
+VNG_TAB *vng_tab_by_id (Uint32 id)
+{
+	for (VNG_TAB *p = vng_tabs; p; p = p->next)
+		if (p->id == id) return p;
+	return NULL;
+}
+
+void vng_tab_set_path (VNG_TAB *t, const char *path)
+{
+	if (!t || !path) return;
+
+	/* Copied BEFORE the old one is freed: save-as can hand back the path the tab
+	 * already has, and freeing it first would name the tab from freed memory. */
+	char *copy = SDL_strdup(path);
+	if (!copy) return;
+
+	SDL_free(t->path);
+	t->path = copy;
+	tab_set_name(t, copy);
 }
 
 int vng_tab_count (void)

@@ -1,5 +1,6 @@
 #include "sidebar.h"
 #include "project.h"
+#include "tabbar.h"
 #include "tabs.h"
 
 #define BAR_W     260.0f
@@ -13,6 +14,51 @@
 static bool  visible = false;
 static float scroll  = 0.0f;
 
+/*
+ * How far in the panel is: 0 fully out to the left, 1 fully in. `visible` is only where
+ * it is HEADED - every position on screen comes from `anim`, so a click during the slide
+ * lands on the panel where the eye sees it and not where it will end up.
+ *
+ * The step is an exponential lerp rather than a fixed increment per frame, because the
+ * loop is vsynced and a 144Hz monitor would otherwise open the panel twice as fast as a
+ * 60Hz one. Feeding the elapsed time through 1 - e^(-RATE*dt) makes the curve a function
+ * of seconds, so the panel takes the same time to arrive on any machine.
+ *
+ * A lerp only ever approaches its target, so the last half pixel is snapped: without it
+ * `anim` never reaches 0, the panel keeps a sliver on screen for ever, and the sidebar
+ * would go on eating clicks along the left edge after it was dismissed.
+ */
+#define ANIM_RATE  16.0f   /* 90% of the way in about 150ms, which is where the eye calls
+                            * it arrived; below 10 the panel drags, above 25 the slide is
+                            * over before it reads as motion at all */
+#define ANIM_SNAP   0.002f /* half a pixel of 260 - past this nothing more is visible */
+
+static float anim = 0.0f;
+
+static void anim_step (void)
+{
+	float target = visible ? 1.0f : 0.0f;
+
+	anim += (target - anim) * (1.0f - SDL_expf(-ANIM_RATE * vng_dt));
+	if (SDL_fabsf(target - anim) < ANIM_SNAP) anim = target;
+}
+
+/* Where the left edge of the panel is right now: -BAR_W when out, 0 when in. Every
+ * coordinate in this file, drawn or tested, is measured from it. */
+static float slide (void) { return (anim - 1.0f) * BAR_W; }
+
+/*
+ * Where the top of the panel is: under the tab bar while the bar is up, at the top of
+ * the window while it is down. Both float over the sheet and both claim the same corner,
+ * so one of them has to give way, and the bar is the one that spans the whole width.
+ *
+ * It is NOT lerped, deliberately. The bar itself appears and disappears in a single
+ * frame; easing the sidebar into place while the bar snaps would open a gap of
+ * checkerboard between the two for the length of the ease. They move together because
+ * they are one edge.
+ */
+static float top_y (void) { return tabbar_height(); }
+
 typedef struct { VNG_NODE *n; int depth; } ROW;
 
 static ROW rows[MAX_ROWS];
@@ -22,7 +68,18 @@ static int row_lot = 0;
  * only fires if the button comes back up over the same [x]. */
 static VNG_NODE *close_armed = NULL;
 
-void sidebar_toggle  (void) { visible = !visible; }
+void sidebar_toggle (void)
+{
+	visible = !visible;
+	/* A press that was armed on an [x] is dropped along with the panel: the button will
+	 * come up somewhere the sidebar is no longer listening, and an arming that outlives
+	 * its panel fires on the next release, in the next session of it. */
+	close_armed = NULL;
+}
+
+/* Reports where the panel is HEADED, not where it is. What asks - a folder dropped on a
+ * hidden sidebar - wants to know whether to summon it, and a panel already on its way in
+ * must not be toggled back out. */
 bool sidebar_visible (void) { return visible; }
 
 static float row_h (void)
@@ -91,7 +148,7 @@ static float content_h (void) { return row_lot * row_h(); }
 
 static void scroll_clamp (void)
 {
-	float over = content_h() - (vng_win_h - PAD * 2.0f);
+	float over = content_h() - (vng_win_h - top_y() - PAD * 2.0f);
 	if (over < 0.0f) over = 0.0f;
 	if (scroll > over)  scroll = over;
 	if (scroll < 0.0f)  scroll = 0.0f;
@@ -101,18 +158,23 @@ static int row_at (float x, float y)
 {
 	if (x < 0.0f || x >= BAR_W) return -1;
 
-	float local = y - PAD + scroll;
+	float local = y - top_y() - PAD + scroll;
 	if (local < 0.0f) return -1;
 
 	int i = (int)(local / row_h());
 	return (i >= 0 && i < row_lot) ? i : -1;
 }
 
-static float row_y (int i) { return PAD + i * row_h() - scroll; }
+static float row_y (int i) { return top_y() + PAD + i * row_h() - scroll; }
 
 bool sidebar_event (const SDL_Event *e)
 {
-	if (!visible) return false;
+	/* Not `visible`: while the panel is sliding out it still covers pixels, and a click
+	 * on what a person can plainly see must not fall through to the sheet. At anim 0 the
+	 * panel is off screen entirely and every test below misses on its own. */
+	if (anim <= 0.0f) return false;
+
+	float ox = slide();
 
 	rows_build();
 
@@ -122,7 +184,7 @@ bool sidebar_event (const SDL_Event *e)
 		/* Only when the pointer is over the panel. Everywhere else the wheel is the
 		 * camera's, and stealing it would make zooming stop working near the left edge
 		 * of the window for no reason a person could see. */
-		if (e->wheel.mouse_x >= BAR_W) return false;
+		if (e->wheel.mouse_x - ox >= BAR_W) return false;
 
 		scroll -= e->wheel.integer_y * row_h() * 3.0f;
 		scroll_clamp();
@@ -130,7 +192,7 @@ bool sidebar_event (const SDL_Event *e)
 	}
 
 	case SDL_EVENT_MOUSE_BUTTON_DOWN: {
-		float x = e->button.x, y = e->button.y;
+		float x = e->button.x - ox, y = e->button.y;
 		if (x >= BAR_W) return false;
 		if (e->button.button != SDL_BUTTON_LEFT) return true;
 
@@ -154,9 +216,9 @@ bool sidebar_event (const SDL_Event *e)
 	case SDL_EVENT_MOUSE_BUTTON_UP: {
 		if (!close_armed) return false;
 
-		int i = row_at(e->button.x, e->button.y);
+		int i = row_at(e->button.x - ox, e->button.y);
 		if (i >= 0 && rows[i].n == close_armed && rows[i].depth == 0 &&
-		    e->button.x >= BAR_W - CLOSE_W - PAD)
+		    e->button.x - ox >= BAR_W - CLOSE_W - PAD)
 			project_remove(close_armed);
 
 		close_armed = NULL;
@@ -174,30 +236,38 @@ bool sidebar_event (const SDL_Event *e)
 
 void sidebar_draw (void)
 {
-	if (!visible) return;
+	/* The clock runs whether the panel shows or not - this is the only place per frame
+	 * that advances it, so an early return above it would freeze the slide half done. */
+	anim_step();
+	if (anim <= 0.0f) return;
+
+	float ox = slide();
 
 	rows_build();
 	scroll_clamp();
 
 	float mx, my;
 	SDL_GetMouseState(&mx, &my);
+	float rx = mx - ox;   /* the pointer, measured from the panel's own left edge */
 
 	SDL_SetRenderDrawBlendMode(vng_ren, SDL_BLENDMODE_BLEND);
 
-	SDL_FRect panel = { 0.0f, 0.0f, BAR_W, (float)vng_win_h };
+	float top = top_y();
+
+	SDL_FRect panel = { ox, top, BAR_W, vng_win_h - top };
 	SDL_SetRenderDrawColor(vng_ren, 0x14, 0x14, 0x14, 0xF0);
 	SDL_RenderFillRect(vng_ren, &panel);
 
 	/* A line down the right edge. The panel is translucent over a checkerboard, and
 	 * without it the two greys blur into each other exactly where the edge should be. */
-	SDL_FRect edge = { BAR_W - 1.0f, 0.0f, 1.0f, (float)vng_win_h };
+	SDL_FRect edge = { ox + BAR_W - 1.0f, top, 1.0f, vng_win_h - top };
 	SDL_SetRenderDrawColor(vng_ren, 0x30, 0x30, 0x30, 0xFF);
 	SDL_RenderFillRect(vng_ren, &edge);
 
 	if (!vng_text) return;
 
 	if (row_lot == 0) {
-		text_print(vng_text, PAD, PAD, 0x707070FF, "drop a folder here");
+		text_print(vng_text, ox + PAD, top + PAD, 0x707070FF, "drop a folder here");
 		return;
 	}
 
@@ -205,12 +275,14 @@ void sidebar_draw (void)
 
 	for (int i = 0; i < row_lot; i++) {
 		float y = row_y(i);
-		if (y + h < 0.0f) continue;
+		/* A row scrolled half under the bar is drawn whole and then painted over:
+		 * tabbar_draw runs after this, and its strip is opaque across the width. */
+		if (y + h < top) continue;
 		if (y > vng_win_h) break;
 
 		VNG_NODE *n   = rows[i].n;
 		float     ind = PAD + rows[i].depth * INDENT;
-		bool      hot = (mx < BAR_W && my >= y && my < y + h);
+		bool      hot = (rx >= 0.0f && rx < BAR_W && my >= y && my < y + h);
 
 		/* The file that is open right now is named in white. In a folder of thirty
 		 * sprites, finding which one is on screen is otherwise a matter of reading the
@@ -219,7 +291,7 @@ void sidebar_draw (void)
 		                SDL_strcmp(vng_tab->path, n->path) == 0);
 
 		if (hot || current) {
-			SDL_FRect r = { 0.0f, y, BAR_W - 1.0f, h };
+			SDL_FRect r = { ox, y, BAR_W - 1.0f, h };
 			SDL_SetRenderDrawColor(vng_ren, 0x2E, 0x2E, 0x2E, current ? 0xFF : 0x80);
 			SDL_RenderFillRect(vng_ren, &r);
 		}
@@ -235,17 +307,17 @@ void sidebar_draw (void)
 		text_fit(vng_text, label, sizeof label, n->name, room);
 
 		if (n->is_dir) {
-			text_print(vng_text, ind, y + 1.0f, 0x707070FF, n->open ? "v" : ">");
-			text_print(vng_text, name_x, y + 1.0f,
+			text_print(vng_text, ox + ind, y + 1.0f, 0x707070FF, n->open ? "v" : ">");
+			text_print(vng_text, ox + name_x, y + 1.0f,
 			           rows[i].depth == 0 ? 0xDCDCDCFF : 0xB4B4B4FF, "%s", label);
 		} else {
-			text_print(vng_text, name_x, y + 1.0f,
+			text_print(vng_text, ox + name_x, y + 1.0f,
 			           current ? 0xFFFFFFFF : 0x909090FF, "%s", label);
 		}
 
 		if (rows[i].depth == 0 && hot) {
-			bool over = mx >= BAR_W - CLOSE_W - PAD;
-			text_print(vng_text, BAR_W - CLOSE_W - PAD + 2.0f, y + 1.0f,
+			bool over = rx >= BAR_W - CLOSE_W - PAD;
+			text_print(vng_text, ox + BAR_W - CLOSE_W - PAD + 2.0f, y + 1.0f,
 			           over ? 0xFF6060FF : 0x707070FF, "x");
 		}
 	}

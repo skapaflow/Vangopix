@@ -1,4 +1,5 @@
 #include "resize.h"
+#include "keys.h"
 #include "view.h"
 
 #define GRIP      5.0f    /* the drawn square, in screen pixels */
@@ -124,7 +125,7 @@ bool resize_event (const SDL_Event *e, VNG_TAB *t)
 		 * rather than from the event, because a motion event carries no modifiers -
 		 * and reading it live means pressing or releasing SHIFT mid-drag takes effect
 		 * on the next movement instead of on the next click. */
-		if (SDL_GetModState() & SDL_KMOD_SHIFT) {
+		if (keys_mods() & SDL_KMOD_SHIFT) {
 			w.x = snap_to(w.x, SNAP);
 			w.y = snap_to(w.y, SNAP);
 		}
@@ -190,7 +191,7 @@ void resize_draw (VNG_TAB *t)
 		/* The readout says when the grid is on. The jumping outline already shows it,
 		 * but only once the hand has moved - a person who presses SHIFT and pauses
 		 * deserves to know it took. */
-		if (SDL_GetModState() & SDL_KMOD_SHIFT)
+		if (keys_mods() & SDL_KMOD_SHIFT)
 			text_print(vng_text, box.x, box.y + box.h + 4.0f, 0x4C9AFFFF,
 			           "%d x %d  [%d]", w, h, SNAP);
 		else

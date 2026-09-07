@@ -40,6 +40,8 @@ LFLAGS  = $(SDL_LIBS)
 #   main.c     the pipeline, and nothing else
 #   vangopix.c the program: globals, window, renderer, font, argv
 #   core.c     the frame: input, draw, present
+#   keys.c     who has the keyboard - one owner, and the gate on the polled state
+#   prompt.c   one line of text, asked for and gone
 #   tabs.c     the tabs, which ARE the documents
 #   tabbar.c   the tab bar: the only file that draws a tab
 #   view.c     the camera: stepped zoom at the cursor, and pan
@@ -50,8 +52,8 @@ LFLAGS  = $(SDL_LIBS)
 #
 # To come:
 #   tool.c     the tools: pencil, bucket, eyedropper
-#   io.c       open and save
-SRC = src/main.c src/vangopix.c src/core.c src/tabs.c src/tabbar.c src/view.c src/resize.c src/project.c src/sidebar.c src/text.c
+#   file.c     save, and the two system dialogs that go with it
+SRC = src/main.c src/vangopix.c src/core.c src/keys.c src/tabs.c src/tabbar.c src/view.c src/resize.c src/project.c src/sidebar.c src/prompt.c src/file.c src/text.c
 DEP = $(wildcard src/*.h)
 
 all: $(OUT) run

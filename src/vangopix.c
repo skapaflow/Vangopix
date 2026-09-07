@@ -2,6 +2,7 @@
 #include "tabs.h"
 #include "core.h"
 #include "project.h"
+#include "file.h"
 
 SDL_Window   *vng_win   = NULL;
 SDL_Renderer *vng_ren   = NULL;
@@ -9,6 +10,7 @@ TextSystem   *vng_text  = NULL;
 int           vng_win_w = VNG_WIN_W;
 int           vng_win_h = VNG_WIN_H;
 bool          vng_loop  = true;
+float         vng_dt    = 0.0f;
 
 /* Fonts are looked up beside the executable, never relative to the working directory:
  * a file manager, a desktop shortcut and a terminal each launch the program from a
@@ -71,6 +73,9 @@ bool vangopix_init (int argc, char **argv)
 	}
 	if (!vng_text)
 		SDL_Log("running without text: no font found beside the executable");
+
+	file_init();   /* not fatal: without it save-as cannot deliver its answer, and the
+	                * log says so - everything else in the program still works */
 
 	project_load();
 
