@@ -11,6 +11,7 @@
 #include "undo.h"
 #include "tool.h"
 #include "view.h"
+#include "file.h"
 
 /* Drives the tool the way core.c does: one synthetic event at the screen point that the
  * camera says a document pixel is under. */
@@ -178,6 +179,35 @@ int main (void)
 	e.button.x = off.x;
 	e.button.y = off.y;
 	ok("a press outside the sheet is not consumed", tool_event(&e, p) == false);
+
+	/* ---- what a save dialog's answer means ----
+	 *
+	 * Filter 0 is PNG and filter 1 is "jpg;jpeg" in file.c's list. -1 is a platform that
+	 * did not report which one was showing.
+	 */
+	{
+		char out[256];
+		#define EXT(path, filter) (file_with_extension(out, sizeof out, path, filter), out)
+
+		ok("a bare name takes the extension from the filter",
+		   SDL_strcmp(EXT("C:/art/dragon", 0), "C:/art/dragon.png") == 0);
+		ok("a jpeg filter writes the FIRST of jpg;jpeg",
+		   SDL_strcmp(EXT("C:/art/dragon", 1), "C:/art/dragon.jpg") == 0);
+		ok("what was typed wins over the dropdown",
+		   SDL_strcmp(EXT("C:/art/dragon.webp", 0), "C:/art/dragon.webp") == 0);
+		ok("no filter reported falls back to png",
+		   SDL_strcmp(EXT("C:/art/dragon", -1), "C:/art/dragon.png") == 0);
+		ok("a dot in a DIRECTORY is not an extension",
+		   SDL_strcmp(EXT("C:/my.sprites/dragon", 0), "C:/my.sprites/dragon.png") == 0);
+		ok("a version number is not an extension either",
+		   SDL_strcmp(EXT("C:/art/dragon v1.2", 0), "C:/art/dragon v1.2.png") == 0);
+		ok("a trailing dot does not become two",
+		   SDL_strcmp(EXT("C:/art/dragon.", 0), "C:/art/dragon.png") == 0);
+		ok("the All files entry has no opinion, so png",
+		   SDL_strcmp(EXT("C:/art/dragon", 6), "C:/art/dragon.png") == 0);
+
+		#undef EXT
+	}
 
 	vng_tabs_free();
 	SDL_DestroyRenderer(vng_ren);

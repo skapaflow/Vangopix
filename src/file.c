@@ -31,6 +31,7 @@ static Uint32 ev_open  = 0;   /* a file to be turned into a tab */
 typedef struct {
 	Uint32 tab_id;
 	bool   close_after;   /* the save was asked for by the close confirmation */
+	int    filter;        /* which entry of save_filters the person had chosen, or -1 */
 } SAVE_REQ;
 
 /* Must outlive the call: SDL_ShowSaveFileDialog says the filter list has to stay valid
@@ -113,9 +114,12 @@ static bool save_to (VNG_TAB *t, const char *path)
 /* Runs on WHATEVER THREAD THE OS CHOSE. Nothing here may touch this program's state. */
 static void SDLCALL on_chosen (void *userdata, const char * const *filelist, int filter)
 {
-	(void)filter;
-
 	SAVE_REQ *req = (SAVE_REQ *)userdata;
+
+	/* The one piece of the answer that is not the path: which filter was showing. It is
+	 * what turns a bare name into a format, and discarding it is what produced
+	 * "Couldn't determine file type" for a name the person had every right to type. */
+	if (req) req->filter = filter;
 
 	/* NULL is an error, a pointer to NULL is a cancel. Neither is worth a message box:
 	 * one the person just did on purpose, and the other SDL has already logged. */
@@ -136,6 +140,79 @@ static void SDLCALL on_chosen (void *userdata, const char * const *filelist, int
 	}
 }
 
+/*
+ * Does the FILE part of this path already name a format?
+ *
+ * Scanned from the end and stopped at the separator, because a dot is perfectly ordinary
+ * inside a DIRECTORY name: C:/my.sprites/dragon has one and still says nothing about a
+ * format.
+ *
+ * A suffix has to be at least two characters and all alphanumeric to count. That is not
+ * pedantry - "dragon v1.2" is a name people really type, and honouring ".2" as a format
+ * hands back the same error this whole function exists to prevent. Every format IMG_Save
+ * writes is three or four letters.
+ */
+static bool names_a_format (const char *path)
+{
+	const char *dot = NULL;
+	const char *p   = path + SDL_strlen(path);
+
+	while (p > path) {
+		p--;
+		if (*p == '/' || *p == '\\') break;
+		if (*p == '.') { dot = p; break; }
+	}
+	if (!dot) return false;
+
+	const char *ext = dot + 1;
+	size_t      n   = SDL_strlen(ext);
+	if (n < 2) return false;
+
+	for (size_t i = 0; i < n; i++)
+		if (!SDL_isalnum((unsigned char)ext[i])) return false;
+
+	return true;
+}
+
+/* The extension the chosen filter implies, or NULL when it has no opinion: "All files",
+ * or a platform that did not report which filter was picked. */
+static const char *filter_pattern (int filter)
+{
+	if (filter < 0 || filter >= (int)SDL_arraysize(save_filters)) return NULL;
+
+	const char *pat = save_filters[filter].pattern;
+	return (pat && pat[0] != '*') ? pat : NULL;
+}
+
+void file_with_extension (char *dst, size_t cap, const char *path, int filter)
+{
+	if (!dst || cap == 0) return;
+
+	SDL_strlcpy(dst, path ? path : "", cap);
+
+	/* What was TYPED wins. Somebody writing "sprite.webp" with PNG selected means webp:
+	 * the name is specific and the dropdown is merely whatever was left alone. */
+	if (names_a_format(dst)) return;
+
+	const char *pat = filter_pattern(filter);
+
+	/* Neither said anything. png is the fallback because it is what the dropdown shows
+	 * when the dialog opens, and because handing back an error for a name a person
+	 * clearly meant is the worse of the two answers. */
+	if (!pat) pat = "png";
+
+	/* Only up to the ';': a pattern lists what the dialog will SHOW ("jpg;jpeg") and the
+	 * first entry is the one to write. */
+	size_t k = 0;
+	while (pat[k] && pat[k] != ';') k++;
+
+	size_t n = SDL_strlen(dst);
+	if (n + 1 >= cap) return;
+
+	SDL_snprintf(dst + n, cap - n, "%s%.*s",
+	             (n > 0 && dst[n - 1] == '.') ? "" : ".", (int)k, pat);
+}
+
 void file_save_as (VNG_TAB *t)
 {
 	if (!t) return;
@@ -143,6 +220,7 @@ void file_save_as (VNG_TAB *t)
 	SAVE_REQ *req = (SAVE_REQ *) SDL_calloc(1, sizeof *req);
 	if (!req) return;
 	req->tab_id = t->id;
+	req->filter = -1;   /* calloc would say "the first filter", which is a claim */
 
 	/* Starts where the document already lives. NULL leaves the choice to the platform,
 	 * which is the right answer for a document that has never been anywhere. */
@@ -209,8 +287,20 @@ bool file_event (const SDL_Event *e)
 	 * still open. It may not be: the dialog was up, and a dialog is not a lock. */
 	VNG_TAB *t = req ? vng_tab_by_id(req->tab_id) : NULL;
 
-	if (t && path && save_to(t, path) && req->close_after)
-		vng_tab_close(t);   /* the question was already asked; the work is on disk now */
+	if (t && path) {
+		/* Sized from the path itself: a Windows path can be far longer than any buffer
+		 * worth putting on a stack, and truncating one silently would write to the
+		 * wrong file. */
+		size_t cap  = SDL_strlen(path) + 16;
+		char  *full = (char *) SDL_malloc(cap);
+
+		if (full) {
+			file_with_extension(full, cap, path, req->filter);
+			if (save_to(t, full) && req->close_after)
+				vng_tab_close(t);   /* the question was asked; the work is on disk */
+			SDL_free(full);
+		}
+	}
 
 	SDL_free(path);
 	SDL_free(req);
@@ -274,6 +364,7 @@ void file_close_tab (VNG_TAB *t)
 			if (!req) break;
 			req->tab_id      = t->id;
 			req->close_after = true;
+			req->filter      = -1;
 
 			SDL_ShowSaveFileDialog(on_chosen, req, vng_win, save_filters,
 			                       (int)SDL_arraysize(save_filters), NULL);

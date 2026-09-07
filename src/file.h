@@ -46,6 +46,24 @@ extern void file_save (VNG_TAB *t);
    answer arrives later, through file_event. */
 extern void file_save_as (VNG_TAB *t);
 
+/*
+ * WHAT FILE A SAVE DIALOG'S ANSWER ACTUALLY MEANS.
+ *
+ * A person who types a bare name with `*.png` showing in the dropdown has said png as
+ * plainly as anyone ever says it - and IMG_Save, which picks the format by suffix, would
+ * answer "Couldn't determine file type". The convention is the platform's own: the chosen
+ * filter supplies the extension when the name does not. Windows and macOS do it inside
+ * their dialogs when an app hands them a default extension, and SDL3 exposes no way to ask
+ * for that, so it is done here.
+ *
+ * `filter` is the index SDL reports in the dialog callback, or -1 when the platform does
+ * not say which one was picked.
+ *
+ * Exposed rather than kept private because it is a rule, not a detail - and a rule with
+ * three branches is worth pinning down in test/checks.c.
+ */
+extern void file_with_extension (char *dst, size_t cap, const char *path, int filter);
+
 /* Offered every event, and claims only the private type above. True when it was the
    dialog's answer and it has been dealt with. */
 extern bool file_event (const SDL_Event *e);

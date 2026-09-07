@@ -152,6 +152,10 @@ file browser drawn in this window: **where to save is asked with the system's ow
 which arrives already knowing how to browse a disk, confirm an overwrite and speak your
 language. The format comes from the extension you type — png, jpg, webp, avif, bmp, tga.
 
+Type a bare name and the **filter showing in the dropdown supplies the extension**, the way
+the platform's own dialogs do it. Type one and it wins over the dropdown: `sprite.webp` with
+PNG selected means webp. If neither says anything, it is png.
+
 Closing a document with unsaved work asks first, and so does quitting. Both are the
 system's message box, so they are drawn outside the window and cost no pixels here.
 
