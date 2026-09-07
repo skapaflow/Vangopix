@@ -1,6 +1,7 @@
 #include "tool.h"
 #include "view.h"
 #include "keys.h"
+#include "glyph.h"
 #include "tabbar.h"
 #include "sidebar.h"
 
@@ -27,6 +28,18 @@
 #define READ_OFF_X  14.0f
 #define READ_OFF_Y  16.0f
 #define READ_PAD     4.0f
+
+/*
+ * WHERE THE TOOL GLYPH HANGS, AND THE NUMBERS ARE THE FIRST VANGOPIX'S OWN:
+ * (mouse.x + 16, mouse.y - 16), from tool_show_icons in its src/tool/tool_misc.c.
+ *
+ * Up and to the right, because that is the quadrant a right-handed hand is not covering
+ * with the mouse itself, and sixteen because the glyphs are drawn on a grid of about
+ * -12..+10 - any less and the outline would reach back over the pixel it is reporting on.
+ */
+#define GLYPH_OFF_X   16.0f
+#define GLYPH_OFF_Y  -16.0f
+#define GLYPH_REACH   12.0f   /* how far a glyph extends from its origin, for the flip */
 
 /* The loaded colours sit this far from the corner, with this much between them. */
 #define SLOT_MARGIN  8.0f
@@ -416,6 +429,25 @@ void tool_draw (VNG_TAB *t)
 
 	if (on && t->zoom >= OUTLINE_ZOOM && inside(t, x, y))
 		outline(t, x, y);
+
+	/*
+	 * The tool glyph, which says WHICH tool without standing on the pixel. The system
+	 * crosshair stays where it is and marks the aim point; the glyph hangs off it. The
+	 * first Vangopix had both at once for the same reason - one answers "where", the other
+	 * answers "what".
+	 *
+	 * It flips below the pointer near the top of the window, where hanging upward would
+	 * put it off screen or behind the tab bar. The original did not bother; a window can
+	 * be small enough that it matters.
+	 */
+	if (on) {
+		float gy = my + GLYPH_OFF_Y;
+		if (gy - GLYPH_REACH < tabbar_height())
+			gy = my - GLYPH_OFF_Y;
+
+		glyph_draw((eyedropper || picking) ? GLYPH_PICK : GLYPH_PENCIL,
+		           mx + GLYPH_OFF_X, gy, 1.0f, 0xFFFFFFFF);
+	}
 
 	/* Over the outline: the value being read matters more than the box saying which pixel
 	 * it came from. A pick being dragged keeps the preview up, showing what was just

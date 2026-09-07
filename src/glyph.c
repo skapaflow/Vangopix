@@ -1,0 +1,58 @@
+#include "glyph.h"
+
+/* The points come from the first Vangopix's src/gui/gui_main_tool.c, vertex for vertex.
+ * They are hand placed on a grid of roughly -12..+10 around the origin, which is what lets
+ * a 16 pixel offset put the whole glyph clear of the point being aimed at. */
+static const SDL_FPoint pencil[] = {
+	{ 6,-3},{ 4,-5},{ 2,-3},{ 4,-1},{ 2,-3},{ 1,-2},{ 3, 0},{ 1,-2},{-4, 3},
+	{-2, 5},{-4, 3},{-6, 6},{-5, 7},{-6, 6},{-7, 8},{-5, 7},{-2, 5}
+};
+
+static const SDL_FPoint pick[] = {
+	{ 1,-3},{ 4, 0},{ 1,-3},{-4, 2},{-6, 4},{-7, 6},{-7, 8},{-5, 8},{-3, 7},
+	{-1, 5},{ 4, 0},{ 5, 1},{ 6, 0},{ 6,-1},{ 2,-5},{ 6,-1},{ 8,-3},{ 9,-4},
+	{ 9,-6},{ 8,-7},{ 7,-8},{ 5,-8},{ 4,-7},{ 2,-5},{ 1,-5},{ 0,-4}
+};
+
+typedef struct { const SDL_FPoint *pt; int lot; } SHAPE;
+
+static const SHAPE shapes[GLYPH_LOT] = {
+	{ pencil, (int)SDL_arraysize(pencil) },
+	{ pick,   (int)SDL_arraysize(pick)   },
+};
+
+/* One more than the longest glyph, because the path is closed by repeating its first point.
+ * A stack array rather than an allocation: this runs once a frame, and the first Vangopix's
+ * malloc per draw was the one thing about draw_wireframe_entity worth leaving behind. */
+#define MAX_PT 64
+
+static void path (const SDL_FPoint *pt, int lot, float x, float y, float scale,
+                  Uint8 r, Uint8 g, Uint8 b, Uint8 a)
+{
+	SDL_FPoint out[MAX_PT];
+
+	for (int i = 0; i < lot; i++) {
+		out[i].x = x + pt[i].x * scale;
+		out[i].y = y + pt[i].y * scale;
+	}
+	out[lot] = out[0];   /* closes it */
+
+	SDL_SetRenderDrawColor(vng_ren, r, g, b, a);
+	SDL_RenderLines(vng_ren, out, lot + 1);
+}
+
+void glyph_draw (GLYPH g, float x, float y, float scale, Uint32 rgba)
+{
+	if (g < 0 || g >= GLYPH_LOT) return;
+
+	const SHAPE *s = &shapes[g];
+	if (s->lot + 1 > MAX_PT) return;
+
+	/* The shadow first, one pixel down and right, so the colour draws over it rather than
+	 * under it. Without this pass a white glyph is invisible on white artwork. */
+	path(s->pt, s->lot, x + 1.0f, y + 1.0f, scale, 0x00, 0x00, 0x00, 0xC0);
+
+	path(s->pt, s->lot, x, y, scale,
+	     (Uint8)((rgba >> 24) & 0xFF), (Uint8)((rgba >> 16) & 0xFF),
+	     (Uint8)((rgba >>  8) & 0xFF), (Uint8)( rgba        & 0xFF));
+}

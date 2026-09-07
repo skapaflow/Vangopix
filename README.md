@@ -31,9 +31,9 @@ that — opening, viewing, framing, sizing and saving.
 | transparency | checkerboard behind the sheet, black frame around it |
 | text | one atlas, packed by stb_truetype |
 
-Next: a line-art glyph per tool for the pointer, offset from the aim point the way the first
-Vangopix did it, and then a summoned palette for the colours that are not on the sheet yet —
-drawn by VagrantUI, gone when it is done.
+Next: a summoned palette for the colours that are not on the sheet yet — drawn by VagrantUI,
+gone when it is done — and the other 39 drawing primitives, which are ports onto the same
+three buffers the pencil already uses.
 
 ## Building
 
@@ -167,12 +167,17 @@ Left drag draws, right drag rubs out — to **transparent**, not to white, which
 checkerboard behind the sheet is for: in a program that keeps alpha, white is a colour
 somebody chose and nothing is the absence of one.
 
-There is no key to select it and no tool window, because with one tool a key that selects
-it does nothing. It shows itself two ways instead, neither of them a panel: the **cursor**
-becomes a crosshair over the sheet and an arrow everywhere else — the system draws that, at
-whatever size and theme you set — and the **pixel under the pointer is outlined** on the
-sheet from 2x zoom up, which is the signal that matters in a pixel editor. It tells you
-*which pixel*, not which tool.
+There is no key to select it and no tool window, because with one tool a key that selects it
+does nothing. It shows itself three ways instead, none of them a panel: the **cursor**
+becomes a crosshair over the sheet and an arrow everywhere else; the **pixel under the
+pointer is outlined** on the sheet from 2x zoom up, which tells you *which pixel*; and a
+**line-art glyph hangs up and to the right of the pointer** saying which tool — a pencil, or
+an eyedropper while `CTRL` is held.
+
+The glyph is an outline and not a filled icon, so the artwork shows through the middle of
+it, and it hangs sixteen pixels off the aim point so it never stands on the pixel it is
+reporting about. Both of those are the first Vangopix's answers, carried over vertex for
+vertex.
 
 A stroke joins its samples, so a fast hand draws a line and not a row of dots. One stroke
 is one undo.
@@ -253,6 +258,7 @@ src/
   file.c/.h     save, and the two system dialogs that go with it
   undo.c/.h     the undo stack, per document
   tool.c/.h     the pencil: the only file that changes a pixel
+  glyph.c/.h    the line-art glyphs
   tabs.c/.h     the tabs, which ARE the documents
   tabbar.c/.h   the tab bar: the only file that draws a tab
   project.c/.h  the project folders and projects.vngproj
