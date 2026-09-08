@@ -1146,7 +1146,7 @@ void tool_draw (VNG_TAB *t)
 			gy = my - GLYPH_OFF_Y;
 
 		glyph_draw((eyedropper || picking) ? GLYPH_PICK : (GLYPH)current,
-		           mx + GLYPH_OFF_X, gy, 1.0f, 0xFFFFFFFF);
+		           mx + GLYPH_OFF_X, gy, 0.0f, 1.0f, 0xFFFFFFFF);
 	}
 
 	/* Over the outline: the value being read matters more than the box saying which pixel it

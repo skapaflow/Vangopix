@@ -36,12 +36,19 @@ typedef enum {
 	GLYPH_CHANGE,
 	GLYPH_SELECT,
 	GLYPH_PICK,
+	GLYPH_POINTER,
 	GLYPH_LOT
 } GLYPH;
 
-/* Draws the glyph centred on (x, y), scaled, in `rgba` (0xRRGGBBAA) with its own shadow.
-   A glyph is centred on its origin, so (x, y) is where it hangs from - see tool.c for the
-   offset that keeps it clear of the pixel being aimed at. */
-extern void glyph_draw (GLYPH g, float x, float y, float scale, Uint32 rgba);
+/*
+ * Draws the glyph centred on (x, y), turned `rot` degrees, scaled, in `rgba` (0xRRGGBBAA)
+ * with its own shadow. A glyph is centred on its origin, so (x, y) is where it hangs from -
+ * see tool.c for the offset that keeps it clear of the pixel being aimed at.
+ *
+ * The rotation is what makes GLYPH_POINTER worth having: one arrow, turned to whatever it is
+ * pointing at, is how the colour wheel marks a hue and how a slider marks its level. The
+ * first Vangopix's draw_wireframe_entity took the same parameter for the same reason.
+ */
+extern void glyph_draw (GLYPH g, float x, float y, float rot, float scale, Uint32 rgba);
 
 #endif

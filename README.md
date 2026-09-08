@@ -244,19 +244,23 @@ one undo.
 `C` raises it. It is where a colour that is **not on the sheet yet** comes from — everything
 else about colour here reads the drawing, and all of that needs a colour to already exist.
 
-A saturation-value square with a hue bar beside it and an alpha bar beside that, because in
-this program nothing *is* a colour and a half-transparent shade is something you want on
-purpose. Click either of the two slots to say which one you are editing; the picker follows
-it, so a colour you absorb with `CTRL` out on the sheet turns up here too.
+**A hue ring, with the colour you are building sitting in the hole** — the result lives in the
+middle of the thing that chooses it, so your eye never travels to see what the wheel just did.
+One pointer marks the hue you have; a second follows your hand while it is over the wheel, so
+you can see where you would land before you press. Hue is circular, and a ring is the only
+shape that says so: complements sit opposite, analogous colours sit next to each other.
+
+Four sliders beside it — hue, saturation, value and alpha — each showing its own channel across
+the whole range with the others held, so what is under the pointer is what you would get. The
+alpha one is a real control, because in this program nothing *is* a colour.
+
+Click either of the two slots to say which one you are editing; the picker follows it, so a
+colour you absorb with `CTRL` out on the sheet turns up here too.
 
 **Click the hex line and type.** `#2E3440`, `2E3440`, `4080FF80` with the alpha, or `F0A` for
 short — with or without the hash, because a colour copied from a published palette arrives in
 whatever shape that palette used. The first thing you type replaces what is there; backspace
 if you meant to edit instead. `ENTER` takes it, `ESC` drops it.
-
-**Hold `SHIFT` while dragging the square to move one axis only** — lighten a colour without
-desaturating it, or the other way round. Same `SHIFT` that snaps a line to the pixel-art
-slopes and a grip to the grid.
 
 Sixteen tiles at the bottom are the eight-to-sixteen you settle on: click one to load it,
 `SHIFT`+click to store the colour you have into it.

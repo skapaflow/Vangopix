@@ -48,6 +48,12 @@ static const SDL_FPoint vselect[] = {
 	{  7, -4},{  5, -4},{  5, -4}
 };
 
+/* A plain arrow, and the only glyph here that is not a tool: it is drawn turned, and what it
+ * is turned to is the whole of what it says. */
+static const SDL_FPoint vpointer[] = {
+	{  0, -8},{ -5,  7},{  0,  7},{  5,  7}
+};
+
 static const SDL_FPoint vpick[] = {
 	{  1, -3},{  4,  0},{  1, -3},{ -4,  2},{ -6,  4},{ -7,  6},{ -7,  8},{ -5,  8},{ -3,  7},
 	{ -1,  5},{  4,  0},{  5,  1},{  6,  0},{  6, -1},{  2, -5},{  6, -1},{  8, -3},{  9, -4},
@@ -68,6 +74,7 @@ static const SHAPE shapes[GLYPH_LOT] = {
 	{ vchange,  (int)SDL_arraysize(vchange)  },
 	{ vselect,  (int)SDL_arraysize(vselect)  },
 	{ vpick,    (int)SDL_arraysize(vpick)    },
+	{ vpointer, (int)SDL_arraysize(vpointer) },
 };
 
 /* One more than the longest glyph, because the path is closed by repeating its first point.
@@ -75,14 +82,19 @@ static const SHAPE shapes[GLYPH_LOT] = {
  * malloc per draw was the one thing about draw_wireframe_entity worth leaving behind. */
 #define MAX_PT 64
 
-static void path (const SDL_FPoint *pt, int lot, float x, float y, float scale,
+static void path (const SDL_FPoint *pt, int lot, float x, float y, float rot, float scale,
                   Uint8 r, Uint8 g, Uint8 b, Uint8 a)
 {
 	SDL_FPoint out[MAX_PT];
 
+	/* The first Vangopix's rotation, sign for sign, so a glyph turned to 90 here points the
+	 * same way it did there. */
+	float sn = SDL_sinf(rot * (SDL_PI_F / 180.0f));
+	float cs = SDL_cosf(rot * (SDL_PI_F / 180.0f));
+
 	for (int i = 0; i < lot; i++) {
-		out[i].x = x + pt[i].x * scale;
-		out[i].y = y + pt[i].y * scale;
+		out[i].x = x + (pt[i].x *  cs + pt[i].y * sn) * scale;
+		out[i].y = y + (pt[i].x * -sn + pt[i].y * cs) * scale;
 	}
 	out[lot] = out[0];   /* closes it */
 
@@ -90,7 +102,7 @@ static void path (const SDL_FPoint *pt, int lot, float x, float y, float scale,
 	SDL_RenderLines(vng_ren, out, lot + 1);
 }
 
-void glyph_draw (GLYPH g, float x, float y, float scale, Uint32 rgba)
+void glyph_draw (GLYPH g, float x, float y, float rot, float scale, Uint32 rgba)
 {
 	if (g < 0 || g >= GLYPH_LOT) return;
 
@@ -99,9 +111,9 @@ void glyph_draw (GLYPH g, float x, float y, float scale, Uint32 rgba)
 
 	/* The shadow first, one pixel down and right, so the colour draws over it rather than
 	 * under it. Without this pass a white glyph is invisible on white artwork. */
-	path(s->pt, s->lot, x + 1.0f, y + 1.0f, scale, 0x00, 0x00, 0x00, 0xC0);
+	path(s->pt, s->lot, x + 1.0f, y + 1.0f, rot, scale, 0x00, 0x00, 0x00, 0xC0);
 
-	path(s->pt, s->lot, x, y, scale,
+	path(s->pt, s->lot, x, y, rot, scale,
 	     (Uint8)((rgba >> 24) & 0xFF), (Uint8)((rgba >> 16) & 0xFF),
 	     (Uint8)((rgba >>  8) & 0xFF), (Uint8)( rgba        & 0xFF));
 }

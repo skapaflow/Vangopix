@@ -15,12 +15,27 @@
  * constantly - so the tiles are not where the work happens, and a window summoned to
  * ESTABLISH those colours and then put away is the shape that matches. C raises it.
  *
- * A SATURATION-VALUE SQUARE WITH A HUE BAR, NOT A WHEEL. The first Vangopix drew a wheel, and
- * a wheel is prettier; a square is easier to hit the same colour on twice, because both axes
- * are straight and the eye can measure along them. In a program about exact pixels that wins.
+ * IT IS THE FIRST VANGOPIX'S WHEEL, and the argument for a square instead was wrong.
  *
- * THE ALPHA BAR IS A REAL CONTROL AND NOT AN AFTERTHOUGHT, because in this program nothing IS
- * a colour: the second slot starts transparent, rubbing out is drawing with nothing, and a
+ * A square lays hue out along a straight edge, which cuts the circle at an arbitrary point -
+ * red - and hides the wrap. HUE IS CIRCULAR, and on a ring the geometry carries the colour
+ * theory with it: complementary colours sit opposite, analogous ones sit next to each other,
+ * and a triad is a triangle. A bar throws all of that away and gives back only precision,
+ * which the four sliders already provide.
+ *
+ * The design is kept whole because it is good:
+ *
+ *   - a RING and not a disc, hue at full saturation and value;
+ *   - THE HOLE HOLDS THE RESULT - the colour being chosen sits in the middle of the thing
+ *     choosing it, so the eye never travels to find out what the wheel just did;
+ *   - TWO POINTERS: one at the hue in hand, saying where you ARE, and one following the
+ *     pointer while it is over the wheel, saying where you would GO. One arrow could only do
+ *     one of those;
+ *   - FOUR SLIDERS beside it, each showing its channel across the whole range with the others
+ *     held, so what is under the pointer is what would be got.
+ *
+ * The alpha slider is a real control and not an afterthought, because in this program nothing
+ * IS a colour: the second slot starts transparent, rubbing out is drawing with nothing, and a
  * half transparent shade is a thing people want on purpose.
  *
  * SIXTEEN SWATCHES, and they are the "eight to sixteen" said back. Click loads one into the

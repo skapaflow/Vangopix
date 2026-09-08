@@ -45,8 +45,8 @@ static void hex_type (const char *t)
 	SDL_zero(e);
 	e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
 	e.button.button = SDL_BUTTON_LEFT;
-	e.button.x = 24.0f + 120.0f;
-	e.button.y = 48.0f + 132.0f;
+	e.button.x = 24.0f + 126.0f;
+	e.button.y = 48.0f + 162.0f;
 	win_event(&e);
 
 	typed(t);
@@ -774,8 +774,8 @@ int main (void)
 		colour_toggle();
 		ok("C puts the colour window up", colour_visible());
 
-		/* It opens at (24,48) and is 200x180 inside. The saturation-value square is the
-		 * left-hand block of that, so a press well inside it has to change slot 1. */
+		/* It opens at (24,48) and is 300x212 inside. The hue ring fills the left-hand block
+		 * of that, so a press well inside it has to change slot 1. */
 		SDL_Event e;
 		SDL_zero(e);
 		e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
@@ -784,7 +784,7 @@ int main (void)
 		e.button.y = 48.0f + 30.0f;
 
 		ok("the window takes the press", win_event(&e));
-		ok("A PRESS IN THE SQUARE WRITES THE SLOT", tool_colour(0) != 0xFF000000u);
+		ok("A PRESS IN THE WHEEL WRITES THE SLOT", tool_colour(0) != 0xFF000000u);
 		ok("and what it wrote is opaque", (tool_colour(0) >> 24) == 0xFF);
 
 		Uint32 first = tool_colour(0);
@@ -796,7 +796,7 @@ int main (void)
 		e.motion.x = 24.0f + 20.0f;
 		e.motion.y = 48.0f + 100.0f;
 		ok("THE DRAG STAYS WITH THE WINDOW", win_event(&e));
-		ok("and moving in the square moves the colour", tool_colour(0) != first);
+		ok("and moving around the wheel moves the hue", tool_colour(0) != first);
 
 		SDL_zero(e);
 		e.type = SDL_EVENT_MOUSE_BUTTON_UP;
@@ -822,8 +822,8 @@ int main (void)
 		SDL_zero(e);
 		e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
 		e.button.button = SDL_BUTTON_LEFT;
-		e.button.x = 24.0f + 120.0f;   /* the readout, right of the two slots */
-		e.button.y = 48.0f + 132.0f;   /* between the picker and the swatches */
+		e.button.x = 24.0f + 126.0f;   /* the readout, right of the two slots */
+		e.button.y = 48.0f + 162.0f;   /* between the picker and the swatches */
 		win_event(&e);
 
 		SDL_zero(e);

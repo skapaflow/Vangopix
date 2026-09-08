@@ -3,21 +3,40 @@
 #include "tool.h"
 #include "core.h"
 #include "keys.h"
+#include "glyph.h"
 
-#define OPEN_W  200.0f
-#define OPEN_H  180.0f
-#define MIN_W   150.0f
-#define MIN_H   130.0f
+#define OPEN_W  300.0f
+#define OPEN_H  212.0f
+#define MIN_W   220.0f
+#define MIN_H   160.0f
 
-#define BAR_W    14.0f    /* the hue and alpha bars */
+#define BAR_W    14.0f
+#define BARS      4       /* hue, saturation, value, alpha */
+
+/*
+ * THE WHEEL'S PROPORTIONS ARE THE FIRST VANGOPIX'S, kept because they are the design.
+ *
+ * Its __draw_color_wheel__ took an inner radius of 50 and a thickness of 20, so the ring runs
+ * from 50 to 70 - the hole is five sevenths of the whole. The preview disc inside it had
+ * radius 30 and the hue marker sat at 40, between the disc and the ring; the marker that
+ * follows the hand sat at 85, outside. Written as fractions of the outer radius so the wheel
+ * scales with the window instead of being a fixed 140 pixels for ever.
+ */
+#define RING_IN   (50.0f / 70.0f)
+#define DISC      (30.0f / 70.0f)
+#define MARK_IN   (40.0f / 70.0f)
+#define MARK_OUT  (85.0f / 70.0f)
 #define GAP       6.0f
 #define SWATCH   16.0f
 #define SLOTS     16      /* the "eight to sixteen", said back */
 
-/* The gradients are generated small and stretched. A hue ramp and a saturation-value field
- * are smooth by definition, so there is nothing for more pixels to say - and 64 is enough
- * that the linear filter has no visible steps to smooth over. */
+/* The sliders are generated small and stretched: a one-channel ramp is smooth by definition,
+ * so there is nothing for more pixels to say. */
 #define RAMP  64
+
+/* The wheel is not, because a ring has EDGES, and an edge is exactly what a stretched
+ * gradient cannot fake. Generated once at a size that is already bigger than it is drawn. */
+#define WHEEL 192
 
 static VNG_WIN *win = NULL;
 
@@ -61,11 +80,13 @@ static char field[12];
  */
 static bool fresh = false;
 
-static SDL_Texture *tex_sv  = NULL;   /* rebuilt when the hue moves */
-static SDL_Texture *tex_hue = NULL;   /* built once */
-static SDL_Texture *tex_a   = NULL;   /* rebuilt when the colour moves */
-static float sv_hue = -1.0f;
-static Uint32 a_of  = 1u;
+/* The ring is hue at full saturation and value, so it never depends on the colour in hand and
+ * is built exactly once. The first Vangopix rebuilt it into a cache; there is nothing to
+ * rebuild. */
+static SDL_Texture *tex_wheel = NULL;
+
+static SDL_Texture *tex_bar[BARS] = { 0 };   /* rebuilt when the colour moves */
+static Uint32 bars_of = 1u;
 
 /* ------------------------------------------------------------------------- the maths */
 
@@ -113,6 +134,8 @@ static void argb_hsv (Uint32 c, float *hh, float *ss, float *vv)
 	if (*hh < 0.0f) *hh += 360.0f;
 }
 
+static float clamp01 (float f) { return f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f); }
+
 /* ---------------------------------------------------------------------- the gradients */
 
 static SDL_Texture *ramp_make (int w, int hgt, const Uint32 *px)
@@ -127,52 +150,112 @@ static SDL_Texture *ramp_make (int w, int hgt, const Uint32 *px)
 	return t;
 }
 
+/*
+ * THE RING, AND ITS RIMS ARE SOFTENED.
+ *
+ * The first Vangopix tested `dist >= in_r && dist <= out_r + in_r` and painted or did not,
+ * which leaves both rims as a staircase - the one place a wheel looks homemade. Coverage over
+ * the last texel costs one subtraction and takes the staircase out, and it is why this is
+ * generated at 192 and drawn smaller rather than generated small and stretched: a stretched
+ * gradient can fake a gradient but not an EDGE.
+ */
+static void wheel_build (void)
+{
+	if (tex_wheel) return;
+
+	Uint32 *px = (Uint32 *) SDL_malloc((size_t)WHEEL * WHEEL * sizeof(Uint32));
+	if (!px) return;
+
+	const float mid  = (WHEEL - 1) * 0.5f;
+	const float soft = 1.0f / mid;          /* one texel, in fractions of the radius */
+
+	for (int y = 0; y < WHEEL; y++) {
+		for (int x = 0; x < WHEEL; x++) {
+			float dx = ((float)x - mid) / mid;
+			float dy = ((float)y - mid) / mid;
+			float d  = SDL_sqrtf(dx * dx + dy * dy);
+
+			/* How much of this texel is inside the ring: 1 well within, 0 well outside,
+			 * and the slope between covers exactly the rim. */
+			float in  = clamp01((d - (RING_IN - soft)) / (soft * 2.0f));
+			float out = clamp01(((1.0f - soft) + soft * 2.0f - d) / (soft * 2.0f));
+			float cov = in < out ? in : out;
+
+			if (cov <= 0.0f) { px[y * WHEEL + x] = 0u; continue; }
+
+			/* Negated y, so the hue runs anticlockwise from red at the right - which is how
+			 * a colour wheel is drawn everywhere, and how the original had it. */
+			float deg = SDL_atan2f(-dy, dx) * (180.0f / SDL_PI_F);
+			if (deg < 0.0f) deg += 360.0f;
+
+			px[y * WHEEL + x] = (hsv_argb(deg, 1.0f, 1.0f, 0xFF) & 0x00FFFFFFu)
+			                  | ((Uint32)(cov * 255.0f + 0.5f) << 24);
+		}
+	}
+
+	tex_wheel = ramp_make(WHEEL, WHEEL, px);
+	SDL_free(px);
+}
+
+/*
+ * FOUR SLIDERS, ONE PER CHANNEL, and each shows its own channel across its whole range WITH
+ * THE OTHERS HELD - so what is under the pointer is what would be got. That is the first
+ * Vangopix's __draw_slide_color__ and it is the only version that tells the truth.
+ *
+ * They are not redundant with the wheel: the wheel is hue, and saturation, value and alpha
+ * have nowhere else to go.
+ */
 static void build (void)
 {
-	static Uint32 px[RAMP * RAMP];
+	static Uint32 px[RAMP];
 
-	if (!tex_hue) {
-		for (int y = 0; y < RAMP; y++)
-			px[y] = hsv_argb((float)y * 360.0f / RAMP, 1.0f, 1.0f, 0xFF);
-		tex_hue = ramp_make(1, RAMP, px);
-	}
+	wheel_build();
 
-	if (sv_hue != h) {
-		for (int y = 0; y < RAMP; y++)
-			for (int x = 0; x < RAMP; x++)
-				px[y * RAMP + x] = hsv_argb(h, (float)x / (RAMP - 1),
-				                            1.0f - (float)y / (RAMP - 1), 0xFF);
-		if (tex_sv) SDL_DestroyTexture(tex_sv);
-		tex_sv = ramp_make(RAMP, RAMP, px);
-		sv_hue = h;
-	}
+	Uint32 now = hsv_argb(h, s, v, alpha);
+	if (bars_of == now) return;
+	bars_of = now;
 
-	Uint32 solid = hsv_argb(h, s, v, 0xFF);
-	if (a_of != solid) {
-		for (int y = 0; y < RAMP; y++)
-			px[y] = (solid & 0x00FFFFFFu)
-			      | ((Uint32)(255 - y * 255 / (RAMP - 1)) << 24);
-		if (tex_a) SDL_DestroyTexture(tex_a);
-		tex_a = ramp_make(1, RAMP, px);
-		a_of = solid;
+	for (int b = 0; b < BARS; b++) {
+		for (int y = 0; y < RAMP; y++) {
+			/* The top of a slider is the most of it, which is what a person expects of a
+			 * vertical control and is the way round the original had. */
+			float f = 1.0f - (float)y / (RAMP - 1);
+
+			switch (b) {
+			case 0: px[y] = hsv_argb(f * 359.99f, s, v, 0xFF);            break;
+			case 1: px[y] = hsv_argb(h, f, v, 0xFF);                      break;
+			case 2: px[y] = hsv_argb(h, s, f, 0xFF);                      break;
+			default: px[y] = (hsv_argb(h, s, v, 0xFF) & 0x00FFFFFFu)
+			               | ((Uint32)(f * 255.0f + 0.5f) << 24);         break;
+			}
+		}
+		if (tex_bar[b]) SDL_DestroyTexture(tex_bar[b]);
+		tex_bar[b] = ramp_make(1, RAMP, px);
 	}
 }
 
 void colour_free (void)
 {
-	if (tex_sv)  SDL_DestroyTexture(tex_sv);
-	if (tex_hue) SDL_DestroyTexture(tex_hue);
-	if (tex_a)   SDL_DestroyTexture(tex_a);
-	tex_sv = tex_hue = tex_a = NULL;
-	sv_hue = -1.0f;
-	a_of   = 1u;
+	if (tex_wheel) SDL_DestroyTexture(tex_wheel);
+	tex_wheel = NULL;
+
+	for (int b = 0; b < BARS; b++) {
+		if (tex_bar[b]) SDL_DestroyTexture(tex_bar[b]);
+		tex_bar[b] = NULL;
+	}
+	bars_of = 1u;
 }
 
 /* ------------------------------------------------------------------------ the layout */
 
 /* Everything is measured from the interior, so stretching the window stretches the picker
  * rather than leaving it in a corner. */
-typedef struct { SDL_FRect sv, hue, a, slots, hex, tiles; } LAYOUT;
+typedef struct {
+	SDL_FRect  wheel;    /* the square the ring is drawn in */
+	SDL_FPoint centre;
+	float      radius;   /* the ring's outer radius */
+	SDL_FRect  bar[BARS], slots, hex, tiles;
+} LAYOUT;
 
 static LAYOUT layout (SDL_FRect r)
 {
@@ -184,9 +267,22 @@ static LAYOUT layout (SDL_FRect r)
 	float top_h = r.h - bottom - GAP;
 	if (top_h < 24.0f) top_h = 24.0f;
 
-	l.sv  = (SDL_FRect){ r.x, r.y, r.w - (BAR_W + GAP) * 2.0f, top_h };
-	l.hue = (SDL_FRect){ l.sv.x + l.sv.w + GAP, r.y, BAR_W, top_h };
-	l.a   = (SDL_FRect){ l.hue.x + BAR_W + GAP, r.y, BAR_W, top_h };
+	float bars_w = (BAR_W + GAP) * BARS;
+
+	/* The wheel is SQUARE and centred in what is left of the row, because a ring squeezed into
+	 * an oblong is an ellipse, and an ellipse says the hues are not evenly spaced. */
+	float box = r.w - bars_w;
+	if (box > top_h) box = top_h;
+	if (box < 8.0f)  box = 8.0f;
+
+	l.wheel  = (SDL_FRect){ r.x + (r.w - bars_w - box) * 0.5f,
+	                        r.y + (top_h - box) * 0.5f, box, box };
+	l.centre = (SDL_FPoint){ l.wheel.x + box * 0.5f, l.wheel.y + box * 0.5f };
+	l.radius = box * 0.5f;
+
+	for (int b = 0; b < BARS; b++)
+		l.bar[b] = (SDL_FRect){ r.x + r.w - bars_w + GAP * 0.5f + b * (BAR_W + GAP),
+		                        r.y, BAR_W, top_h };
 
 	float lh = vng_text ? text_line_height(vng_text) : 15.0f;
 
@@ -202,7 +298,7 @@ static bool in_rect (SDL_FRect r, float x, float y)
 	return x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h;
 }
 
-static float clamp01 (float f) { return f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f); }
+
 
 /* ------------------------------------------------------------------------- the field */
 
@@ -301,24 +397,8 @@ static void field_start (void)
 /* ------------------------------------------------------------------------ the events */
 
 /* What the window is holding on to between the press and the release. */
-static enum { GRAB_NONE, GRAB_SV, GRAB_HUE, GRAB_A } grab = GRAB_NONE;
-
-/*
- * SHIFT CONSTRAINS THE SQUARE TO ONE AXIS, and that is the capability the first Vangopix's
- * four channel bars were really for.
- *
- * On a square, saturation and value move TOGETHER: there is no way to drag one without
- * disturbing the other, and lightening a colour without desaturating it is most of what
- * shading is. Four separate bars give that back by spending a strip of the window on each
- * channel. Holding SHIFT gives the same thing for nothing - and SHIFT ALREADY MEANS
- * CONSTRAIN here, twice over: it snaps a line to the pixel-art slopes and a corner grip to
- * the eight pixel grid. A third use of an idiom is cheaper to learn than a fourth control.
- *
- * The axis is decided by which way the hand has travelled furthest from the press, and kept
- * for the rest of the drag - so it does not flip about while a slow hand wanders.
- */
-static float press_x = 0.0f, press_y = 0.0f;
-static int   axis = 0;   /* 0 free, 1 saturation only, 2 value only */
+static enum { GRAB_NONE, GRAB_WHEEL, GRAB_BAR } grab = GRAB_NONE;
+static int grab_bar = 0;
 
 static void push (void)
 {
@@ -336,23 +416,26 @@ static bool on_event (SDL_FRect area, const SDL_Event *e, void *ctx)
 	if (e->type == SDL_EVENT_MOUSE_MOTION) { x = e->motion.x; y = e->motion.y; }
 	else                                   { x = e->button.x; y = e->button.y; }
 
-	if (e->type == SDL_EVENT_MOUSE_BUTTON_UP) { grab = GRAB_NONE; axis = 0; return false; }
+	if (e->type == SDL_EVENT_MOUSE_BUTTON_UP) { grab = GRAB_NONE; return false; }
 
 	if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
 		/* Pressing anywhere else finishes what was being typed, which is what a person means
 		 * by it - losing it because the mouse moved would be the surprising reading. */
 		if (editing && !in_rect(l.hex, x, y)) field_stop(true);
 
-		press_x = x;
-		press_y = y;
-		axis    = 0;
-
 		if (in_rect(l.hex, x, y)) { if (!editing) field_start(); return false; }
 
-		if (in_rect(l.sv, x, y))       grab = GRAB_SV;
-		else if (in_rect(l.hue, x, y)) grab = GRAB_HUE;
-		else if (in_rect(l.a, x, y))   grab = GRAB_A;
+		/* ANYWHERE INSIDE THE WHEEL'S REACH TAKES THE HUE, not only the ring itself. Aiming
+		 * at a twenty pixel band is a worse gesture than pointing at a direction, and a
+		 * direction is all the ring is asking for. The original did the same. */
+		float dx = x - l.centre.x, dy = y - l.centre.y;
+		if (SDL_sqrtf(dx * dx + dy * dy) <= l.radius) grab = GRAB_WHEEL;
 		else {
+			for (int b = 0; b < BARS; b++)
+				if (in_rect(l.bar[b], x, y)) { grab = GRAB_BAR; grab_bar = b; }
+		}
+
+		if (grab == GRAB_NONE) {
 			/* The two slots: clicking one says which is being edited, and the picker jumps
 			 * to the colour that is in it rather than overwriting it. */
 			SDL_FRect s0 = { l.slots.x, l.slots.y, SWATCH, l.slots.h };
@@ -392,26 +475,28 @@ static bool on_event (SDL_FRect area, const SDL_Event *e, void *ctx)
 	if (grab == GRAB_NONE) return false;
 
 	switch (grab) {
-	case GRAB_SV: {
-		if (keys_mods() & SDL_KMOD_SHIFT) {
-			if (!axis) {
-				float dx = SDL_fabsf(x - press_x), dy = SDL_fabsf(y - press_y);
-				if (dx > 2.0f || dy > 2.0f) axis = dx >= dy ? 1 : 2;
-			}
-		} else {
-			axis = 0;
-		}
+	case GRAB_WHEEL: {
+		/* The angle from the CENTRE to the hand, which is the readable version. The original
+		 * measured it the other way round and then cancelled the difference with a minus
+		 * sign in front of every cosine that used it. */
+		float dx = x - l.centre.x, dy = y - l.centre.y;
+		if (dx == 0.0f && dy == 0.0f) break;
 
-		if (axis != 2) s = clamp01((x - l.sv.x) / l.sv.w);
-		if (axis != 1) v = 1.0f - clamp01((y - l.sv.y) / l.sv.h);
+		float deg = SDL_atan2f(-dy, dx) * (180.0f / SDL_PI_F);
+		h = deg < 0.0f ? deg + 360.0f : deg;
 		break;
 	}
-	case GRAB_HUE:
-		h = clamp01((y - l.hue.y) / l.hue.h) * 359.99f;
+	case GRAB_BAR: {
+		float f = 1.0f - clamp01((y - l.bar[grab_bar].y) / l.bar[grab_bar].h);
+
+		switch (grab_bar) {
+		case 0: h = f * 359.99f;                      break;
+		case 1: s = f;                                break;
+		case 2: v = f;                                break;
+		default: alpha = (Uint8)(f * 255.0f + 0.5f);  break;
+		}
 		break;
-	case GRAB_A:
-		alpha = (Uint8)((1.0f - clamp01((y - l.a.y) / l.a.h)) * 255.0f + 0.5f);
-		break;
+	}
 	default: break;
 	}
 
@@ -421,17 +506,42 @@ static bool on_event (SDL_FRect area, const SDL_Event *e, void *ctx)
 
 /* ------------------------------------------------------------------------- the pixels */
 
-static void marker (float x, float y)
+/*
+ * A filled disc of one colour, laid over the same two tones every swatch in this program uses
+ * so that a transparent colour reads as transparent here too.
+ *
+ * Row by row, because SDL draws no circles - and row by row is exactly what makes the two
+ * tones easy: each row is split at the centre, which is the same left-half-lighter figure the
+ * bars at the bottom of the screen show.
+ */
+static void disc (float cx, float cy, float r, Uint32 c)
 {
-	SDL_FRect in  = { x - 3.0f, y - 3.0f, 7.0f, 7.0f };
-	SDL_FRect out = { x - 4.0f, y - 4.0f, 9.0f, 9.0f };
+	if (r < 1.0f) return;
 
-	/* Black then white, the rule every marker in this program follows: one tone alone
-	 * disappears against something. */
-	SDL_SetRenderDrawColor(vng_ren, 0x00, 0x00, 0x00, 0xC0);
-	SDL_RenderRect(vng_ren, &out);
-	SDL_SetRenderDrawColor(vng_ren, 0xFF, 0xFF, 0xFF, 0xF0);
-	SDL_RenderRect(vng_ren, &in);
+	int ri = (int)r;
+
+	for (int dy = -ri; dy <= ri; dy++) {
+		float half = SDL_sqrtf((float)(ri * ri - dy * dy));
+		float y    = cy + (float)dy;
+
+		SDL_SetRenderDrawColor(vng_ren, 0x25, 0x25, 0x25, 0xFF);
+		SDL_RenderLine(vng_ren, cx, y, cx + half, y);
+		SDL_SetRenderDrawColor(vng_ren, 0x33, 0x33, 0x33, 0xFF);
+		SDL_RenderLine(vng_ren, cx - half, y, cx, y);
+
+		SDL_SetRenderDrawColor(vng_ren, (Uint8)((c >> 16) & 0xFF), (Uint8)((c >> 8) & 0xFF),
+		                                (Uint8)(c & 0xFF), (Uint8)((c >> 24) & 0xFF));
+		SDL_RenderLine(vng_ren, cx - half, y, cx + half, y);
+	}
+
+	/* A rim, so a pale colour still has an edge against the ring's hole. */
+	SDL_SetRenderDrawColor(vng_ren, 0x00, 0x00, 0x00, 0xB0);
+	for (int i = 0; i < 64; i++) {
+		float a0 = (float)i * (2.0f * SDL_PI_F / 64);
+		float a1 = (float)(i + 1) * (2.0f * SDL_PI_F / 64);
+		SDL_RenderLine(vng_ren, cx + SDL_cosf(a0) * r, cy + SDL_sinf(a0) * r,
+		                        cx + SDL_cosf(a1) * r, cy + SDL_sinf(a1) * r);
+	}
 }
 
 /* A colour over the desk at its real alpha, which is how every swatch in this program shows
@@ -468,16 +578,53 @@ static void body (SDL_FRect area, void *ctx)
 
 	LAYOUT l = layout(area);
 
-	if (tex_sv)  SDL_RenderTexture(vng_ren, tex_sv,  NULL, &l.sv);
-	if (tex_hue) SDL_RenderTexture(vng_ren, tex_hue, NULL, &l.hue);
-	if (tex_a) {
-		vangopix_desk_rect(l.a);
-		SDL_RenderTexture(vng_ren, tex_a, NULL, &l.a);
+	if (tex_wheel) SDL_RenderTexture(vng_ren, tex_wheel, NULL, &l.wheel);
+
+	/*
+	 * THE HOLE IN THE RING HOLDS THE RESULT, which is the best idea in the original's design:
+	 * the colour being chosen sits in the middle of the thing choosing it, so the eye never
+	 * has to travel to find out what the wheel just did.
+	 */
+	disc(l.centre.x, l.centre.y, l.radius * DISC, hsv_argb(h, s, v, alpha));
+
+	/*
+	 * TWO POINTERS, and the pair is the point. The inner one sits at the hue in hand, so the
+	 * wheel always says where you ARE; the outer one follows the pointer while it is over the
+	 * wheel, so it also says where you would GO. One arrow could only do one of those.
+	 */
+	{
+		float rad = h * (SDL_PI_F / 180.0f);
+		float mx  = l.centre.x + SDL_cosf(rad) * l.radius * MARK_IN;
+		float my  = l.centre.y - SDL_sinf(rad) * l.radius * MARK_IN;
+		glyph_draw(GLYPH_POINTER, mx, my, h + 90.0f, l.radius / 70.0f, 0xFFFFFFFF);
 	}
 
-	marker(l.sv.x + s * l.sv.w, l.sv.y + (1.0f - v) * l.sv.h);
-	marker(l.hue.x + BAR_W * 0.5f, l.hue.y + (h / 360.0f) * l.hue.h);
-	marker(l.a.x + BAR_W * 0.5f, l.a.y + (1.0f - alpha / 255.0f) * l.a.h);
+	float px, py;
+	SDL_GetMouseState(&px, &py);
+
+	float dx = px - l.centre.x, dy = py - l.centre.y;
+	if (SDL_sqrtf(dx * dx + dy * dy) <= l.radius && (dx != 0.0f || dy != 0.0f)) {
+		float deg = SDL_atan2f(-dy, dx) * (180.0f / SDL_PI_F);
+		if (deg < 0.0f) deg += 360.0f;
+
+		float rad = deg * (SDL_PI_F / 180.0f);
+		glyph_draw(GLYPH_POINTER,
+		           l.centre.x + SDL_cosf(rad) * l.radius * MARK_OUT,
+		           l.centre.y - SDL_sinf(rad) * l.radius * MARK_OUT,
+		           deg - 90.0f, l.radius / 70.0f * 1.5f, 0xFFFFFFFF);
+	}
+
+	/* The alpha slider is the one with something behind it to show through. */
+	for (int b = 0; b < BARS; b++) {
+		if (b == BARS - 1) vangopix_desk_rect(l.bar[b]);
+		if (tex_bar[b]) SDL_RenderTexture(vng_ren, tex_bar[b], NULL, &l.bar[b]);
+	}
+
+	const float level[BARS] = { h / 360.0f, s, v, alpha / 255.0f };
+	for (int b = 0; b < BARS; b++)
+		glyph_draw(GLYPH_POINTER, l.bar[b].x + BAR_W * 0.5f,
+		           l.bar[b].y + (1.0f - level[b]) * l.bar[b].h,
+		           90.0f, 0.8f, 0xFFFFFFFF);
 
 	/* The two slots, with the one being edited ringed. */
 	for (int i = 0; i < 2; i++) {
