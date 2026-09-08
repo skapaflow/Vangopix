@@ -11,6 +11,7 @@
 #include "undo.h"
 #include "tool.h"
 #include "select.h"
+#include "thumb.h"
 #include "view.h"
 #include "file.h"
 
@@ -686,6 +687,43 @@ int main (void)
 		key(a, SDLK_R, SDL_KMOD_NONE);
 		ok("with nothing selected, bare R is the ellipse once more",
 		   tool_current() == T_ELLIPSE);
+	}
+
+	/* ---- the 1:1 panel ---- */
+	{
+		VNG_TAB *q = vng_tab_new(400, 300);
+		view_sheet_rect(q);
+
+		SDL_Event e;
+		SDL_zero(e);
+		e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+		e.button.button = SDL_BUTTON_LEFT;
+
+		/* Bottom right, one margin in: the panel is 160 a side on a document this big. */
+		e.button.x = (float)vng_win_w - 80.0f;
+		e.button.y = (float)vng_win_h - 80.0f;
+
+		ok("down, the panel takes nothing", thumb_event(&e, q) == false);
+
+		thumb_toggle();
+		ok("V puts it up", thumb_visible());
+		ok("UP, IT TAKES THE CLICK RATHER THAN LETTING IT REACH THE SHEET",
+		   thumb_event(&e, q));
+
+		e.button.x = 10.0f;
+		e.button.y = 10.0f;
+		ok("and takes nothing anywhere else", thumb_event(&e, q) == false);
+
+		/* Motion is deliberately not consumed, so a stroke or a pan begun on the sheet is
+		 * not cut in half by crossing the panel - the same rule the sidebar follows. */
+		SDL_zero(e);
+		e.type = SDL_EVENT_MOUSE_MOTION;
+		e.motion.x = (float)vng_win_w - 80.0f;
+		e.motion.y = (float)vng_win_h - 80.0f;
+		ok("MOTION CROSSES IT UNTOUCHED", thumb_event(&e, q) == false);
+
+		thumb_toggle();
+		ok("V puts it away again", thumb_visible() == false);
 	}
 
 	/* ---- what a save dialog's answer means ----

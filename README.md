@@ -28,6 +28,7 @@ around that — opening, viewing, framing, sizing and saving.
 | undo | per document, made of pixel carries and resizes rather than snapshots |
 | drawing | eight tools on `Q W E R / A S D F`, each with its own tip size |
 | selection | mark, move, copy and paste between documents, flip, rotate, invert |
+| 1:1 panel | what the art looks like at real size, while you work zoomed in |
 | colour | two, one per mouse button, filled by `CTRL`+click and shown as hex |
 | transparency | checkerboard behind the sheet, black frame around it |
 | text | one atlas, packed by stb_truetype |
@@ -109,6 +110,7 @@ drawing near the border.
 | `Q` `W` `E` `R` | pencil, line, rect, ellipse |
 | `A` `S` `D` `F` | eraser, bucket, spray, change-colours |
 | `Z` | select |
+| `V` | show the 1:1 panel |
 | `CTRL+A` `CTRL+C` `CTRL+X` `CTRL+V` | select all, copy, cut, paste |
 | `CTRL` + drag a selection | copy it instead of moving it |
 | `V` `H` `I` `R`, with a selection | flip, flip, invert, rotate |
@@ -234,6 +236,19 @@ answers, carried over vertex for vertex.
 
 A stroke joins its samples, so a fast hand draws a line and not a row of dots. One stroke is
 one undo.
+
+### The 1:1 panel
+
+`V` puts it in the bottom-right corner and `V` takes it away. **It is not a miniature** — it
+shows the document at one art pixel to one screen pixel, cropped around whatever you are
+looking at. Pixel art is drawn at 800% and looked at at 100%, and this answers the question
+you ask twenty times an hour: what does this actually look like?
+
+When the document is smaller than the panel, the panel shrinks to the document — so your
+sprite *is* the panel, at the size it will be seen. When it is bigger, hovering the panel
+outlines the part of the sheet it is showing.
+
+(With a selection in hand, `V` flips it instead — same arrangement `R` has with the ellipse.)
 
 ### The selection
 

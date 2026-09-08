@@ -12,6 +12,7 @@
 #include "undo.h"
 #include "tool.h"
 #include "select.h"
+#include "thumb.h"
 
 /*
  * The desk: a grey checkerboard, the size and the two greys taken from what the first
@@ -179,6 +180,11 @@ void vangopix_input (void)
 		if (sidebar_event(&e))
 			continue;
 
+		/* The thumbnail, on the same claim as the panels above it: it floats over the sheet,
+		 * so a click on it must not also reach the drawing underneath. */
+		if (thumb_event(&e, vng_tab))
+			continue;
+
 		/* Then the canvas grips, BEFORE the camera: they answer the left button, and
 		 * so does the space-pan. Whichever runs first wins the drag, and grabbing a
 		 * corner has to mean resizing it. */
@@ -243,6 +249,7 @@ void vangopix_input (void)
 			 */
 			if (bare(e.key.mod)) {
 				if (e.key.key == SDLK_F1)     { overlay = !overlay; break; }
+				if (e.key.key == SDLK_V)      { thumb_toggle();     break; }
 				if (e.key.key == SDLK_ESCAPE) { tabbar_toggle();    break; }
 				if (e.key.key == SDLK_TAB)    { sidebar_toggle();   break; }
 			}
@@ -385,6 +392,7 @@ void vangopix_core (void)
 
 		draw_sheet(t);
 		select_draw(t);    /* the float and its marching rectangle, over the sheet */
+		thumb_draw(t);     /* after the sheet: it copies from the sheet's own texture */
 		tool_draw(t);      /* the tip outline and the glyph, under the panels */
 		resize_draw(t);
 		if (overlay) draw_overlay(t, t->zoom);
