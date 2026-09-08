@@ -295,6 +295,22 @@ int main (void)
 		ok("the whole drag is one undo",
 		   undo_undo(c) && SDL_memcmp(c->pixels, blank, sizeof blank) == 0);
 
+		/*
+		 * A shape is rebuilt on every FRAME and not only on every motion, so that letting go
+		 * of SHIFT or sizing the tip mid-drag shows without the hand having to move. The
+		 * regression that guards is the rebuild itself: run it a few times with the pointer
+		 * standing still and the shape has to be the same shape, not a thicker one.
+		 */
+		mouse(c, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 3, 3);
+		mouse(c, SDL_EVENT_MOUSE_MOTION,      0,               3, 9);
+		for (int i = 0; i < 5; i++) tool_frame(c);
+		mouse(c, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 3, 9);
+
+		int lit = 0;
+		for (int i = 0; i < 24 * 24; i++) if (c->pixels[i] != blank[0]) lit++;
+		ok("REBUILDING A HELD SHAPE LEAVES THE SAME SHAPE", lit == 7);
+		undo_undo(c);
+
 		/* The rectangle is an outline: its corners are set and its middle is not. */
 		key(c, SDLK_E, SDL_KMOD_NONE);
 		mouse(c, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 4, 4);

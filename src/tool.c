@@ -816,14 +816,36 @@ void tool_frame (VNG_TAB *t)
 {
 	if (!t) return;
 
-	/* The spray is the one tool measured in time rather than in events: held still, it goes
-	 * on building up, which is what a spray can does. */
-	if (drawing && current == T_SPRAY) {
-		plot_spray(t, last_x, last_y, size[T_SPRAY]);
+	if (drawing) {
+		/* The spray is measured in time rather than in events: held still, it goes on
+		 * building up, which is what a spray can does. */
+		if (current == T_SPRAY) {
+			plot_spray(t, last_x, last_y, size[T_SPRAY]);
+			return;
+		}
+
+		/*
+		 * A SHAPE IS REDRAWN EVERY FRAME, NOT ONLY ON MOTION.
+		 *
+		 * It used to be redrawn from the motion handler alone, and that made everything
+		 * except the cursor position stale for as long as the hand held still: pressing or
+		 * releasing SHIFT mid-drag did not re-snap the line, and SHIFT+wheel changed the tip
+		 * size without the preview changing thickness. The hand had to be jiggled to see
+		 * what the modifiers had already done.
+		 *
+		 * The shape depends on more than where the pointer is, so it is rebuilt from all of
+		 * it, every frame. last_x/last_y hold the RAW pointer position - the snap is applied
+		 * to a copy inside apply - so re-running it here re-decides the snap rather than
+		 * baking in the old one.
+		 */
+		if (anchored(current)) {
+			vng_tab_stroke_reset(t);
+			apply(t, last_x, last_y);
+		}
 		return;
 	}
 
-	if (drawing || picking) return;
+	if (picking) return;
 
 	float mx, my;
 	SDL_GetMouseState(&mx, &my);
