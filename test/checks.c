@@ -321,6 +321,71 @@ int main (void)
 		ok("which put the region back",        c->pixels[0] == blank[0]);
 	}
 
+	/* ---- SHIFT snaps a line to the pixel-art slopes ---- */
+	{
+		int x, y;
+		#define SNAP(sx, sy) (x = (sx), y = (sy), tool_snap_iso(10, 10, &x, &y), 1)
+
+		SNAP(40, 11);
+		ok("a near-horizontal drag flattens onto the anchor", y == 10 && x == 40);
+
+		SNAP(12, 40);
+		ok("a near-vertical drag stands upright", x == 10 && y == 40);
+
+		/* 14 degrees up and to the right: the ISOMETRIC slope, two across for every one up. */
+		SNAP(30, 5);
+		ok("a shallow drag becomes 2:1", x == 20 && y == 5);
+
+		/* 56 degrees down and to the right: one across for every two down. */
+		SNAP(30, 40);
+		ok("a steep drag becomes 1:2", x == 25 && y == 40);
+
+		/* 45 down-right, and the sign has to survive going the other way too. */
+		SNAP(30, 30);
+		ok("a diagonal stays 1:1", x == 30 && y == 30);
+		SNAP(-10, 30);
+		ok("and 1:1 up the other diagonal", x == -10 && y == 30);
+
+		#undef SNAP
+	}
+
+	/* ---- the barrier fill, which is a different question from the bucket ---- */
+	{
+		VNG_TAB *f = vng_tab_new(20, 20);
+		view_sheet_rect(f);
+		undo_mark_saved(f);
+
+		const Uint32 paper = 0xFFFFFFFFu, wall = 0xFF102030u, junk = 0xFF445566u;
+
+		/* A ring of wall at 5..14, and two junk pixels inside it - the mixed region an
+		 * ordinary bucket refuses to cross. */
+		for (int i = 5; i <= 14; i++) {
+			f->pixels[5 * 20 + i] = f->pixels[14 * 20 + i] = wall;
+			f->pixels[i * 20 + 5] = f->pixels[i * 20 + 14] = wall;
+		}
+		f->pixels[8 * 20 + 8] = junk;
+		f->pixels[8 * 20 + 9] = junk;
+
+		tool_pick(f, 5, 5, 0);            /* the wall colour goes in slot 1 */
+		ok("the wall colour is loaded", tool_colour(0) == wall);
+
+		tool_fill(f, 10, 10, 0, false);   /* the ordinary bucket */
+		ok("the bucket filled the paper inside the ring", f->pixels[10 * 20 + 10] == wall);
+		ok("AND LEFT THE JUNK ALONE, being a different colour",
+		   f->pixels[8 * 20 + 8] == junk);
+		ok("and did not leak outside the ring", f->pixels[0] == paper);
+		undo_undo(f);
+		ok("the bucket was one undo", f->pixels[10 * 20 + 10] == paper);
+
+		tool_fill(f, 10, 10, 0, true);    /* the barrier */
+		ok("the barrier covered the paper too", f->pixels[10 * 20 + 10] == wall);
+		ok("AND THE JUNK WITH IT, not caring what it covers",
+		   f->pixels[8 * 20 + 8] == wall && f->pixels[8 * 20 + 9] == wall);
+		ok("and still stopped at the wall", f->pixels[0] == paper);
+		ok("the barrier was one undo too",
+		   undo_undo(f) && f->pixels[8 * 20 + 8] == junk);
+	}
+
 	/* ---- what a save dialog's answer means ----
 	 *
 	 * Filter 0 is PNG and filter 1 is "jpg;jpeg" in file.c's list. -1 is a platform that

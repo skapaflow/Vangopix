@@ -108,6 +108,8 @@ drawing near the border.
 | `Q` `W` `E` `R` | pencil, line, rect, ellipse |
 | `A` `S` `D` `F` | eraser, bucket, spray, change-colours |
 | `SHIFT` + wheel | tip size, per tool |
+| `SHIFT` + drag a line | snap to the pixel-art slopes: 2:1, 1:1, 1:2 |
+| `SHIFT` + bucket | barrier fill — spread until it meets your colour |
 | `SHIFT`+`TAB` | change-colours: circle or square limiter |
 | left drag on the sheet | draw |
 | right drag on the sheet | draw colour 2 — transparent to begin with, so it rubs out |
@@ -183,6 +185,18 @@ region it is dropped in. The spray keeps building while you hold it, even standi
 because that is what a spray can does. Change-colours turns every pixel of the colour under
 the pointer into your colour — across the whole sheet, or only inside a circle or a square:
 `SHIFT`+`TAB` swaps the shape.
+
+**`SHIFT` while dragging a line snaps it to the pixel-art slopes** — horizontal, 2:1, 1:1,
+1:2, vertical. The 2:1 is the isometric one: two across for every one down is the line that
+comes out clean on a pixel grid, with a run of two identical steps all the way. An arbitrary
+angle gives runs of 3, 2, 3, 2, 2 and reads as a wobble.
+
+**`SHIFT` on the bucket makes it a barrier fill**, which is a different question rather than a
+variation. The bucket spreads across one colour and stops where that colour stops; the barrier
+spreads across everything and stops only where it meets *your* colour. Draw an outline, drop
+the barrier inside it, and it fills up to the outline whatever is in there — where a bucket
+would refuse to cross a region of mixed shades. The word `barrier` appears beside the pointer
+while `SHIFT` is held, because the two look identical until one of them runs.
 
 **`SHIFT` + wheel sizes the tip, and each tool remembers its own.** An eraser wants to be
 twenty across and a pencil wants to be one, so they are not the same number. The step is per

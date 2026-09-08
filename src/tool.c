@@ -91,8 +91,9 @@ static int slot_of (Uint8 btn) { return btn == SDL_BUTTON_RIGHT ? 1 : 0; }
  * every motion rather than accumulated. */
 static bool anchored (TOOL t) { return t == T_LINE || t == T_RECT || t == T_ELLIPSE; }
 
-/* These do their whole job on the press and have nothing to add on the way out. */
-static bool instant (TOOL t) { return t == T_BUCKET || t == T_CHANGE; }
+/* Does its whole job on the press and has nothing to add on the way out. The bucket is one
+ * too, but it goes through tool_fill and never reaches the generic path. */
+static bool instant (TOOL t) { return t == T_CHANGE; }
 
 TOOL tool_current  (void) { return current; }
 int  tool_tip_size (void) { return size[current]; }
@@ -258,6 +259,65 @@ static void plot_line (VNG_TAB *t, int x0, int y0, int x1, int y1)
 	}
 }
 
+/*
+ * SHIFT SNAPS A LINE TO THE PIXEL-ART SLOPES, and the ladder is the reason it exists:
+ * horizontal, 2:1, 1:1, 1:2, vertical. The 2:1 is the isometric slope - a line that goes two
+ * across for every one down is the one that comes out CLEAN on a pixel grid, with a run of
+ * two identical steps all the way. An arbitrary angle produces runs of 3, 2, 3, 2, 2 and
+ * reads as a wobble. The first Vangopix's table, in its tool_brush.c, is these twelve
+ * sectors, and its own comment draws them as a grid of angles.
+ *
+ * WHAT IS PRESERVED IS THE VERTICAL TRAVEL, and X is recomputed from it - which is what the
+ * original does and what the hand expects: the length of the line follows how far the hand
+ * moved down the screen, and the slope decides the rest. Horizontal is the exception, where
+ * Y is flattened onto the anchor instead.
+ *
+ * The boundaries here are CONTIGUOUS, which the original's were not: it used a chain of
+ * `dir > a && dir < b`, so an angle landing exactly on 30 or 80 fell through every test and
+ * the line stayed free. Never seen in practice, and there is no reason to reproduce it.
+ */
+typedef enum { SNAP_FLAT, SNAP_UPRIGHT, SNAP_SLOPE } SNAP_KIND;
+
+static const struct { float upto; SNAP_KIND kind; float k; } iso[] = {
+	{  10.0f, SNAP_FLAT,    0.0f },
+	{  30.0f, SNAP_SLOPE,   2.0f },   /*  26 deg - two across, one up */
+	{  50.0f, SNAP_SLOPE,   1.0f },   /*  45 */
+	{  80.0f, SNAP_SLOPE,   0.5f },   /*  64 - one across, two up */
+	{ 100.0f, SNAP_UPRIGHT, 0.0f },
+	{ 130.0f, SNAP_SLOPE,  -0.5f },
+	{ 150.0f, SNAP_SLOPE,  -1.0f },
+	{ 170.0f, SNAP_SLOPE,  -2.0f },
+	{ 190.0f, SNAP_FLAT,    0.0f },
+	{ 210.0f, SNAP_SLOPE,   2.0f },
+	{ 230.0f, SNAP_SLOPE,   1.0f },
+	{ 260.0f, SNAP_SLOPE,   0.5f },
+	{ 280.0f, SNAP_UPRIGHT, 0.0f },
+	{ 310.0f, SNAP_SLOPE,  -0.5f },
+	{ 330.0f, SNAP_SLOPE,  -1.0f },
+	{ 350.0f, SNAP_SLOPE,  -2.0f },
+	{ 360.1f, SNAP_FLAT,    0.0f },   /* the far side of 350, which wraps to the first */
+};
+
+void tool_snap_iso (int ax, int ay, int *x, int *y)
+{
+	/* Negated, so the angle grows anticlockwise the way a person reads one, on a screen whose
+	 * Y grows downward. 90 is straight up. */
+	float dir = -SDL_atan2f((float)(*y - ay), (float)(*x - ax)) * (180.0f / SDL_PI_F);
+	if (dir < 0.0f) dir += 360.0f;
+
+	for (size_t i = 0; i < SDL_arraysize(iso); i++) {
+		if (dir >= iso[i].upto) continue;
+
+		switch (iso[i].kind) {
+		case SNAP_FLAT:    *y = ay; return;
+		case SNAP_UPRIGHT: *x = ax; return;
+		case SNAP_SLOPE:
+			*x = ax + (int)((float)(ay - *y) * iso[i].k);
+			return;
+		}
+	}
+}
+
 static void plot_rect (VNG_TAB *t, int x0, int y0, int x1, int y1)
 {
 	plot_line(t, x0, y0, x1, y0);
@@ -321,12 +381,26 @@ static void plot_ellipse (VNG_TAB *t, int x0, int y0, int x1, int y1)
  * THE MASK IS THE VISITED SET, and that is free: a pixel already marked in this stroke is a
  * pixel already filled, so nothing else has to remember where the fill has been.
  */
-static void plot_flood (VNG_TAB *t, int sx, int sy)
+static void plot_flood (VNG_TAB *t, int sx, int sy, bool barrier)
 {
 	if (!inside(t, sx, sy)) return;
 
 	Uint32 target = t->pixels[(size_t)sy * t->w + sx];
-	if (target == laying) return;   /* filling a colour with itself is a no-op with a cost */
+
+	/*
+	 * TWO FILLS, AND THE DIFFERENCE IS THE MATCH TEST.
+	 *
+	 * The ordinary bucket spreads across ONE COLOUR and stops where that colour stops. The
+	 * barrier spreads across EVERYTHING and stops only where it meets the colour it is
+	 * laying down - which is the tool for painting inside an outline you have just drawn,
+	 * whatever is in there. A bucket refuses to cross a region of mixed shades; the barrier
+	 * does not care what it is covering, only where the wall is.
+	 *
+	 * That is the first Vangopix's tool_flood_fill_adv, which it calls with the new colour
+	 * and the barrier colour set to the same value - and passing the same colour twice is
+	 * exactly what makes it terminate: a painted pixel becomes a wall.
+	 */
+	if (!barrier && target == laying) return;   /* a no-op with a cost */
 
 	/* Two ints per span start. One entry per row is the worst case, and a few rows of slack
 	 * cost nothing beside the buffers a document already carries. */
@@ -343,15 +417,19 @@ static void plot_flood (VNG_TAB *t, int sx, int sy)
 
 		if (!inside(t, x, y)) continue;
 
+		/* The document is read, never the preview, so the wall a barrier fill stops at is
+		 * the drawing as it was when the button went down. The mask guards against walking
+		 * back over what this fill has already covered. */
+		#define MATCH(rr, xx) 			(!t->mask[(rr) + (xx)] && (barrier ? t->pixels[(rr) + (xx)] != laying 			                                   : t->pixels[(rr) + (xx)] == target))
+
 		size_t row = (size_t)y * t->w;
-		if (t->mask[row + x] || t->pixels[row + x] != target) continue;
+		if (!MATCH(row, x)) continue;
 
 		int x0 = x;
-		while (x0 > 0 && !t->mask[row + x0 - 1] && t->pixels[row + x0 - 1] == target) x0--;
+		while (x0 > 0 && MATCH(row, x0 - 1)) x0--;
 
 		int x1 = x;
-		while (x1 < t->w - 1 && !t->mask[row + x1 + 1] && t->pixels[row + x1 + 1] == target)
-			x1++;
+		while (x1 < t->w - 1 && MATCH(row, x1 + 1)) x1++;
 
 		for (int i = x0; i <= x1; i++)
 			vng_tab_put(t, i, y, laying);
@@ -365,13 +443,14 @@ static void plot_flood (VNG_TAB *t, int sx, int sy)
 			bool   run  = false;
 
 			for (int i = x0; i <= x1; i++) {
-				bool match = !t->mask[nrow + i] && t->pixels[nrow + i] == target;
+				bool match = MATCH(nrow, i);
 				if (match && !run && top < cap) {
 					stack[top * 2] = i; stack[top * 2 + 1] = ny; top++;
 				}
 				run = match;
 			}
 		}
+		#undef MATCH
 	}
 
 	SDL_free(stack);
@@ -438,6 +517,16 @@ static void plot_change (VNG_TAB *t, int cx, int cy)
 	}
 }
 
+void tool_fill (VNG_TAB *t, int x, int y, int slot, bool barrier)
+{
+	if (!t || !inside(t, x, y)) return;
+	if (!vng_tab_stroke_open(t)) return;
+
+	laying = colour[slot == 1 ? 1 : 0];
+	plot_flood(t, x, y, barrier);
+	vng_tab_stroke_close(t);
+}
+
 /* Everything a press or a drag lays down, in one place, so the event handler stays a list of
  * gestures instead of a list of tools. */
 static void apply (VNG_TAB *t, int x, int y)
@@ -446,10 +535,14 @@ static void apply (VNG_TAB *t, int x, int y)
 	case T_PENCIL:
 	case T_ERASER:  plot_line(t, last_x, last_y, x, y);        break;
 	case T_SPRAY:   plot_spray(t, x, y, size[T_SPRAY]);        break;
-	case T_LINE:    plot_line(t, anchor_x, anchor_y, x, y);    break;
+	case T_LINE:
+		/* SHIFT snaps the far end to the pixel-art slopes before anything is drawn, so the
+		 * preview and the committed line are the same line. */
+		if (keys_mods() & SDL_KMOD_SHIFT) tool_snap_iso(anchor_x, anchor_y, &x, &y);
+		plot_line(t, anchor_x, anchor_y, x, y);
+		break;
 	case T_RECT:    plot_rect(t, anchor_x, anchor_y, x, y);    break;
 	case T_ELLIPSE: plot_ellipse(t, anchor_x, anchor_y, x, y); break;
-	case T_BUCKET:  plot_flood(t, x, y);                       break;
 	case T_CHANGE:  plot_change(t, x, y);                      break;
 	default: break;
 	}
@@ -545,6 +638,14 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 			picking   = true;
 			button    = e->button.button;
 			tool_pick(t, x, y, pick_slot);
+			return true;
+		}
+
+		/* The bucket is a drop and not a drag: it opens, fills and closes in one gesture, and
+		 * SHIFT chooses which of the two fills that is. */
+		if (!drawing && current == T_BUCKET) {
+			tool_fill(t, x, y, slot_of(e->button.button),
+			          (keys_mods() & SDL_KMOD_SHIFT) != 0);
 			return true;
 		}
 
@@ -688,6 +789,30 @@ static void ring (float cx, float cy, float r)
 	for (int i = 0; i <= SEG; i++) { p[i].x -= 1.0f; p[i].y -= 1.0f; }
 	SDL_SetRenderDrawColor(vng_ren, 0xFF, 0xFF, 0xFF, 0xE0);
 	SDL_RenderLines(vng_ren, p, SEG + 1);
+}
+
+/*
+ * A word beside the pointer, for a variant a shape cannot show. The bucket looks exactly the
+ * same whether SHIFT is held or not, and it does something quite different - so it says so.
+ * The first Vangopix printed BARRIER at (+32, -32) for the same reason; the offset here is
+ * double the glyph's, which puts it just clear of it.
+ */
+static void label (const char *text, float mx, float my)
+{
+	if (!vng_text) return;
+
+	float tw, th;
+	text_measure(vng_text, text, &tw, &th);
+
+	SDL_FRect r = { mx + GLYPH_OFF_X * 2.0f, my + GLYPH_OFF_Y * 2.0f,
+	                tw + READ_PAD * 2.0f, th + 2.0f };
+
+	if (r.y < tabbar_height()) r.y = my - GLYPH_OFF_Y * 2.0f;
+	if (r.x + r.w > vng_win_w) r.x = mx - GLYPH_OFF_X * 2.0f - r.w;
+
+	SDL_SetRenderDrawColor(vng_ren, 0x00, 0x00, 0x00, 0xC0);
+	SDL_RenderFillRect(vng_ren, &r);
+	text_print(vng_text, r.x + READ_PAD, r.y + 1.0f, 0xFFD060FF, "%s", text);
 }
 
 /*
@@ -875,6 +1000,11 @@ void tool_draw (VNG_TAB *t)
 	 * the same pixel either way. */
 	if ((eyedropper || picking) && inside(t, x, y))
 		preview(t->pixels[(size_t)y * t->w + x], mx, my);
+
+	/* The bucket's two fills look identical until one of them runs, so the variant is named
+	 * while the modifier that chooses it is held. */
+	if (on && !eyedropper && current == T_BUCKET && (keys_mods() & SDL_KMOD_SHIFT))
+		label("barrier", mx, my);
 
 	slots_draw();
 }

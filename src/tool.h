@@ -86,6 +86,33 @@ extern Uint32 tool_colour (int slot);
 extern void tool_pick (VNG_TAB *t, int x, int y, int slot);
 
 /*
+ * One bucket drop, as one undo step. `barrier` picks between the two fills:
+ *
+ *   false  the ordinary bucket - spreads across ONE COLOUR and stops where it stops.
+ *   true   the barrier fill - spreads across EVERYTHING and stops only where it meets the
+ *          colour it is laying down. The tool for painting inside an outline you have just
+ *          drawn, whatever is in there; a bucket refuses to cross a region of mixed shades,
+ *          and the barrier does not care what it covers, only where the wall is.
+ *
+ * SHIFT chooses it at the moment of the press. Exposed rather than kept inside the event
+ * handler because the difference between the two is a predicate, and a predicate is worth
+ * pinning down in test/checks.c.
+ */
+extern void tool_fill (VNG_TAB *t, int x, int y, int slot, bool barrier);
+
+/*
+ * SHIFT SNAPS A LINE TO THE PIXEL-ART SLOPES: horizontal, 2:1, 1:1, 1:2, vertical, in twelve
+ * sectors. The 2:1 is the isometric one - two across for every one down is the slope that
+ * comes out CLEAN on a pixel grid, a run of two identical steps all the way, where an
+ * arbitrary angle gives runs of 3, 2, 3, 2, 2 and reads as a wobble.
+ *
+ * (ax, ay) is the anchor and (x, y) the far end, moved in place. Takes the anchor as an
+ * argument rather than reading the drag's, so the twelve sectors and their sign convention
+ * can be checked without a mouse.
+ */
+extern void tool_snap_iso (int ax, int ay, int *x, int *y);
+
+/*
  * A colour as a person reads it: RRGGBBAA, eight hex digits, no prefix.
  *
  * NOT the 0xAARRGGBB the code uses. The internal shape matches the ARGB8888 texture and
