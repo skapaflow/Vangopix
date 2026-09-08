@@ -65,7 +65,10 @@ static TOOL current = T_PENCIL;
  * scale_step it sets per case in the same switch. */
 static int size[T_LOT] = { 1, 1, 1, 1, 20, 1, 20, 1 };
 
-static const int step[T_LOT] = { 1, 1, 1, 1,  5, 1,  3, 3 };
+/* A step of ZERO means the tool has no size, and the wheel says so by doing nothing. The
+ * bucket fills a region: there is no tip to make bigger, and letting SHIFT+wheel give it a
+ * number produced an outline that grew on screen and changed nothing at all. */
+static const int step[T_LOT] = { 1, 1, 1, 1,  5, 0,  3, 3 };
 
 /*
  * The change-colours limiter: 0 the whole sheet, 1 a circle, 2 a square. SHIFT+TAB swaps
@@ -78,6 +81,19 @@ static bool   drawing = false;
 static Uint8  button  = 0;                  /* the one that started the stroke */
 static int    last_x = 0, last_y = 0;       /* where the previous sample landed */
 static int    anchor_x = 0, anchor_y = 0;   /* where a shape was begun */
+
+/*
+ * SHIFT WITH THE PENCIL PREVIEWS A LINE FROM THE LAST POINT, and clicking commits it. It is
+ * the straight-line gesture every pixel editor has: draw, move away, SHIFT, click, and the
+ * two ends are joined exactly. The first Vangopix drew it from mouse.lfwx/lfwy - the last
+ * point - and so does this, which is why last_x/last_y are not reset when a stroke ends.
+ *
+ * The preview is a REAL STROKE that is opened, redrawn from the anchor every frame, and
+ * discarded if the key is let go: the same machinery a dragged shape uses, so what is on
+ * screen is pixel for pixel what a click would leave. `hinting` is what tells it apart from
+ * a drag - no button is down.
+ */
+static bool hinting = false;
 
 /* True while a CTRL press is being dragged across the sheet, absorbing as it goes. */
 static bool   picking = false;
@@ -554,6 +570,15 @@ static void apply (VNG_TAB *t, int x, int y)
 
 /* ------------------------------------------------------------------------ the events */
 
+/* The panels float OVER the sheet, so the pointer can be on the paper and on a panel at the
+ * same time. Their own events already settle a click - they consume it before this file sees
+ * it - but the cursor SHAPE is decided every frame, from where the pointer is, and it has to
+ * agree with who would actually get the click. */
+static bool over_panel (float mx, float my)
+{
+	return my < tabbar_height() || mx < sidebar_edge();
+}
+
 /* Q W E R / A S D F, the first Vangopix's own block under the left hand. */
 static bool tool_key (SDL_Keycode k, TOOL *out)
 {
@@ -588,6 +613,33 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 		TOOL want;
 		if (bare && tool_key(e->key.key, &want)) {
 			current = want;
+			return true;
+		}
+
+		/*
+		 * SHIFT+R is a random opaque colour into slot 1, and M is the average of the two
+		 * slots, alpha included, back into slot 1. Both are the first Vangopix's
+		 * (VNG_RAND_COLOR and VNG_MIX_COLOR in its keybind.c), and both are what a person
+		 * reaches for when the colour they want is NEAR one they already have: roll until
+		 * something is close, or split the difference between the two in hand.
+		 *
+		 * Averaging the alpha is the part worth keeping: mixing an opaque colour with
+		 * nothing is how a half transparent shade gets made without a slider anywhere.
+		 */
+		if (e->key.key == SDLK_R && (m & SDL_KMOD_SHIFT) && !(m & SDL_KMOD_CTRL)) {
+			colour[0] = 0xFF000000u
+			          | ((Uint32)SDL_rand(256) << 16)
+			          | ((Uint32)SDL_rand(256) <<  8)
+			          |  (Uint32)SDL_rand(256);
+			return true;
+		}
+
+		if (bare && e->key.key == SDLK_M) {
+			Uint32 a = colour[0], b = colour[1];
+			colour[0] = ((((a >> 24) & 0xFF) + ((b >> 24) & 0xFF)) / 2) << 24
+			          | ((((a >> 16) & 0xFF) + ((b >> 16) & 0xFF)) / 2) << 16
+			          | ((((a >>  8) & 0xFF) + ((b >>  8) & 0xFF)) / 2) <<  8
+			          | ((((a      ) & 0xFF) + ((b      ) & 0xFF)) / 2);
 			return true;
 		}
 
@@ -650,6 +702,26 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 		if (!drawing && current == T_BUCKET) {
 			tool_fill(t, x, y, slot_of(e->button.button),
 			          (keys_mods() & SDL_KMOD_SHIFT) != 0);
+			return true;
+		}
+
+		/*
+		 * A press while the hint is up COMMITS IT: what is on screen is already the line,
+		 * so there is nothing to draw again - only to keep. Redrawn first if the button
+		 * that pressed wants the other colour, since the hint previews slot 1.
+		 */
+		if (hinting) {
+			Uint32 want = colour[slot_of(e->button.button)];
+			if (want != laying) {
+				vng_tab_stroke_reset(t);
+				laying = want;
+				plot_line(t, last_x, last_y, x, y);
+			}
+			hinting = false;
+			vng_tab_stroke_close(t);
+
+			last_x = anchor_x = x;
+			last_y = anchor_y = y;
 			return true;
 		}
 
@@ -729,25 +801,54 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 	}
 }
 
+/* Throws the hint away. Its undo step carried something, so it is rewound rather than
+ * closed - a preview must leave nothing behind, not even one step to press CTRL+Z on. */
+static void hint_drop (VNG_TAB *t)
+{
+	if (!hinting) return;
+
+	hinting = false;
+	vng_tab_stroke_reset(t);
+	vng_tab_stroke_close(t);   /* the step is empty now, so it is discarded */
+}
+
 void tool_frame (VNG_TAB *t)
 {
+	if (!t) return;
+
 	/* The spray is the one tool measured in time rather than in events: held still, it goes
-	 * on building up, which is what a spray can does. Everything else has already happened
-	 * by the time this runs. */
-	if (t && drawing && current == T_SPRAY)
+	 * on building up, which is what a spray can does. */
+	if (drawing && current == T_SPRAY) {
 		plot_spray(t, last_x, last_y, size[T_SPRAY]);
+		return;
+	}
+
+	if (drawing || picking) return;
+
+	float mx, my;
+	SDL_GetMouseState(&mx, &my);
+
+	int x, y;
+	pixel_of(t, mx, my, &x, &y);
+
+	bool want = (current == T_PENCIL) && (keys_mods() & SDL_KMOD_SHIFT) &&
+	            inside(t, x, y) && !over_panel(mx, my);
+
+	if (!want) { hint_drop(t); return; }
+
+	if (!hinting) {
+		laying = colour[0];
+		if (!vng_tab_stroke_open(t, writes_through(laying))) return;
+		hinting = true;
+	}
+
+	/* Redrawn from scratch every frame, exactly as a dragged shape is: the line is the one
+	 * from the last point to HERE, and the one from the previous frame never existed. */
+	vng_tab_stroke_reset(t);
+	plot_line(t, last_x, last_y, x, y);
 }
 
 /* ------------------------------------------------------------------------ the pixels */
-
-/* The panels float OVER the sheet, so the pointer can be on the paper and on a panel at the
- * same time. Their own events already settle a click - they consume it before this file sees
- * it - but the cursor SHAPE is decided every frame, from where the pointer is, and it has to
- * agree with who would actually get the click. */
-static bool over_panel (float mx, float my)
-{
-	return my < tabbar_height() || mx < sidebar_edge();
-}
 
 static void set_cursor (SDL_Cursor *want)
 {
@@ -832,14 +933,21 @@ static void outline (VNG_TAB *t, int px, int py)
 	SDL_FPoint b = view_world_to_screen(t, (float)px + 1.0f, (float)py + 1.0f);
 	float cell = b.x - a.x;
 
-	if (current == T_CHANGE && limiter == 1) {
+	/*
+	 * THE OUTLINE IS THE SHAPE OF WHAT WILL HAPPEN, not a generic box. The spray scatters
+	 * inside a CIRCLE, so a square around it claims an area it never touches; the eraser
+	 * clears a square and says so; change-colours draws whichever limiter is chosen, since
+	 * SHIFT+TAB swaps them and a swap nobody can see is a swap nobody will use.
+	 */
+	if ((current == T_SPRAY && r > 1) || (current == T_CHANGE && limiter == 1)) {
 		ring(a.x + cell * 0.5f, a.y + cell * 0.5f, (float)r * cell);
 		return;
 	}
 
 	/* One pixel, or the square the tip covers. The eraser is odd-sized by definition, and
-	 * the round tips are measured the same way, so the box says how far each reaches. */
-	float half = (r <= 1) ? 0.0f : (float)r;
+	 * the round tips are measured the same way, so the box says how far each reaches. A tool
+	 * with no size of its own is always the single pixel it is aimed at. */
+	float half = (r <= 1 || step[current] == 0) ? 0.0f : (float)r;
 	if (current == T_ERASER) half = (float)((size[T_ERASER] | 1) / 2);
 
 	SDL_FRect in = { a.x - half * cell, a.y - half * cell,

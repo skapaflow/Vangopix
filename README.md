@@ -108,9 +108,12 @@ drawing near the border.
 | `Q` `W` `E` `R` | pencil, line, rect, ellipse |
 | `A` `S` `D` `F` | eraser, bucket, spray, change-colours |
 | `SHIFT` + wheel | tip size, per tool |
+| `SHIFT` + click, pencil | draw a straight line from the last point |
 | `SHIFT` + drag a line | snap to the pixel-art slopes: 2:1, 1:1, 1:2 |
 | `SHIFT` + bucket | barrier fill — spread until it meets your colour |
 | `SHIFT`+`TAB` | change-colours: circle or square limiter |
+| `SHIFT`+`R` | roll a random colour into slot 1 |
+| `M` | average the two slots into slot 1 |
 | left drag on the sheet | draw |
 | right drag on the sheet | draw colour 2 — transparent to begin with, so it rubs out |
 | `CTRL` + left / right click | absorb that colour into 1 or 2; drag to keep absorbing |
@@ -187,6 +190,10 @@ because that is what a spray can does. Change-colours turns every pixel of the c
 the pointer into your colour — across the whole sheet, or only inside a circle or a square:
 `SHIFT`+`TAB` swaps the shape.
 
+**`SHIFT` with the pencil previews a straight line from the last point**, and a click commits
+it: draw, move away, hold `SHIFT`, click, and the two ends are joined exactly. What you see
+before clicking is pixel for pixel what you get.
+
 **`SHIFT` while dragging a line snaps it to the pixel-art slopes** — horizontal, 2:1, 1:1,
 1:2, vertical. The 2:1 is the isometric one: two across for every one down is the line that
 comes out clean on a pixel grid, with a run of two identical steps all the way. An arbitrary
@@ -229,6 +236,10 @@ is the button that lays it down. Keep the button down and drag to go on absorbin
 Colour 2 starts as **nothing**, which is what makes the right button an eraser without an
 eraser existing: in a program that keeps alpha, rubbing out *is* drawing with nothing. Put a
 colour in slot 2 and the right button draws with it instead.
+
+`SHIFT`+`R` rolls a random colour into slot 1, and `M` replaces slot 1 with the average of
+the two — alpha included, which is how you make a half transparent shade without a slider.
+Both are for when the colour you want is *near* one you already have.
 
 While `CTRL` is held, a bar follows the pointer with the colour under it and its value as
 `RRGGBBAA` — what you would get if you pressed. The two loaded colours sit at the bottom

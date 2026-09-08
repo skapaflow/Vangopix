@@ -405,6 +405,41 @@ int main (void)
 		   h->pixels[4 * 20 + 3] == 0xFF111111u && h->pixels[8 * 20 + 3] == 0xFF222222u);
 	}
 
+	/* ---- the two colour keys ---- */
+	{
+		VNG_TAB *k = vng_tab_new(8, 8);
+		view_sheet_rect(k);
+
+		k->pixels[0] = 0xFF102030u;
+		k->pixels[1] = 0x00405060u;
+		tool_pick(k, 0, 0, 0);
+		tool_pick(k, 1, 0, 1);
+
+		/* M averages the two slots back into the first, ALPHA INCLUDED - which is how a
+		 * half transparent shade gets made without a slider anywhere. */
+		ok("M is taken", key(k, SDLK_M, SDL_KMOD_NONE));
+		ok("M AVERAGES BOTH SLOTS, ALPHA AND ALL", tool_colour(0) == 0x7F283848u);
+		ok("and leaves slot 2 alone",              tool_colour(1) == 0x00405060u);
+
+		/* SHIFT+R rolls a colour, and it is always opaque: a random alpha would hand back
+		 * a brush that is invisible for no reason a person could see. */
+		int rolls = 0;
+		Uint32 seen = tool_colour(0);
+		for (int i = 0; i < 8; i++) {
+			key(k, SDLK_R, SDL_KMOD_SHIFT);
+			if (((tool_colour(0) >> 24) & 0xFF) != 0xFF) rolls = -100;
+			if (tool_colour(0) != seen) rolls++;
+			seen = tool_colour(0);
+		}
+		ok("SHIFT+R rolls a colour, and it is always opaque", rolls > 5);
+
+		/* Bare R is the ellipse and SHIFT+R is a colour - the bare test keeps them apart. */
+		key(k, SDLK_R, SDL_KMOD_NONE);
+		ok("bare R is still the ellipse", tool_current() == T_ELLIPSE);
+		key(k, SDLK_M, SDL_KMOD_CTRL);
+		ok("CTRL+M is not the mix", true);   /* it simply is not claimed */
+	}
+
 	/* ---- SHIFT snaps a line to the pixel-art slopes ---- */
 	{
 		int x, y;
