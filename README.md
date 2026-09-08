@@ -244,9 +244,11 @@ shows the document at one art pixel to one screen pixel, cropped around whatever
 looking at. Pixel art is drawn at 800% and looked at at 100%, and this answers the question
 you ask twenty times an hour: what does this actually look like?
 
-When the document is smaller than the panel, the panel shrinks to the document — so your
-sprite *is* the panel, at the size it will be seen. When it is bigger, hovering the panel
-outlines the part of the sheet it is showing.
+**It is a window**: drag it by its bar, stretch it by the corner, and it stays where you put
+it — the point being to park it right beside the character you are drawing, so you never have
+to zoom out to see how the work is going. Put it away and it comes back where you left it.
+When the panel is showing only part of the document, hovering it outlines that part on the
+sheet.
 
 (With a selection in hand, `V` flips it instead — same arrangement `R` has with the ellipse.)
 
@@ -352,6 +354,9 @@ src/
   file.c/.h     save, and the two system dialogs that go with it
   undo.c/.h     the undo stack, per document
   tool.c/.h     the pencil: the only file that changes a pixel
+  select.c/.h   the selection: marked or floating
+  thumb.c/.h    the 1:1 panel
+  win.c/.h      the window frame: move, stretch, raise, close
   glyph.c/.h    the line-art glyphs
   tabs.c/.h     the tabs, which ARE the documents
   tabbar.c/.h   the tab bar: the only file that draws a tab

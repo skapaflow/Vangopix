@@ -5,6 +5,7 @@
 #include "file.h"
 #include "tool.h"
 #include "select.h"
+#include "win.h"
 
 SDL_Window   *vng_win   = NULL;
 SDL_Renderer *vng_ren   = NULL;
@@ -103,6 +104,7 @@ bool vangopix_init (int argc, char **argv)
 void vangopix_quit (void)
 {
 	tool_free();
+	win_free();
 	select_clipboard_free();
 	vng_tabs_free();
 	project_free();

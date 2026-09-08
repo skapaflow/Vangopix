@@ -12,6 +12,7 @@
 #include "tool.h"
 #include "select.h"
 #include "thumb.h"
+#include "win.h"
 #include "view.h"
 #include "file.h"
 
@@ -689,7 +690,7 @@ int main (void)
 		   tool_current() == T_ELLIPSE);
 	}
 
-	/* ---- the 1:1 panel ---- */
+	/* ---- the 1:1 panel, which is now a window ---- */
 	{
 		VNG_TAB *q = vng_tab_new(400, 300);
 		view_sheet_rect(q);
@@ -698,32 +699,35 @@ int main (void)
 		SDL_zero(e);
 		e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
 		e.button.button = SDL_BUTTON_LEFT;
+		e.button.x = (float)vng_win_w - 70.0f;
+		e.button.y = (float)vng_win_h - 70.0f;
 
-		/* Bottom right, one margin in: the panel is 160 a side on a document this big. */
-		e.button.x = (float)vng_win_w - 80.0f;
-		e.button.y = (float)vng_win_h - 80.0f;
-
-		ok("down, the panel takes nothing", thumb_event(&e, q) == false);
+		ok("down, no window takes the click", win_event(&e) == false);
 
 		thumb_toggle();
 		ok("V puts it up", thumb_visible());
-		ok("UP, IT TAKES THE CLICK RATHER THAN LETTING IT REACH THE SHEET",
-		   thumb_event(&e, q));
+		ok("UP, THE WINDOW TAKES THE CLICK RATHER THAN THE SHEET", win_event(&e));
 
 		e.button.x = 10.0f;
 		e.button.y = 10.0f;
-		ok("and takes nothing anywhere else", thumb_event(&e, q) == false);
+		ok("and takes nothing where it is not", win_event(&e) == false);
 
-		/* Motion is deliberately not consumed, so a stroke or a pan begun on the sheet is
-		 * not cut in half by crossing the panel - the same rule the sidebar follows. */
+		/* Motion is consumed only while something is being carried, so a stroke or a pan
+		 * begun on the sheet is not cut in half by crossing a window. */
 		SDL_zero(e);
 		e.type = SDL_EVENT_MOUSE_MOTION;
-		e.motion.x = (float)vng_win_w - 80.0f;
-		e.motion.y = (float)vng_win_h - 80.0f;
-		ok("MOTION CROSSES IT UNTOUCHED", thumb_event(&e, q) == false);
+		e.motion.x = (float)vng_win_w - 70.0f;
+		e.motion.y = (float)vng_win_h - 70.0f;
+		ok("MOTION CROSSES A WINDOW UNTOUCHED", win_event(&e) == false);
 
 		thumb_toggle();
 		ok("V puts it away again", thumb_visible() == false);
+
+		/* And putting it away does not throw it out: it comes back where it was left, which
+		 * is the whole reason it is a window rather than a corner. */
+		thumb_toggle();
+		ok("it comes back", thumb_visible());
+		thumb_toggle();
 	}
 
 	/* ---- what a save dialog's answer means ----

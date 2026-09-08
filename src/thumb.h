@@ -29,25 +29,26 @@
  *
  *   3. `rec4i win = {250, 100, w, h}` carried two numbers that were never read. Gone.
  *
- * IT IS A READOUT AND TAKES NO GESTURE OF ITS OWN. Click-to-navigate was considered and left
- * out: the panel is a crop around where the camera already IS, so clicking inside it would
- * move the view a few pixels - a gesture that looks useful and is not. It follows the camera
- * rather than being panned separately, because there is one place you are looking and two of
- * them would have to be kept in step by hand.
+ * IT IS A WINDOW, and that is what the panel is FOR: parked beside the character being drawn,
+ * at 1:1, so the eye never has to zoom out to ask how the work is going. A corner it cannot
+ * leave would have been half the feature. win.c carries the frame - moving, stretching,
+ * raising - and this file draws the inside; the position is kept when it is put away, so it
+ * is found again where it was left.
  *
- * Summoned by V and gone again, bottom right - opposite the colour slots and clear of the
- * project sidebar.
+ * It follows the camera rather than being panned separately, because there is one place you
+ * are looking and two of them would have to be kept in step by hand. Click-to-navigate was
+ * considered and left out: it is a crop around where the camera already IS, so clicking
+ * inside would move the view a few pixels - a gesture that looks useful and is not.
+ *
+ * Summoned by V and gone again.
  */
 
 extern void thumb_toggle  (void);
 extern bool thumb_visible (void);
 
-/* Returns true when the panel consumed the event: it floats over the sheet, so a click on it
-   must not also land on the drawing underneath. */
-extern bool thumb_event (const SDL_Event *e, VNG_TAB *t);
-
-/* Drawn AFTER the sheet, because it copies from the sheet's own texture and that texture is
-   brought up to date there. */
+/* Draws only the marker on the SHEET saying which part the panel is showing - the panel
+   itself is drawn by win.c, inside the frame. Called after the sheet, because both halves
+   read from the sheet's own texture and that texture is brought up to date there. */
 extern void thumb_draw (VNG_TAB *t);
 
 #endif

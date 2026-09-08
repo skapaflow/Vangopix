@@ -13,6 +13,7 @@
 #include "tool.h"
 #include "select.h"
 #include "thumb.h"
+#include "win.h"
 
 /*
  * The desk: a grey checkerboard, the size and the two greys taken from what the first
@@ -180,9 +181,10 @@ void vangopix_input (void)
 		if (sidebar_event(&e))
 			continue;
 
-		/* The thumbnail, on the same claim as the panels above it: it floats over the sheet,
-		 * so a click on it must not also reach the drawing underneath. */
-		if (thumb_event(&e, vng_tab))
+		/* The floating windows. Under the bar and the panel above, because those two are
+		 * summoned to be used and put away again, while a window is parked and stays - and a
+		 * parked window must not hide the thing you raised the bar to reach. */
+		if (win_event(&e))
 			continue;
 
 		/* Then the canvas grips, BEFORE the camera: they answer the left button, and
@@ -392,11 +394,12 @@ void vangopix_core (void)
 
 		draw_sheet(t);
 		select_draw(t);    /* the float and its marching rectangle, over the sheet */
-		thumb_draw(t);     /* after the sheet: it copies from the sheet's own texture */
+		thumb_draw(t);     /* the marker on the sheet; win_draw draws the panel itself */
 		tool_draw(t);      /* the tip outline and the glyph, under the panels */
 		resize_draw(t);
 		if (overlay) draw_overlay(t, t->zoom);
 		sidebar_draw();
+		win_draw();      /* the floating windows, over the sheet and under the panels */
 		tabbar_draw();   /* last of the layers, so it floats over the sheet */
 	}
 
