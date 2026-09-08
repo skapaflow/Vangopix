@@ -49,6 +49,11 @@ extern bool undo_open  (VNG_TAB *t);
 extern void undo_carry (VNG_TAB *t, int x, int y, Uint32 was, Uint32 now);
 extern void undo_close (VNG_TAB *t);   /* a step that carried nothing is discarded */
 
+/* Puts back every pixel the OPEN step has changed so far and empties it, leaving the step
+   open. What a write-through stroke does instead of throwing a preview away - see the
+   `direct` strokes in tabs.h. */
+extern void undo_rewind (VNG_TAB *t);
+
 /*
  * A resize. TAKES OWNERSHIP of `was`, the buffer the resize replaced - it is freed with
  * the step, or handed back to the document when the step is undone.

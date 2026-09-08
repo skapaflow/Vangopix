@@ -115,7 +115,7 @@ int main (void)
 	ok("geometry back to 4x3 after the grow was undone", t->w == 4 && t->h == 3);
 
 	/* ---- a stroke ---- */
-	ok("stroke opens", vng_tab_stroke_open(t));
+	ok("stroke opens", vng_tab_stroke_open(t, false));
 	ok("nothing touched yet", vng_tab_touched(t, 1, 1) == false);
 	vng_tab_put(t, 1, 1, 0xFF00FF00u);
 	vng_tab_put(t, 2, 1, 0xFF00FF00u);
@@ -135,7 +135,7 @@ int main (void)
 	ok("stroke back", t->pixels[1 * 4 + 1] == 0xFF00FF00u);
 
 	/* ---- an empty stroke is not a step ---- */
-	vng_tab_stroke_open(t);
+	vng_tab_stroke_open(t, false);
 	vng_tab_stroke_close(t);
 	ok("an empty stroke left nothing to undo, so this undoes the real one",
 	   undo_undo(t) && same(t->pixels, origin, 12));
@@ -319,6 +319,90 @@ int main (void)
 		ok("and did not paint the wall",       c->pixels[12 * 24 + 5] == 0xFF00FF00u);
 		ok("one bucket is one undo",           undo_undo(c));
 		ok("which put the region back",        c->pixels[0] == blank[0]);
+	}
+
+	/* ---- a stroke that REMOVES colour shows as it is drawn ----
+	 *
+	 * The bug this pins: the preview is composited OVER the sheet, and nothing composited
+	 * over anything takes a pixel away, so an eraser laid into the preview stayed invisible
+	 * until the button came up.
+	 */
+	{
+		VNG_TAB *g = vng_tab_new(20, 20);
+		view_sheet_rect(g);
+		undo_mark_saved(g);
+
+		key(g, SDLK_A, SDL_KMOD_NONE);   /* eraser */
+
+		mouse(g, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 10, 10);
+		ok("THE ERASER SHOWS BEFORE THE BUTTON COMES UP",
+		   g->pixels[10 * 20 + 10] == 0x00000000u);
+
+		mouse(g, SDL_EVENT_MOUSE_MOTION,    0,               13, 10);
+		ok("and goes on showing as it is dragged",
+		   g->pixels[10 * 20 + 12] == 0x00000000u);
+
+		mouse(g, SDL_EVENT_MOUSE_BUTTON_UP, SDL_BUTTON_LEFT, 13, 10);
+		ok("the whole rub-out is one undo", undo_undo(g));
+		ok("which put the paper back", g->pixels[10 * 20 + 10] == 0xFFFFFFFFu &&
+		                               g->pixels[10 * 20 + 12] == 0xFFFFFFFFu);
+
+		/* A SHAPE in a colour that removes: the same write-through path, and the drag still
+		 * has to leave nothing behind where it passed. Colour 2 is nothing by default, so
+		 * the right button is the one that does it. */
+		g->pixels[19 * 20 + 19] = 0x00000000u;
+		tool_pick(g, 19, 19, 1);         /* nothing, back into slot 2 */
+
+		key(g, SDLK_E, SDL_KMOD_NONE);   /* rect */
+		mouse(g, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_RIGHT, 2,  2);
+		mouse(g, SDL_EVENT_MOUSE_MOTION,      0,                17, 17);
+		mouse(g, SDL_EVENT_MOUSE_MOTION,      0,                8,  8);
+		mouse(g, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_RIGHT, 8,  8);
+
+		ok("the erasing rect landed where the drag ended",
+		   g->pixels[2 * 20 + 2] == 0x00000000u && g->pixels[8 * 20 + 8] == 0x00000000u);
+		ok("AND WAS REWOUND EVERYWHERE THE DRAG PASSED",
+		   g->pixels[17 * 20 + 17] == 0xFFFFFFFFu && g->pixels[2 * 20 + 17] == 0xFFFFFFFFu);
+		ok("and it too was one undo",
+		   undo_undo(g) && g->pixels[2 * 20 + 2] == 0xFFFFFFFFu);
+	}
+
+	/* ---- change-colours keeps working while the button is held ---- */
+	{
+		VNG_TAB *h = vng_tab_new(20, 20);
+		view_sheet_rect(h);
+		undo_mark_saved(h);
+
+		/* Three bands, so a drag down the sheet meets a different colour at each step. */
+		for (int i = 0; i < 20; i++) {
+			h->pixels[4 * 20 + i] = 0xFF111111u;
+			h->pixels[8 * 20 + i] = 0xFF222222u;
+		}
+
+		key(h, SDLK_Q, SDL_KMOD_NONE);
+		h->pixels[0] = 0xFF00FF00u;
+		tool_pick(h, 0, 0, 0);            /* green in slot 1 */
+
+		key(h, SDLK_F, SDL_KMOD_NONE);    /* change-colours, limiter 0: the whole sheet */
+
+		/* A press and NO drag: only the band it was dropped on. */
+		mouse(h, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 10, 4);
+		mouse(h, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 10, 4);
+		ok("a press changes the band under it", h->pixels[4 * 20 + 3] == 0xFF00FF00u);
+		ok("and leaves the one below alone",    h->pixels[8 * 20 + 3] == 0xFF222222u);
+		undo_undo(h);
+
+		/* THE DRAG IS THE FEATURE: the same gesture, slid onto a second colour, takes that
+		 * one as well. Before this it stopped at the press. */
+		mouse(h, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 10, 4);
+		mouse(h, SDL_EVENT_MOUSE_MOTION,      0,               10, 8);
+		mouse(h, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 10, 8);
+		ok("SLIDING ONTO ANOTHER COLOUR TAKES THAT ONE TOO",
+		   h->pixels[4 * 20 + 3] == 0xFF00FF00u && h->pixels[8 * 20 + 3] == 0xFF00FF00u);
+
+		ok("the whole slide is one undo", undo_undo(h));
+		ok("which put both bands back",
+		   h->pixels[4 * 20 + 3] == 0xFF111111u && h->pixels[8 * 20 + 3] == 0xFF222222u);
 	}
 
 	/* ---- SHIFT snaps a line to the pixel-art slopes ---- */

@@ -91,9 +91,13 @@ static int slot_of (Uint8 btn) { return btn == SDL_BUTTON_RIGHT ? 1 : 0; }
  * every motion rather than accumulated. */
 static bool anchored (TOOL t) { return t == T_LINE || t == T_RECT || t == T_ELLIPSE; }
 
-/* Does its whole job on the press and has nothing to add on the way out. The bucket is one
- * too, but it goes through tool_fill and never reaches the generic path. */
-static bool instant (TOOL t) { return t == T_CHANGE; }
+/*
+ * A colour with alpha below full cannot be shown by compositing the preview OVER the sheet -
+ * nothing drawn over anything takes a pixel away - so a stroke laying one writes straight
+ * through instead. The eraser is the obvious case; the right button on a fresh program is the
+ * one that surprised somebody, since colour 2 starts as nothing.
+ */
+static bool writes_through (Uint32 c) { return ((c >> 24) & 0xFF) != 0xFF; }
 
 TOOL tool_current  (void) { return current; }
 int  tool_tip_size (void) { return size[current]; }
@@ -520,9 +524,9 @@ static void plot_change (VNG_TAB *t, int cx, int cy)
 void tool_fill (VNG_TAB *t, int x, int y, int slot, bool barrier)
 {
 	if (!t || !inside(t, x, y)) return;
-	if (!vng_tab_stroke_open(t)) return;
 
 	laying = colour[slot == 1 ? 1 : 0];
+	if (!vng_tab_stroke_open(t, writes_through(laying))) return;
 	plot_flood(t, x, y, barrier);
 	vng_tab_stroke_close(t);
 }
@@ -657,10 +661,14 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 			vng_tab_stroke_close(t);
 		}
 
-		if (!vng_tab_stroke_open(t)) return true;   /* no memory for it; still ours */
-
+		/* The colour is decided BEFORE the stroke opens, because it is what decides whether
+		 * the stroke can be previewed at all. */
 		button   = e->button.button;
 		laying   = (current == T_ERASER) ? 0u : colour[slot_of(button)];
+
+		if (!vng_tab_stroke_open(t, writes_through(laying)))
+			return true;                       /* no memory for it; still ours */
+
 		drawing  = true;
 		last_x   = anchor_x = x;
 		last_y   = anchor_y = y;
@@ -668,12 +676,6 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 		if (current == T_PENCIL || current == T_ERASER) tip(t, x, y);
 		else                                            apply(t, x, y);
 
-		/* The bucket and the change do their whole job here. Leaving the stroke open would
-		 * make a drag across the sheet refill on every motion event. */
-		if (instant(current)) {
-			drawing = false;
-			vng_tab_stroke_close(t);
-		}
 		return true;
 	}
 

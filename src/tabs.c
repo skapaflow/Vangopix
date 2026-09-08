@@ -117,10 +117,12 @@ static bool draw_buffers_make (VNG_TAB *t)
 	return true;
 }
 
-bool vng_tab_stroke_open (VNG_TAB *t)
+bool vng_tab_stroke_open (VNG_TAB *t, bool direct)
 {
 	if (!t || !draw_buffers_make(t)) return false;
 	if (!undo_open(t)) return false;
+
+	t->direct = direct;
 
 	/* An empty box, stated so that the first put widens it in both directions. */
 	t->sx0 = t->w; t->sy0 = t->h;
@@ -140,8 +142,19 @@ void vng_tab_put (VNG_TAB *t, int x, int y, Uint32 argb)
 	if (!t || !t->stroke || x < 0 || y < 0 || x >= t->w || y >= t->h) return;
 
 	size_t i = (size_t)y * t->w + x;
-	t->pixels_preview[i] = argb;
-	t->mask[i]           = 1;
+
+	if (t->direct) {
+		/* Straight into the document, carry first. There is no preview to composite and
+		 * nothing to merge later - which is the whole point, since what this stroke lays
+		 * cannot be shown by drawing it over anything. */
+		undo_carry(t, x, y, t->pixels[i], argb);
+		t->pixels[i] = argb;
+		t->tex_dirty = true;
+	} else {
+		t->pixels_preview[i] = argb;
+	}
+
+	t->mask[i] = 1;   /* the mask does its job either way: one write per pixel per stroke */
 
 	if (x     < t->sx0) t->sx0 = x;
 	if (y     < t->sy0) t->sy0 = y;
@@ -172,16 +185,44 @@ static void preview_wipe (VNG_TAB *t)
 	t->sx1 = 0;    t->sy1 = 0;
 }
 
+/* Empties the touched rectangle in the mask without touching the pixels - what a
+ * write-through stroke needs, since its pixels are put back by the undo step instead. */
+static void mask_wipe (VNG_TAB *t)
+{
+	if (t->sx1 <= t->sx0 || t->sy1 <= t->sy0) return;
+
+	for (int y = t->sy0; y < t->sy1; y++)
+		SDL_memset(t->mask + (size_t)y * t->w + t->sx0, 0, (size_t)(t->sx1 - t->sx0));
+
+	t->sx0 = t->w; t->sy0 = t->h;
+	t->sx1 = 0;    t->sy1 = 0;
+}
+
 void vng_tab_stroke_reset (VNG_TAB *t)
 {
 	if (!t || !t->stroke) return;
-	preview_wipe(t);
+
+	if (t->direct) {
+		/* The step itself is the record of what to put back, so rewinding it IS the reset.
+		 * That is what lets a shape be dragged in a colour that removes rather than adds. */
+		undo_rewind(t);
+		mask_wipe(t);
+	} else {
+		preview_wipe(t);
+	}
 }
 
 void vng_tab_stroke_close (VNG_TAB *t)
 {
 	if (!t || !t->stroke) return;
 	t->stroke = false;
+
+	/* Nothing to merge: every pixel went in as it was drawn, and its carry with it. */
+	if (t->direct) {
+		mask_wipe(t);
+		undo_close(t);
+		return;
+	}
 
 	/* Only the rectangle the stroke actually reached is walked. The alternative is the
 	 * whole sheet on every stroke, which on a large canvas is millions of untouched

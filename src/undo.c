@@ -168,6 +168,25 @@ void undo_carry (VNG_TAB *t, int x, int y, Uint32 was, Uint32 now)
 	s->lot++;
 }
 
+void undo_rewind (VNG_TAB *t)
+{
+	VNG_UNDO *u = t ? t->undo : NULL;
+	if (!u || !u->open) return;
+
+	STEP *s = u->open;
+
+	/* Backwards, so a pixel written twice in this step ends on the colour it had before the
+	 * first of them. The carries are the only record of what was there. */
+	for (int i = s->lot - 1; i >= 0; i--) {
+		const CARRY *c = &s->carry[i];
+		if (c->x < 0 || c->y < 0 || c->x >= t->w || c->y >= t->h) continue;
+		t->pixels[(size_t)c->y * t->w + c->x] = c->was;
+	}
+
+	s->lot = 0;             /* the allocation is kept: the next pass will refill it */
+	t->tex_dirty = true;
+}
+
 void undo_close (VNG_TAB *t)
 {
 	VNG_UNDO *u = t ? t->undo : NULL;

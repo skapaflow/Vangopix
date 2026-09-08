@@ -181,7 +181,8 @@ the names:
 Left button draws colour 1, right button draws colour 2. The line, the rectangle and the
 ellipse are dragged: press where it starts, drag, release where it ends, and what you see
 while dragging is the shape you will get — the whole drag is one undo. The bucket fills the
-region it is dropped in. The spray keeps building while you hold it, even standing still,
+region it is dropped in. Change-colours keeps working while you hold the button, so sliding
+across the sheet takes every colour you pass over — one gesture for an aggressive recolour. The spray keeps building while you hold it, even standing still,
 because that is what a spray can does. Change-colours turns every pixel of the colour under
 the pointer into your colour — across the whole sheet, or only inside a circle or a square:
 `SHIFT`+`TAB` swaps the shape.

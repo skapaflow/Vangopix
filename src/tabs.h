@@ -50,6 +50,7 @@ typedef struct _vng_tab_ {
 	Uint8  *mask;
 	SDL_Texture *tex_preview;
 	bool    stroke;            /* a stroke is open, so the preview has something in it */
+	bool    direct;            /* ... unless it writes straight through - see stroke_open */
 	int     sx0, sy0, sx1, sy1;/* what it has touched, half open, so nothing else is
 	                            * uploaded or walked when it closes */
 
@@ -73,6 +74,13 @@ extern VNG_TAB *vng_tab;    /* the one on screen */
  *
  *   open   allocates the two extra buffers if this is the first stroke, and starts a
  *          step. False means there was no memory for them and nothing may be drawn.
+ *
+ *          `direct` is the one flag, and it exists because A PREVIEW IS COMPOSITED OVER THE
+ *          SHEET AND NOTHING COMPOSITED OVER ANYTHING CAN TAKE A PIXEL AWAY. An eraser laid
+ *          into the preview is invisible until the merge - it looked as though rubbing out
+ *          only happened when the button came up. The same is true of ANY colour with alpha
+ *          below full, so the tool passes `direct` when what it lays is not opaque, and the
+ *          writes go straight into the document with their carries as they go.
  *   touched  has this pixel already been painted in THIS stroke? What a blending tool
  *          asks before it blends, so it never blends onto its own output.
  *   put    writes one pixel into the preview and marks it. The colour is final; the
@@ -84,7 +92,7 @@ extern VNG_TAB *vng_tab;    /* the one on screen */
  *   close  merges every marked pixel into the document, records every one of them, and
  *          leaves the preview empty for the next stroke.
  */
-extern bool vng_tab_stroke_open  (VNG_TAB *t);
+extern bool vng_tab_stroke_open  (VNG_TAB *t, bool direct);
 extern bool vng_tab_touched      (VNG_TAB *t, int x, int y);
 extern void vng_tab_put          (VNG_TAB *t, int x, int y, Uint32 argb);
 extern void vng_tab_stroke_reset (VNG_TAB *t);
