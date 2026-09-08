@@ -58,6 +58,21 @@ typedef bool (*WIN_EVENT) (SDL_FRect area, const SDL_Event *e, void *ctx);
 extern VNG_WIN *win_open (const char *title, SDL_FRect area, SDL_FPoint min,
                           WIN_DRAW draw, WIN_EVENT ev, void *ctx);
 
+/*
+ * Puts the scissors down for one thing, and picks them back up.
+ *
+ * An owner's drawing is clipped to its interior, which is what stops a window spilling onto
+ * the sheet. ONE KIND OF THING WANTS OUT: a marker whose body is meant to stand outside the
+ * thing it marks - the colour wheel's rim arrows, which press the ring from either side and
+ * whose tails hang past it. The first Vangopix drew those over whatever was behind, and that
+ * IS the look; the difference is that here it is asked for by name and for one call, instead
+ * of being what happens because nobody clipped anything.
+ *
+ * Always in a pair, and always the narrow way round: unclip, draw the one thing, clip again.
+ */
+extern void win_unclip (VNG_WIN *w);
+extern void win_clip   (VNG_WIN *w);
+
 extern void win_show    (VNG_WIN *w, bool on);
 
 /*

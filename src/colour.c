@@ -22,8 +22,8 @@
  * FOOT, which is what keeps the stretch corner clear of everything - the whole of what it is
  * for now.
  */
-#define OPEN_W  280.0f
-#define OPEN_H  200.0f
+#define OPEN_W  320.0f
+#define OPEN_H  220.0f
 #define MIN_W   250.0f
 #define MIN_H   150.0f
 
@@ -51,6 +51,20 @@
 #define MARK_IN   (40.0f / 70.0f)
 
 /*
+ * BOTH MARKERS TOUCH THE RING, FROM OPPOSITE SIDES, so the pair reads as two fingers pressing
+ * the hue between them - which is what the first Vangopix's two arrows look like.
+ *
+ * The glyph's tip is 8 units above its origin in its own space, so an arrow whose tip is to
+ * graze a rim has its origin one tip's length back from it. The inner one sits in the hole
+ * with its tip on the ring's inner edge pointing OUT; the outer one sits past the ring with
+ * its tip on the outer edge pointing IN, and its tail hangs outside the window - which is the
+ * style, not an accident, and is why win_unclip exists.
+ */
+#define MARK_TIP   8.0f
+#define SCALE_IN   1.0f
+#define SCALE_OUT  1.5f    /* the original's, and it wants to be the bolder of the two */
+
+/*
  * THE OUTER MARKER RIDES THE RIM, and this is the one proportion changed.
  *
  * The original put it at 85 of 70 - a fifth of a radius OUTSIDE the ring - and with a centre
@@ -61,7 +75,7 @@
  * instead. Sitting it ON the rim keeps it inside by construction, and it reads better for it:
  * the arrow now touches the hue it is pointing at rather than floating a gap away from it.
  */
-#define MARK_OUT  1.5f
+#define MARK_OUT  1.0f
 
 /* Half a pointer glyph and its shadow. The wheel is held this far in from the space it is
  * given, so the marker at the rim has room for its own body. */
@@ -600,10 +614,14 @@ static void body (SDL_FRect area, void *ctx)
 	 * wheel, so it also says where you would GO. One arrow could only do one of those.
 	 */
 	{
+		/* Inside the hole, tip on the ring's INNER edge, pointing out. */
 		float rad = h * (SDL_PI_F / 180.0f);
-		float mx  = l.centre.x + SDL_cosf(rad) * l.radius * MARK_IN;
-		float my  = l.centre.y - SDL_sinf(rad) * l.radius * MARK_IN;
-		glyph_draw(GLYPH_POINTER, mx, my, h - 90.0f, l.radius / 70.0f, 0xFFFFFFFF);
+		float at  = l.radius * RING_IN - MARK_TIP * SCALE_IN;
+
+		glyph_draw(GLYPH_POINTER,
+		           l.centre.x + SDL_cosf(rad) * at,
+		           l.centre.y - SDL_sinf(rad) * at,
+		           h - 90.0f, SCALE_IN, 0xFFFFFFFF);
 	}
 
 	float px, py;
@@ -614,11 +632,21 @@ static void body (SDL_FRect area, void *ctx)
 		float deg = SDL_atan2f(-dy, dx) * (180.0f / SDL_PI_F);
 		if (deg < 0.0f) deg += 360.0f;
 
+		/* Past the ring, tip on the OUTER edge, pointing in - so the two arrows meet the same
+		 * band of colour from either side.
+		 *
+		 * THE SCISSORS COME OFF FOR THIS ONE CALL. Its tail stands outside the wheel and,
+		 * near the top of a small window, outside the window itself; cut short it stops
+		 * reading as a thing pressing on the ring. Every other line here stays clipped. */
 		float rad = deg * (SDL_PI_F / 180.0f);
+		float at  = l.radius + MARK_TIP * SCALE_OUT;
+
+		win_unclip(win);
 		glyph_draw(GLYPH_POINTER,
-		           l.centre.x + SDL_cosf(rad) * l.radius * MARK_OUT,
-		           l.centre.y - SDL_sinf(rad) * l.radius * MARK_OUT,
-		           deg + 90.0f, l.radius / 50.0f * 1.5f, 0xFFFFFFFF);
+		           l.centre.x + SDL_cosf(rad) * at,
+		           l.centre.y - SDL_sinf(rad) * at,
+		           deg + 90.0f, SCALE_OUT, 0xFFFFFFFF);
+		win_clip(win);
 	}
 
 	for (int b = 0; b < BARS; b++) {

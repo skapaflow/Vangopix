@@ -108,6 +108,20 @@ bool win_hover (VNG_WIN *w)
  * asked for, so it cannot come up behind another. */
 static void raise (VNG_WIN *w);
 
+void win_unclip (VNG_WIN *w)
+{
+	(void)w;
+	SDL_SetRenderClipRect(vng_ren, NULL);
+}
+
+void win_clip (VNG_WIN *w)
+{
+	if (!w) return;
+
+	SDL_Rect r = { (int)w->a.x, (int)w->a.y, (int)w->a.w, (int)w->a.h };
+	SDL_SetRenderClipRect(vng_ren, &r);
+}
+
 void win_show (VNG_WIN *w, bool on)
 {
 	if (!w) return;
