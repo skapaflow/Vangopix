@@ -56,9 +56,10 @@ LFLAGS  = $(SDL_LIBS)
 #   select.c   the selection: marked or floating, and nothing in between
 #   thumb.c    the 1:1 panel: what the art looks like at real size
 #   win.c      the window frame: move, stretch, raise, close - not a toolkit
+#   colour.c   the colour window: where a new colour comes from
 #   glyph.c    the line-art glyphs, drawn as wireframe paths
 #   text.c     glyphs packed into one atlas by stb_truetype
-SRC = src/main.c src/vangopix.c src/core.c src/keys.c src/tabs.c src/tabbar.c src/view.c src/resize.c src/project.c src/sidebar.c src/prompt.c src/file.c src/undo.c src/tool.c src/select.c src/thumb.c src/win.c src/glyph.c src/text.c
+SRC = src/main.c src/vangopix.c src/core.c src/keys.c src/tabs.c src/tabbar.c src/view.c src/resize.c src/project.c src/sidebar.c src/prompt.c src/file.c src/undo.c src/tool.c src/select.c src/thumb.c src/win.c src/colour.c src/glyph.c src/text.c
 DEP = $(wildcard src/*.h)
 
 all: $(OUT) run

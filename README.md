@@ -30,6 +30,7 @@ around that — opening, viewing, framing, sizing and saving.
 | selection | mark, move, copy and paste between documents, flip, rotate, invert |
 | 1:1 panel | what the art looks like at real size, while you work zoomed in |
 | colour | two, one per mouse button, filled by `CTRL`+click and shown as hex |
+| windows | floating, movable, resizable — the 1:1 panel and the colour picker |
 | transparency | checkerboard behind the sheet, black frame around it |
 | text | one atlas, packed by stb_truetype |
 
@@ -111,6 +112,7 @@ drawing near the border.
 | `A` `S` `D` `F` | eraser, bucket, spray, change-colours |
 | `Z` | select |
 | `V` | show the 1:1 panel |
+| `C` | show the colour window |
 | `CTRL+A` `CTRL+C` `CTRL+X` `CTRL+V` | select all, copy, cut, paste |
 | `CTRL` + drag a selection | copy it instead of moving it |
 | `V` `H` `I` `R`, with a selection | flip, flip, invert, rotate |
@@ -236,6 +238,19 @@ answers, carried over vertex for vertex.
 
 A stroke joins its samples, so a fast hand draws a line and not a row of dots. One stroke is
 one undo.
+
+### The colour window
+
+`C` raises it. It is where a colour that is **not on the sheet yet** comes from — everything
+else about colour here reads the drawing, and all of that needs a colour to already exist.
+
+A saturation-value square with a hue bar beside it and an alpha bar beside that, because in
+this program nothing *is* a colour and a half-transparent shade is something you want on
+purpose. Click either of the two slots to say which one you are editing; the picker follows
+it, so a colour you absorb with `CTRL` out on the sheet turns up here too.
+
+Sixteen tiles at the bottom are the eight-to-sixteen you settle on: click one to load it,
+`SHIFT`+click to store the colour you have into it.
 
 ### The 1:1 panel
 

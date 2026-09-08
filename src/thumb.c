@@ -85,7 +85,7 @@ void thumb_toggle (void)
 	                 vng_win_h - MARGIN - OPEN_SIDE, OPEN_SIDE, OPEN_SIDE };
 	SDL_FPoint m = { MIN_SIDE, MIN_SIDE };
 
-	win = win_open("1:1", a, m, body, NULL);
+	win = win_open("1:1", a, m, body, NULL, NULL);
 }
 
 bool thumb_visible (void) { return win_visible(win); }

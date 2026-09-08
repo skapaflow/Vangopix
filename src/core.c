@@ -14,6 +14,7 @@
 #include "select.h"
 #include "thumb.h"
 #include "win.h"
+#include "colour.h"
 
 /*
  * The desk: a grey checkerboard, the size and the two greys taken from what the first
@@ -252,6 +253,7 @@ void vangopix_input (void)
 			if (bare(e.key.mod)) {
 				if (e.key.key == SDLK_F1)     { overlay = !overlay; break; }
 				if (e.key.key == SDLK_V)      { thumb_toggle();     break; }
+				if (e.key.key == SDLK_C)      { colour_toggle();    break; }
 				if (e.key.key == SDLK_ESCAPE) { tabbar_toggle();    break; }
 				if (e.key.key == SDLK_TAB)    { sidebar_toggle();   break; }
 			}

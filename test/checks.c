@@ -13,6 +13,7 @@
 #include "select.h"
 #include "thumb.h"
 #include "win.h"
+#include "colour.h"
 #include "view.h"
 #include "file.h"
 
@@ -728,6 +729,55 @@ int main (void)
 		thumb_toggle();
 		ok("it comes back", thumb_visible());
 		thumb_toggle();
+	}
+
+	/* ---- the colour window ---- */
+	{
+		tool_set_colour(0, 0xFF000000u);
+
+		colour_toggle();
+		ok("C puts the colour window up", colour_visible());
+
+		/* It opens at (24,48) and is 200x180 inside. The saturation-value square is the
+		 * left-hand block of that, so a press well inside it has to change slot 1. */
+		SDL_Event e;
+		SDL_zero(e);
+		e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+		e.button.button = SDL_BUTTON_LEFT;
+		e.button.x = 24.0f + 90.0f;
+		e.button.y = 48.0f + 30.0f;
+
+		ok("the window takes the press", win_event(&e));
+		ok("A PRESS IN THE SQUARE WRITES THE SLOT", tool_colour(0) != 0xFF000000u);
+		ok("and what it wrote is opaque", (tool_colour(0) >> 24) == 0xFF);
+
+		Uint32 first = tool_colour(0);
+
+		/* The drag belongs to the window until the button comes up, even off its edge -
+		 * a slider dragged past its own end is still being dragged. */
+		SDL_zero(e);
+		e.type = SDL_EVENT_MOUSE_MOTION;
+		e.motion.x = 24.0f + 20.0f;
+		e.motion.y = 48.0f + 100.0f;
+		ok("THE DRAG STAYS WITH THE WINDOW", win_event(&e));
+		ok("and moving in the square moves the colour", tool_colour(0) != first);
+
+		SDL_zero(e);
+		e.type = SDL_EVENT_MOUSE_BUTTON_UP;
+		e.button.button = SDL_BUTTON_LEFT;
+		e.button.x = 24.0f + 20.0f;
+		e.button.y = 48.0f + 100.0f;
+		win_event(&e);
+
+		/* Once the button is up the window has let go, and the sheet gets its events back. */
+		SDL_zero(e);
+		e.type = SDL_EVENT_MOUSE_MOTION;
+		e.motion.x = 300.0f;
+		e.motion.y = 260.0f;
+		ok("and lets go when the button does", win_event(&e) == false);
+
+		colour_toggle();
+		ok("C puts it away", colour_visible() == false);
 	}
 
 	/* ---- what a save dialog's answer means ----

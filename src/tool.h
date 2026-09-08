@@ -82,6 +82,9 @@ extern int  tool_tip_size (void);   /* of the current tool */
  */
 extern Uint32 tool_colour (int slot);
 
+/* Puts a colour in a slot - what the colour window does, and what a palette would. */
+extern void tool_set_colour (int slot, Uint32 argb);
+
 /*
  * CTRL+CLICK IS THE EYEDROPPER, AND THE PICK IS ON THE PRESS.
  *

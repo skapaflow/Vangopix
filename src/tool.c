@@ -122,6 +122,8 @@ int  tool_tip_size (void) { return size[current]; }
 
 Uint32 tool_colour (int slot) { return colour[slot == 1 ? 1 : 0]; }
 
+void tool_set_colour (int slot, Uint32 argb) { colour[slot == 1 ? 1 : 0] = argb; }
+
 void tool_pick (VNG_TAB *t, int x, int y, int slot)
 {
 	if (!t || x < 0 || y < 0 || x >= t->w || y >= t->h) return;

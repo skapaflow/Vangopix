@@ -14,6 +14,7 @@ struct _vng_win_ {
 	SDL_FRect a;            /* the INTERIOR, in screen pixels */
 	SDL_FPoint min;
 	WIN_DRAW  draw;
+	WIN_EVENT ev;
 	void     *ctx;
 	bool      shown;
 
@@ -26,6 +27,10 @@ static VNG_WIN *list = NULL;
 static VNG_WIN *held = NULL;
 static bool     stretching = false;
 static float    grab_x = 0.0f, grab_y = 0.0f;
+
+/* The window whose OWNER took a press. Everything that follows until the release goes to it,
+ * even off the window: a slider dragged past its own edge is still being dragged. */
+static VNG_WIN *inner = NULL;
 
 /* The close box a press went down on. The same contract as every other button here: it only
  * fires if the button comes back up over the same box. */
@@ -99,11 +104,12 @@ void win_show (VNG_WIN *w, bool on)
 	/* Hiding whatever was being carried, rather than leaving a drag pointed at something
 	 * nobody can see. */
 	if (!on && held == w) { held = NULL; stretching = false; }
+	if (!on && inner == w) inner = NULL;
 	if (!on && close_armed == w) close_armed = NULL;
 }
 
 VNG_WIN *win_open (const char *title, SDL_FRect area, SDL_FPoint min,
-                   WIN_DRAW draw, void *ctx)
+                   WIN_DRAW draw, WIN_EVENT ev, void *ctx)
 {
 	VNG_WIN *w = (VNG_WIN *) SDL_calloc(1, sizeof *w);
 	if (!w) return NULL;
@@ -112,6 +118,7 @@ VNG_WIN *win_open (const char *title, SDL_FRect area, SDL_FPoint min,
 	w->a     = area;
 	w->min   = min;
 	w->draw  = draw;
+	w->ev    = ev;
 	w->ctx   = ctx;
 	w->shown = true;
 
@@ -131,7 +138,7 @@ void win_free (void)
 		w = n;
 	}
 	list = NULL;
-	held = close_armed = NULL;
+	held = inner = close_armed = NULL;
 }
 
 /* To the end of the list, which draws last and is therefore on top. A relink and not a sort:
@@ -206,10 +213,17 @@ bool win_event (const SDL_Event *e)
 			return true;
 		}
 
-		return true;   /* the interior: taken, so it does not also reach the sheet */
+		/* The interior. Whatever the owner says, the event stops here - it landed on a
+		 * window, and the sheet underneath must not see it. */
+		if (w->ev && w->ev(w->a, e, w->ctx))
+			inner = w;
+		return true;
 	}
 
 	case SDL_EVENT_MOUSE_MOTION: {
+		/* Off the window is still the owner's while its button is down. */
+		if (inner) return inner->ev(inner->a, e, inner->ctx), true;
+
 		if (!held) return false;
 
 		float x = e->motion.x, y = e->motion.y;
@@ -228,6 +242,12 @@ bool win_event (const SDL_Event *e)
 	}
 
 	case SDL_EVENT_MOUSE_BUTTON_UP: {
+		if (inner) {
+			VNG_WIN *w = inner;
+			inner = NULL;
+			w->ev(w->a, e, w->ctx);
+			return true;
+		}
 		if (close_armed) {
 			VNG_WIN *w = close_armed;
 			close_armed = NULL;

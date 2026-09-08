@@ -43,12 +43,21 @@ typedef struct _vng_win_ VNG_WIN;
 typedef void (*WIN_DRAW) (SDL_FRect area, void *ctx);
 
 /*
+ * The inside's events. Called for a press that lands in the interior, and then for every
+ * motion and the release that follow it, until the button comes up - so an owner that has
+ * taken hold of something keeps receiving the drag even when the pointer wanders off the
+ * window. Returning true on the press is what asks for that; a window whose owner wants
+ * nothing simply passes NULL.
+ */
+typedef bool (*WIN_EVENT) (SDL_FRect area, const SDL_Event *e, void *ctx);
+
+/*
  * Opens a window. It is created VISIBLE, and it is never destroyed by being closed - hiding
  * and showing keep its position and size, which is what lets a panel be parked somewhere and
  * found there again. `min` is the smallest its interior may be stretched to.
  */
 extern VNG_WIN *win_open (const char *title, SDL_FRect area, SDL_FPoint min,
-                          WIN_DRAW draw, void *ctx);
+                          WIN_DRAW draw, WIN_EVENT ev, void *ctx);
 
 extern void win_show    (VNG_WIN *w, bool on);
 extern bool win_visible (VNG_WIN *w);
