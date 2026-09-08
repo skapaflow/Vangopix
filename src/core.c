@@ -56,15 +56,20 @@ static bool checker_make (void)
 	return true;
 }
 
-static void draw_desk (void)
+void vangopix_desk_rect (SDL_FRect r)
 {
 	if (!checker && !checker_make()) {
 		SDL_SetRenderDrawColor(vng_ren, 0x25, 0x25, 0x25, 0xFF);
-		SDL_RenderClear(vng_ren);
+		SDL_RenderFillRect(vng_ren, &r);
 		return;
 	}
+	SDL_RenderTextureTiled(vng_ren, checker, NULL, 1.0f, &r);
+}
+
+static void draw_desk (void)
+{
 	SDL_FRect all = { 0.0f, 0.0f, (float)vng_win_w, (float)vng_win_h };
-	SDL_RenderTextureTiled(vng_ren, checker, NULL, 1.0f, &all);
+	vangopix_desk_rect(all);
 }
 
 void vangopix_core_free (void)

@@ -3,6 +3,7 @@
 #include "keys.h"
 #include "tool.h"
 #include "undo.h"
+#include "core.h"
 
 /* The dashes of the marching rectangle, in SCREEN pixels: it is an annotation about the
  * document, not part of it, so it stays the same size at any zoom. */
@@ -136,14 +137,21 @@ void select_commit (VNG_TAB *t)
 	VNG_SEL *s = t ? t->sel : NULL;
 	if (!s || !s->pixels) return;
 
-	/* Direct, because clearing the source lays transparency, and transparency cannot be
-	 * shown by compositing a preview over the sheet - see tabs.h. */
+	/* Direct, always: what a cut leaves may be transparent, and transparency cannot be shown
+	 * by compositing a preview over the sheet - see tabs.h. Everything a selection does is
+	 * one step from the person's side, so it may as well be one kind of stroke. */
 	if (!vng_tab_stroke_open(t, true)) { float_drop(s); return; }
 
-	if (s->cut)
+	/* WHAT A CUT LEAVES BEHIND IS COLOUR 2, not a hole and not white. The second colour is
+	 * already "what the right button lays down" - the background of the moment - so cutting
+	 * leaving it is the same idea said once more. It defaults to nothing, so the default
+	 * behaviour is still a hole; load it with white and a cut leaves paper. */
+	if (s->cut) {
+		Uint32 back = tool_colour(1);
 		for (int j = 0; j < s->h; j++)
 			for (int i = 0; i < s->w; i++)
-				vng_tab_put(t, s->sx + i, s->sy + j, 0u);
+				vng_tab_put(t, s->sx + i, s->sy + j, back);
+	}
 
 	for (int j = 0; j < s->h; j++)
 		for (int i = 0; i < s->w; i++) {
@@ -223,12 +231,23 @@ static bool rotate (VNG_SEL *s)
 
 /* ------------------------------------------------------------------------- the events */
 
-static void mark_from_drag (VNG_SEL *s, int x, int y)
+/* Clamped to the sheet as it is dragged. Selecting what is not there is meaningless, and a
+ * drag that ran a long way off the canvas at a low zoom would otherwise ask for a buffer of
+ * thousands of pixels a side the moment it was lifted. */
+static void mark_from_drag (VNG_TAB *t, VNG_SEL *s, int x, int y)
 {
-	s->x = s->ax < x ? s->ax : x;
-	s->y = s->ay < y ? s->ay : y;
-	s->w = SDL_abs(x - s->ax) + 1;
-	s->h = SDL_abs(y - s->ay) + 1;
+	int x0 = s->ax < x ? s->ax : x, x1 = s->ax < x ? x : s->ax;
+	int y0 = s->ay < y ? s->ay : y, y1 = s->ay < y ? y : s->ay;
+
+	if (x0 < 0) x0 = 0;
+	if (y0 < 0) y0 = 0;
+	if (x1 > t->w - 1) x1 = t->w - 1;
+	if (y1 > t->h - 1) y1 = t->h - 1;
+
+	s->x = x0;
+	s->y = y0;
+	s->w = x1 - x0 + 1;
+	s->h = y1 - y0 + 1;
 }
 
 static bool inside_sel (VNG_SEL *s, int x, int y)
@@ -282,11 +301,14 @@ static void clear_marked (VNG_TAB *t, VNG_SEL *s)
 	clamp_rect(t, &x, &y, &w, &h);
 	if (w < 1 || h < 1) return;
 
+	/* Direct, like everything else here: colour 2 may be nothing, and nothing cannot be shown
+	 * by compositing a preview over the sheet. */
 	if (!vng_tab_stroke_open(t, true)) return;
 
+	Uint32 back = tool_colour(1);
 	for (int j = 0; j < h; j++)
 		for (int i = 0; i < w; i++)
-			vng_tab_put(t, x + i, y + j, 0u);
+			vng_tab_put(t, x + i, y + j, back);
 
 	vng_tab_stroke_close(t);
 }
@@ -397,15 +419,27 @@ bool select_event (const SDL_Event *e, VNG_TAB *t)
 		SDL_FPoint w = view_screen_to_world(t, e->button.x, e->button.y);
 		int x = (int)SDL_floorf(w.x), y = (int)SDL_floorf(w.y);
 
-		/* A press INSIDE the rectangle takes hold of it; anywhere else starts a new one and
-		 * puts down whatever was being carried. */
+		bool ctrl = (keys_mods() & SDL_KMOD_CTRL) != 0;
+
+		/*
+		 * A press INSIDE the rectangle takes hold of it, and CTRL makes that a COPY: the
+		 * pixels come with the hand and the place they came from is left as it was.
+		 *
+		 * CTRL BELONGS TO THE SELECTION ONLY WHERE THE SELECTION IS. Anywhere else there is
+		 * nothing to duplicate, so it means what it means everywhere else in the program and
+		 * this file declines the event - which is what puts the eyedropper back. It had
+		 * stopped working the moment the select tool was in hand, because this returned true
+		 * for every left press it saw.
+		 */
 		if (inside_sel(s, x, y)) {
-			if (!lift(t, s, true)) return true;
+			if (!lift(t, s, !ctrl)) return true;
 			s->moving = true;
 			s->grab_x = x - s->x;
 			s->grab_y = y - s->y;
 			return true;
 		}
+
+		if (ctrl) return false;   /* the eyedropper's, and the tool is right behind us */
 
 		select_commit(t);
 
@@ -413,7 +447,7 @@ bool select_event (const SDL_Event *e, VNG_TAB *t)
 		s->marking = true;
 		s->ax = x;
 		s->ay = y;
-		mark_from_drag(s, x, y);
+		mark_from_drag(t, s, x, y);
 		return true;
 	}
 
@@ -423,7 +457,7 @@ bool select_event (const SDL_Event *e, VNG_TAB *t)
 		SDL_FPoint w = view_screen_to_world(t, e->motion.x, e->motion.y);
 		int x = (int)SDL_floorf(w.x), y = (int)SDL_floorf(w.y);
 
-		if (s->marking) mark_from_drag(s, x, y);
+		if (s->marking) mark_from_drag(t, s, x, y);
 		else            { s->x = x - s->grab_x; s->y = y - s->grab_y; }
 		return true;
 	}
@@ -485,7 +519,7 @@ static void tex_make (VNG_SEL *s)
  * any artwork and reads as a SELECTION rather than as something drawn. */
 static void ants (SDL_FRect r)
 {
-	float off = SDL_fmodf(march, DASH * 2.0f);
+	float off = march;
 
 	SDL_SetRenderDrawColor(vng_ren, 0x00, 0x00, 0x00, 0xFF);
 	SDL_RenderRect(vng_ren, &r);
@@ -521,7 +555,9 @@ void select_draw (VNG_TAB *t)
 	VNG_SEL *s = t ? t->sel : NULL;
 	if (!s || !s->on) return;
 
-	march += vng_dt * MARCH * DASH;
+	/* Wrapped as it accumulates, not only where it is read: a float that grows for an hour
+	 * loses the precision the dashes are measured in. */
+	march = SDL_fmodf(march + vng_dt * MARCH * DASH, DASH * 2.0f);
 
 	SDL_SetRenderDrawBlendMode(vng_ren, SDL_BLENDMODE_BLEND);
 
@@ -532,7 +568,18 @@ void select_draw (VNG_TAB *t)
 	 */
 	if (s->pixels && s->cut) {
 		SDL_FRect hole = on_screen(t, s->sx, s->sy, s->w, s->h);
-		SDL_SetRenderDrawColor(vng_ren, 0x25, 0x25, 0x25, 0xFF);
+		Uint32    back = tool_colour(1);
+
+		/* THE HOLE SHOWS WHAT WILL ACTUALLY BE LEFT THERE, which is colour 2 - so the desk
+		 * goes down first and the colour over it at its REAL alpha. A flat grey rectangle
+		 * was a lie twice over: it looked like the desk when the colour was opaque, and it
+		 * looked like a colour when the colour was nothing. */
+		vangopix_desk_rect(hole);
+
+		SDL_SetRenderDrawColor(vng_ren, (Uint8)((back >> 16) & 0xFF),
+		                                (Uint8)((back >>  8) & 0xFF),
+		                                (Uint8)( back        & 0xFF),
+		                                (Uint8)((back >> 24) & 0xFF));
 		SDL_RenderFillRect(vng_ren, &hole);
 	}
 

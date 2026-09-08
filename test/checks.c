@@ -562,7 +562,8 @@ int main (void)
 		mouse(a, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 12, 12);
 
 		ok("the move landed four to the right", a->pixels[2 * 16 + 6] == 0xFF000001u);
-		ok("and left a hole behind it",         a->pixels[2 * 16 + 2] == 0x00000000u);
+		ok("AND LEFT COLOUR 2 BEHIND IT, whatever colour 2 is",
+		   a->pixels[2 * 16 + 2] == tool_colour(1));
 		ok("A MOVE IS ONE UNDO STEP",           undo_undo(a));
 		ok("which puts the block back whole",
 		   SDL_memcmp(a->pixels, fresh, sizeof fresh) == 0);
@@ -579,9 +580,33 @@ int main (void)
 
 		ok("AN OVERLAPPING NUDGE KEEPS EVERY PIXEL",
 		   a->pixels[2 * 16 + 3] == 0xFF000001u && a->pixels[2 * 16 + 5] == 0xFF000003u);
-		ok("and empties only the column it left", a->pixels[2 * 16 + 2] == 0x00000000u);
+		ok("and leaves colour 2 in only the column it left",
+		   a->pixels[2 * 16 + 2] == tool_colour(1));
 		ok("the nudge undoes cleanly",
 		   undo_undo(a) && SDL_memcmp(a->pixels, fresh, sizeof fresh) == 0);
+
+		/* WHAT A CUT LEAVES IS COLOUR 2 AND NOT A FIXED THING: load another and the next cut
+		 * leaves that one. Colour 2 is already "what the right button lays down", so a cut
+		 * leaving it is the same idea said once more. */
+		a->pixels[15 * 16 + 15] = 0xFF778899u;
+		tool_pick(a, 15, 15, 1);
+
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 2, 2);
+		mouse(a, SDL_EVENT_MOUSE_MOTION,      0,               4, 4);
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 4, 4);
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 3, 3);
+		mouse(a, SDL_EVENT_MOUSE_MOTION,      0,               9, 9);
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 9, 9);
+		select_commit(a);
+		ok("A CUT LEAVES WHATEVER COLOUR 2 HOLDS NOW",
+		   a->pixels[2 * 16 + 2] == 0xFF778899u);
+		undo_undo(a);
+		key(a, SDLK_ESCAPE, SDL_KMOD_NONE);
+
+		/* Back to nothing, so the rest of the block reads as it did. */
+		a->pixels[15 * 16 + 15] = 0x00000000u;
+		tool_pick(a, 15, 15, 1);
+		SDL_memcpy(a->pixels, fresh, sizeof fresh);
 
 		/* ESC gives a float back, and leaves NO undo step, because nothing was written. */
 		mouse(a, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 2, 2);

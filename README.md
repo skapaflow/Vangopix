@@ -110,6 +110,7 @@ drawing near the border.
 | `A` `S` `D` `F` | eraser, bucket, spray, change-colours |
 | `Z` | select |
 | `CTRL+A` `CTRL+C` `CTRL+X` `CTRL+V` | select all, copy, cut, paste |
+| `CTRL` + drag a selection | copy it instead of moving it |
 | `V` `H` `I` `R`, with a selection | flip, flip, invert, rotate |
 | `DELETE`, with a selection | clear it |
 | `ESC`, with a selection | let it go |
@@ -245,6 +246,11 @@ While something is selected, `V` and `H` flip it, `I` inverts its colours and `R
 quarter clockwise. Those are the only bare keys in the program that mean something different
 depending on state — allowed because both halves of the condition are on screen: the select
 tool is in hand and a rectangle is marked. With nothing selected, `R` is the ellipse again.
+
+Dragging a selection **moves** it, and what it leaves behind is **colour 2** — nothing by
+default, so it looks like a hole, but load colour 2 with white and a cut leaves paper. Hold
+`CTRL` while dragging and it is **copied** instead: the place it came from is untouched.
+`CTRL` anywhere outside the selection is still the eyedropper.
 
 **Nothing is written to the sheet while a selection floats.** The hole where it came from is
 *drawn*, not dug, so letting go of a float costs nothing and leaves nothing to undo. Putting

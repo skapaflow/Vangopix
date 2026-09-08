@@ -4,6 +4,7 @@
 #include "glyph.h"
 #include "tabbar.h"
 #include "sidebar.h"
+#include "select.h"
 
 /*
  * The two colours a fresh program starts with. 0xAARRGGBB, matching the ARGB8888 the
@@ -614,6 +615,9 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 		 * happens to collide today. */
 		TOOL want;
 		if (bare && tool_key(e->key.key, &want)) {
+			/* A float is put down before the hand moves to another tool. Leaving one in the
+			 * air while a pencil draws under it is a document with two futures. */
+			if (want != current) select_commit(t);
 			current = want;
 			return true;
 		}
@@ -680,10 +684,6 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 		if (e->button.button != SDL_BUTTON_LEFT &&
 		    e->button.button != SDL_BUTTON_RIGHT) return false;
 
-		/* The select tool marks and moves; it lays down no pixels of its own. Its drags are
-		 * select.c's, and select.c has already had them. */
-		if (current == T_SELECT) return false;
-
 		int x, y;
 		pixel_of(t, e->button.x, e->button.y, &x, &y);
 
@@ -691,10 +691,17 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 		 * the desk, and one day it will be a selection. */
 		if (!inside(t, x, y)) return false;
 
-		/* CTRL turns both buttons into the eyedropper, and while it is held neither is the
-		 * tool's: a press that also drew would smear the colour being sampled across the
-		 * very pixels being read. A drag already running is left alone - the stroke owns it,
-		 * and CTRL pressed halfway through a line must not cut it. */
+		/*
+		 * CTRL turns both buttons into the eyedropper, and while it is held neither is the
+		 * tool's: a press that also drew would smear the colour being sampled across the very
+		 * pixels being read. A drag already running is left alone - the stroke owns it, and
+		 * CTRL pressed halfway through a line must not cut it.
+		 *
+		 * THIS COMES BEFORE THE SELECT TOOL BOWS OUT, and that ordering is the fix for a
+		 * reported bug: picking stopped working the moment the select tool was in hand. It
+		 * is picking that CTRL means everywhere in this program, and the one exception -
+		 * duplicating a selection - is settled in select.c before this file sees the event.
+		 */
 		if (!drawing && (keys_mods() & SDL_KMOD_CTRL)) {
 			pick_slot = slot_of(e->button.button);
 			picking   = true;
@@ -730,6 +737,10 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 			last_y = anchor_y = y;
 			return true;
 		}
+
+		/* The select tool marks and moves; it lays down no pixels of its own. Its drags are
+		 * select.c's, and select.c has already had them. */
+		if (current == T_SELECT) return false;
 
 		/* A stroke already open means its button-up never arrived - the pointer was released
 		 * somewhere this program never heard about. Commit it rather than merge the two:
