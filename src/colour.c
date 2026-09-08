@@ -61,6 +61,20 @@
  * style, not an accident, and is why win_unclip exists.
  */
 #define MARK_TIP   8.0f
+
+/*
+ * THE HAIRLINE THE INNER MARKER KEEPS OFF THE RING, in pixels.
+ *
+ * Its tip landing ON the inner edge made the arrow and the ring one shape: the white tip and
+ * the coloured band met with nothing between them, so at a glance the marker read as part of
+ * the wheel rather than as a thing pointing at it. One pixel of hole showing through is all it
+ * takes to separate them.
+ *
+ * NOT scaled with the wheel, unlike everything else about the markers. This is not a
+ * proportion - a gap is either visible or it is not, and one that grew to three pixels on a
+ * stretched window would stop being a hairline and start being a distance.
+ */
+#define MARK_GAP   1.0f
 #define SCALE_IN   1.0f
 #define SCALE_OUT  1.5f    /* the original's, and it wants to be the bolder of the two */
 
@@ -667,7 +681,7 @@ static void body (SDL_FRect area, void *ctx)
 		/* Inside the hole, tip on the ring's INNER edge, pointing out. */
 		float sc  = SCALE_IN * (l.radius / MARK_REF);
 		float rad = h * (SDL_PI_F / 180.0f);
-		float at  = l.radius * RING_IN - MARK_TIP * sc;
+		float at  = l.radius * RING_IN - MARK_TIP * sc - MARK_GAP;
 
 		glyph_draw(GLYPH_POINTER,
 		           l.centre.x + SDL_cosf(rad) * at,
