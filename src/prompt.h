@@ -10,10 +10,10 @@
  * IT IS NOT CHROME: closed, it draws nothing and costs one branch. It is the shape
  * section 1 asks for - a window that appears on demand and leaves.
  *
- * PROVISIONAL, in the same sense the title bar is. VagrantUI is meant to draw the
- * windows of this program, and the day its SDL3 bridge lands this file is the one that
- * changes; what must NOT change is the keyboard contract underneath it, which is why
- * that lives in keys.c and not here.
+ * PROVISIONAL, in the same sense the title bar is. The day this program has a proper one-line
+ * field - the colour window's hex box is most of one already - this file is the one that
+ * changes; what must NOT change is the keyboard contract underneath it, which is why that
+ * lives in keys.c and not here.
  *
  * It deliberately does not touch the mouse. Clicking a tab while a field is open still
  * switches tabs, and the field keeps the keyboard - a modal that also swallowed the

@@ -312,9 +312,6 @@ VNG_TAB *vng_tab_open (const char *path)
 		SDL_Log("IMG_Load(%s): %s", path, SDL_GetError());
 		return NULL;
 	}
-	SDL_Log("opened: %s  %dx%d  source format: %s",
-	        path, raw->w, raw->h, SDL_GetPixelFormatName(raw->format));
-
 	SDL_Surface *img = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
 	SDL_DestroySurface(raw);
 	if (!img) {

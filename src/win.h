@@ -6,20 +6,12 @@
 /*
  * A WINDOW FRAME, AND DELIBERATELY NOT A WIDGET TOOLKIT.
  *
- * Section 7 says to leave the first Vangopix's src/window/ behind because VagrantUI would
- * replace it. That reason has EXPIRED, and it is worth writing down why rather than quietly
- * doing the opposite:
- *
- *   VagrantUI emits VUI_CMD_RECT and VUI_CMD_TEXT and nothing else (verified in its own
- *   vagrantui.h). The windows this program actually wants are mostly VIEWPORTS ONTO PIXELS -
- *   the 1:1 panel, a colour wheel, a timeline of frames - and a texture is the one thing
- *   those two commands cannot say. That is not a defect in VagrantUI: "rect and text and
- *   nothing else" is exactly what lets it drop into any engine, and a texture handle is
- *   backend-specific, so adding one would cost VagrantUI more than it would gain Vangopix.
- *
- * So the two COMPOSE rather than compete. The frame is ours; the interior belongs to whoever
- * owns the window; and the day a window is genuinely made of text and boxes, VagrantUI draws
- * inside one of these.
+ * Section 7 said to leave the first Vangopix's src/window/ behind because VagrantUI would
+ * replace it. It could not - VagrantUI emits VUI_CMD_RECT and VUI_CMD_TEXT and nothing else,
+ * and the windows this program wants are mostly viewports onto pixels - so this was written
+ * instead. It has since carried a window with a hue ring, four generated sliders and a text
+ * field that owns the keyboard, and has needed nothing from anywhere else. Section 8 closes
+ * the question: there is no bridge coming, and what a window needs next it gets here.
  *
  * WHAT IS TAKEN FROM winmgr AND WHAT IS NOT. Taken: the callback per window, which is
  * already the house pattern - tabbar.c, sidebar.c and thumb.c each draw their own pixels;

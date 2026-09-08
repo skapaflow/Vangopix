@@ -69,14 +69,20 @@ bool vangopix_init (int argc, char **argv)
 	}
 	SDL_SetRenderVSync(vng_ren, 1);
 
-	/* The font is not fatal. Nothing the editor does to an image depends on being able
-	 * to draw a letter, so a missing or unreadable face costs the overlay and nothing
-	 * else - text_draw on a NULL system is a no-op by design. */
+	/*
+	 * The font is not fatal. Nothing the editor does to an image depends on being able to draw
+	 * a letter, so a missing or unreadable face costs the overlay and nothing else -
+	 * text_draw on a NULL system is a no-op by design.
+	 *
+	 * WHICH FACE LOADED IS NOT REPORTED. Nothing is decided by it and nobody is waiting to
+	 * hear it, and a line printed on every successful start is the kind of noise that trains
+	 * a person to stop reading the output - which is the whole value of the lines below, all
+	 * of which report a FAILURE.
+	 */
 	for (size_t i = 0; i < SDL_arraysize(vng_fonts) && !vng_text; i++) {
 		char *font = vangopix_asset(vng_fonts[i]);
 		if (!font) continue;
 		vng_text = text_init(vng_ren, font, VNG_FONT_SIZE);
-		if (vng_text) SDL_Log("font: %s", vng_fonts[i]);
 		SDL_free(font);
 	}
 	if (!vng_text)

@@ -30,7 +30,7 @@
 #define TOP      14.0f    /* the sliders' top edge: 32 in the window, less the 18 head */
 #define LEFT      5.0f
 #define RIGHT    14.0f    /* 280 - (250 + 16), what the original left past the last slider */
-#define BAR_W    16.0f
+#define BAR_W    20.0f
 #define BAR_STEP 30.0f    /* 190 - 160 */
 #define HEX_H    20.0f
 #define FOOT     18.0f    /* the band the stretch corner lives in */

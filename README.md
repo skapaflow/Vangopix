@@ -34,8 +34,8 @@ around that — opening, viewing, framing, sizing and saving.
 | transparency | checkerboard behind the sheet, black frame around it |
 | text | one atlas, packed by stb_truetype |
 
-Next: a summoned palette for the colours that are not on the sheet yet — drawn by VagrantUI,
-gone when it is done — and the other 39 drawing primitives, which are ports onto the same
+Next: a summoned palette for the colours that are not on the sheet yet,
+gone when it is done, and the other 39 drawing primitives, which are ports onto the same
 three buffers the pencil already uses.
 
 ## Building
@@ -69,9 +69,9 @@ The program looks beside the executable for `font/DejaVuSansMono.ttf` first, the
 
 **DejaVu Sans Mono** ships with the repository, under the Bitstream Vera / DejaVu licence,
 which permits redistribution and asks that the notice travel with the font —
-`font/LICENSE_DEJAVU.txt`. It is monospaced, which matters beyond taste: VagrantUI asks for
-one fixed character cell and lays its content out in columns from it, so a proportional face
-makes every column drift.
+`font/LICENSE_DEJAVU.txt`. It is monospaced, which matters beyond taste: anything
+laid out in columns needs one fixed character cell, and a proportional face makes every column
+drift.
 
 `FreeSans.ttf` is [GNU FreeFont](https://www.gnu.org/software/freefont/) and stays as the
 one behind it — proportional, so not the right answer, but a corrupt first file should cost
@@ -146,7 +146,7 @@ While the tab bar is up the sidebar starts below it. Both float over the sheet a
 claim the same corner, and the bar is the one that spans the whole width.
 
 A name too long for the panel is cut and its last column becomes a `~`, the same mark
-VagrantUI uses when content overruns its width. The room a name gets accounts for its
+every other panel here uses. The room a name gets accounts for its
 own indent, so a deeply nested file is cut shorter than one at the root.
 
 Only images are listed, along with the folders that might contain them. Dot files and

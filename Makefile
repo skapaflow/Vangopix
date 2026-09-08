@@ -85,13 +85,20 @@ test: test/checks.c $(TEST_SRC) $(DEP)
 	$(CC) $(CFLAGS) test/checks.c $(TEST_SRC) -o $(TEST_OUT) $(LFLAGS)
 	./$(TEST_OUT)
 
-# -mwindows drops the console, and only on Windows does that mean anything. It stays OUT
-# of the normal build on purpose: while developing, SDL_Log is the only window into the
-# program, and a mute editor is worse than an ugly one.
-release: CFLAGS += -DNDEBUG
+# -mwindows drops the console, and only on Windows does it mean anything. It is now on by
+# DEFAULT: a black terminal opening behind an image editor is not a thing to ship, and this
+# program stopped being a thing that is only ever run from a shell.
+#
+# `make CONSOLE=1` puts it back, which is the half worth keeping - SDL_Log is the only window
+# into a failure that does not stop the program, and a mute editor is worse than an ugly one
+# while something is being chased. Nothing is removed for the console build; it is one word.
 ifeq ($(OS),Windows_NT)
-release: CFLAGS += -mwindows
+ifndef CONSOLE
+    LFLAGS += -mwindows
 endif
+endif
+
+release: CFLAGS += -DNDEBUG
 release: clean $(OUT)
 
 ifeq ($(OS),Windows_NT)

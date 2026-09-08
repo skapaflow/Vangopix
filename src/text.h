@@ -41,21 +41,20 @@ void text_measure (TextSystem *ts, const char *text, float *out_w, float *out_h)
 /* Copies src into dst, shortened until it fits max_w, with the last column turned into
  * a tilde.
  *
- * A TILDE AND NOT AN ELLIPSIS, because that is what VagrantUI does when content overruns
- * its width, and two truncation marks in one program read as two different kinds of
- * truncation. It lives here rather than in each panel for the same reason: the tab bar
- * and the sidebar must cut a long name the same way.
+ * A TILDE AND NOT AN ELLIPSIS. It came from VagrantUI, and it outlived the decision to use
+ * VagrantUI at all: two truncation marks in one program read as two different kinds of
+ * truncation, whoever draws them. It lives here rather than in each panel for the same
+ * reason - the tab bar, the sidebar and a window title must cut a long name the same way.
  *
  * dst always ends up NUL terminated, and is safe to draw even when max_w is absurd. */
 void text_fit (TextSystem *ts, char *dst, size_t cap, const char *src, float max_w);
 
 /* The cell of one character, measured on 'M'.
  *
- * ONLY MEANINGFUL FOR A MONOSPACED FACE. It exists because VagrantUI asks for a fixed
- * char_w/char_h through vui_font() and lays its content out in columns from it; give it
- * the cell of a proportional face and every column drifts. The face Vangopix ships is
- * monospaced (DejaVu Sans Mono), so this is now true by default - but the fallback in
- * vangopix.c is not, and whoever wires VagrantUI up should still know which one loaded. */
+ * ONLY MEANINGFUL FOR A MONOSPACED FACE. Anything laying content out in columns needs one
+ * fixed char_w/char_h; give it the cell of a proportional face and every column drifts. The
+ * face Vangopix ships is monospaced (DejaVu Sans Mono), so this is true by default - but the
+ * fallback in vangopix.c is not, and whoever lays out columns should know which one loaded. */
 void text_cell (TextSystem *ts, float *out_w, float *out_h);
 
 /* Distance between the baselines of two consecutive lines. */

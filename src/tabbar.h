@@ -8,8 +8,8 @@
  *
  * It is SEPARATE from tabs.c on purpose. tabs.c owns the documents and knows nothing
  * about pixels on screen; this file owns pixels on screen and knows nothing about what
- * a document contains. The day VagrantUI draws this bar instead, this file is the only
- * one that changes.
+ * a document contains. The day this bar is drawn some other way, this file is the only one
+ * that changes.
  *
  * IT IS NOT PERMANENT CHROME. It is off until ESC is pressed, it floats over the sheet
  * rather than pushing it down, and it costs nothing while it is not asked for. Toggle
