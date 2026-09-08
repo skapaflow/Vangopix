@@ -249,6 +249,15 @@ this program nothing *is* a colour and a half-transparent shade is something you
 purpose. Click either of the two slots to say which one you are editing; the picker follows
 it, so a colour you absorb with `CTRL` out on the sheet turns up here too.
 
+**Click the hex line and type.** `#2E3440`, `2E3440`, `4080FF80` with the alpha, or `F0A` for
+short — with or without the hash, because a colour copied from a published palette arrives in
+whatever shape that palette used. The first thing you type replaces what is there; backspace
+if you meant to edit instead. `ENTER` takes it, `ESC` drops it.
+
+**Hold `SHIFT` while dragging the square to move one axis only** — lighten a colour without
+desaturating it, or the other way round. Same `SHIFT` that snaps a line to the pixel-art
+slopes and a grip to the grid.
+
 Sixteen tiles at the bottom are the eight-to-sixteen you settle on: click one to load it,
 `SHIFT`+click to store the colour you have into it.
 

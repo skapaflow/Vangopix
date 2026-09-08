@@ -2,6 +2,7 @@
 #include "win.h"
 #include "tool.h"
 #include "core.h"
+#include "keys.h"
 
 #define OPEN_W  200.0f
 #define OPEN_H  180.0f
@@ -30,6 +31,35 @@ static int slot = 0;              /* which of the two is being edited */
 static Uint32 last = 0xFF000000u; /* what this window last wrote, to notice outside changes */
 
 static Uint32 swatch[SLOTS];
+
+/*
+ * THE HEX READOUT IS THE HEX FIELD. Leaving somewhere to TYPE a colour out was a mistake and
+ * not a decision: a published palette arrives as a string - #2E3440, and fifteen more like it
+ * - and with nowhere to put one the only way in is to paste the image and eyedrop it. The
+ * first Vangopix had a text box for this and was right to.
+ *
+ * It is not a second control beside the readout, though. The readout already says what the
+ * colour is; clicking it and typing over it is the same thing answering in both directions,
+ * and one box is better than a label with a box under it.
+ *
+ * IT IS THE SECOND THING IN THE PROGRAM TO OWN THE KEYBOARD, after the CTRL+N prompt - which
+ * is what keys.c was built for. While it is being typed into, TAB does not raise the sidebar
+ * and Q does not take the pencil, for free.
+ */
+static bool editing = false;
+static char field[12];
+
+/*
+ * THE FIRST KEY TYPED REPLACES WHAT IS THERE, and the rest add to it.
+ *
+ * The field opens holding the colour it is showing - it has to, or clicking it to check a
+ * value would blank it. But the reason a person clicks it is almost always to put a
+ * DIFFERENT colour in, and having to press backspace eight times first is the kind of thing
+ * that makes a field not worth using. Every small value field in every program behaves this
+ * way; backspace cancels it, because backspace means "I am editing this one" rather than
+ * "I am replacing it".
+ */
+static bool fresh = false;
 
 static SDL_Texture *tex_sv  = NULL;   /* rebuilt when the hue moves */
 static SDL_Texture *tex_hue = NULL;   /* built once */
@@ -142,7 +172,7 @@ void colour_free (void)
 
 /* Everything is measured from the interior, so stretching the window stretches the picker
  * rather than leaving it in a corner. */
-typedef struct { SDL_FRect sv, hue, a, slots, tiles; } LAYOUT;
+typedef struct { SDL_FRect sv, hue, a, slots, hex, tiles; } LAYOUT;
 
 static LAYOUT layout (SDL_FRect r)
 {
@@ -158,8 +188,11 @@ static LAYOUT layout (SDL_FRect r)
 	l.hue = (SDL_FRect){ l.sv.x + l.sv.w + GAP, r.y, BAR_W, top_h };
 	l.a   = (SDL_FRect){ l.hue.x + BAR_W + GAP, r.y, BAR_W, top_h };
 
-	l.slots = (SDL_FRect){ r.x, r.y + top_h + GAP, SWATCH * 2.0f + GAP,
-	                       (vng_text ? text_line_height(vng_text) : 15.0f) };
+	float lh = vng_text ? text_line_height(vng_text) : 15.0f;
+
+	l.slots = (SDL_FRect){ r.x, r.y + top_h + GAP, SWATCH * 2.0f + GAP, lh };
+	l.hex   = (SDL_FRect){ l.slots.x + l.slots.w + GAP, l.slots.y,
+	                       r.w - l.slots.w - GAP, lh };
 	l.tiles = (SDL_FRect){ r.x, r.y + r.h - SWATCH * rows, SWATCH * 8.0f, SWATCH * rows };
 	return l;
 }
@@ -171,10 +204,121 @@ static bool in_rect (SDL_FRect r, float x, float y)
 
 static float clamp01 (float f) { return f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f); }
 
+/* ------------------------------------------------------------------------- the field */
+
+/*
+ * Liberal in what it takes, because a colour is copied from somewhere else and arrives in
+ * whatever shape that somewhere used: with or without the hash, three digits or six or eight.
+ * Refusing "#2E3440" for its hash would be refusing the only form most palettes are published
+ * in.
+ *
+ * Six digits means OPAQUE, which is what #RRGGBB means everywhere; eight says the alpha
+ * outright. Three is the shorthand, each digit doubled.
+ */
+static bool hex_parse (const char *t, Uint32 *out)
+{
+	char d[9];
+	int  n = 0;
+
+	for (; *t && n < 8; t++) {
+		if (*t == '#' || *t == ' ') continue;
+		if (!SDL_isxdigit((unsigned char)*t)) return false;
+		d[n++] = *t;
+	}
+	d[n] = 0;
+
+	if (n != 3 && n != 6 && n != 8) return false;
+
+	unsigned long v32 = SDL_strtoul(d, NULL, 16);
+
+	if (n == 3) {
+		unsigned r = (v32 >> 8) & 0xF, g = (v32 >> 4) & 0xF, b = v32 & 0xF;
+		*out = 0xFF000000u | (r * 0x11u << 16) | (g * 0x11u << 8) | (b * 0x11u);
+		return true;
+	}
+	if (n == 6) { *out = 0xFF000000u | (Uint32)v32; return true; }
+
+	/* RRGGBBAA on the way in, because that is how it is shown - the shape a person can paste
+	 * elsewhere. The document is 0xAARRGGBB and the two orders must not be confused. */
+	*out = ((Uint32)(v32 & 0xFFu) << 24) | (Uint32)(v32 >> 8);
+	return true;
+}
+
+static void field_stop (bool keep)
+{
+	if (!editing) return;
+	editing = false;
+	keys_release(&editing);
+
+	Uint32 c;
+	if (keep && hex_parse(field, &c)) {
+		argb_hsv(c, &h, &s, &v);
+		alpha = (Uint8)((c >> 24) & 0xFF);
+		last  = c;
+		tool_set_colour(slot, c);
+	}
+}
+
+static void field_key (const SDL_Event *e, void *ctx)
+{
+	(void)ctx;
+
+	if (e->type == SDL_EVENT_TEXT_INPUT) {
+		if (fresh) { field[0] = 0; fresh = false; }
+
+		for (const char *t = e->text.text; *t; t++)
+			if (SDL_isxdigit((unsigned char)*t) && SDL_strlen(field) < 8) {
+				size_t n = SDL_strlen(field);
+				field[n]     = *t;
+				field[n + 1] = 0;
+			}
+		return;
+	}
+	if (e->type != SDL_EVENT_KEY_DOWN) return;
+
+	switch (e->key.key) {
+	case SDLK_BACKSPACE: {
+		size_t n = SDL_strlen(field);
+		if (n) field[n - 1] = 0;
+		fresh = false;
+		break;
+	}
+	case SDLK_RETURN:
+	case SDLK_KP_ENTER: field_stop(true);  break;
+	case SDLK_ESCAPE:   field_stop(false); break;
+	default: break;
+	}
+}
+
+static void field_start (void)
+{
+	tool_hex(tool_colour(slot), field, sizeof field);
+	editing = true;
+	fresh   = true;
+	keys_capture(field_key, &editing);
+}
+
 /* ------------------------------------------------------------------------ the events */
 
 /* What the window is holding on to between the press and the release. */
 static enum { GRAB_NONE, GRAB_SV, GRAB_HUE, GRAB_A } grab = GRAB_NONE;
+
+/*
+ * SHIFT CONSTRAINS THE SQUARE TO ONE AXIS, and that is the capability the first Vangopix's
+ * four channel bars were really for.
+ *
+ * On a square, saturation and value move TOGETHER: there is no way to drag one without
+ * disturbing the other, and lightening a colour without desaturating it is most of what
+ * shading is. Four separate bars give that back by spending a strip of the window on each
+ * channel. Holding SHIFT gives the same thing for nothing - and SHIFT ALREADY MEANS
+ * CONSTRAIN here, twice over: it snaps a line to the pixel-art slopes and a corner grip to
+ * the eight pixel grid. A third use of an idiom is cheaper to learn than a fourth control.
+ *
+ * The axis is decided by which way the hand has travelled furthest from the press, and kept
+ * for the rest of the drag - so it does not flip about while a slow hand wanders.
+ */
+static float press_x = 0.0f, press_y = 0.0f;
+static int   axis = 0;   /* 0 free, 1 saturation only, 2 value only */
 
 static void push (void)
 {
@@ -192,9 +336,19 @@ static bool on_event (SDL_FRect area, const SDL_Event *e, void *ctx)
 	if (e->type == SDL_EVENT_MOUSE_MOTION) { x = e->motion.x; y = e->motion.y; }
 	else                                   { x = e->button.x; y = e->button.y; }
 
-	if (e->type == SDL_EVENT_MOUSE_BUTTON_UP) { grab = GRAB_NONE; return false; }
+	if (e->type == SDL_EVENT_MOUSE_BUTTON_UP) { grab = GRAB_NONE; axis = 0; return false; }
 
 	if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+		/* Pressing anywhere else finishes what was being typed, which is what a person means
+		 * by it - losing it because the mouse moved would be the surprising reading. */
+		if (editing && !in_rect(l.hex, x, y)) field_stop(true);
+
+		press_x = x;
+		press_y = y;
+		axis    = 0;
+
+		if (in_rect(l.hex, x, y)) { if (!editing) field_start(); return false; }
+
 		if (in_rect(l.sv, x, y))       grab = GRAB_SV;
 		else if (in_rect(l.hue, x, y)) grab = GRAB_HUE;
 		else if (in_rect(l.a, x, y))   grab = GRAB_A;
@@ -238,10 +392,20 @@ static bool on_event (SDL_FRect area, const SDL_Event *e, void *ctx)
 	if (grab == GRAB_NONE) return false;
 
 	switch (grab) {
-	case GRAB_SV:
-		s = clamp01((x - l.sv.x) / l.sv.w);
-		v = 1.0f - clamp01((y - l.sv.y) / l.sv.h);
+	case GRAB_SV: {
+		if (keys_mods() & SDL_KMOD_SHIFT) {
+			if (!axis) {
+				float dx = SDL_fabsf(x - press_x), dy = SDL_fabsf(y - press_y);
+				if (dx > 2.0f || dy > 2.0f) axis = dx >= dy ? 1 : 2;
+			}
+		} else {
+			axis = 0;
+		}
+
+		if (axis != 2) s = clamp01((x - l.sv.x) / l.sv.w);
+		if (axis != 1) v = 1.0f - clamp01((y - l.sv.y) / l.sv.h);
 		break;
+	}
 	case GRAB_HUE:
 		h = clamp01((y - l.hue.y) / l.hue.h) * 359.99f;
 		break;
@@ -329,9 +493,32 @@ static void body (SDL_FRect area, void *ctx)
 
 	if (vng_text) {
 		char hex[16];
-		tool_hex(tool_colour(slot), hex, sizeof hex);
-		text_print(vng_text, l.slots.x + (SWATCH + GAP) * 2.0f + GAP, l.slots.y,
-		           0xB4B4B4FF, "%s", hex);
+
+		/* ONE BOX THAT ANSWERS IN BOTH DIRECTIONS: it says what the colour is, and typing
+		 * over it says what the colour should be. A label with an input under it would be the
+		 * same question asked twice. */
+		SDL_SetRenderDrawColor(vng_ren, 0x0C, 0x0C, 0x0C, 0xFF);
+		SDL_RenderFillRect(vng_ren, &l.hex);
+		SDL_SetRenderDrawColor(vng_ren, editing ? 0xC0 : 0x38, editing ? 0xC0 : 0x38,
+		                                editing ? 0xC0 : 0x38, 0xFF);
+		SDL_RenderRect(vng_ren, &l.hex);
+
+		if (editing) SDL_strlcpy(hex, field, sizeof hex);
+		else         tool_hex(tool_colour(slot), hex, sizeof hex);
+
+		text_print(vng_text, l.hex.x + 4.0f, l.hex.y, 0xDCDCDCFF, "#%s", hex);
+
+		if (editing) {
+			char  lead[16];
+			float tw;
+			SDL_snprintf(lead, sizeof lead, "#%s", hex);
+			text_measure(vng_text, lead, &tw, NULL);
+
+			SDL_FRect caret = { l.hex.x + 4.0f + tw + 1.0f, l.hex.y + 2.0f,
+			                    1.0f, l.hex.h - 4.0f };
+			SDL_SetRenderDrawColor(vng_ren, 0xFF, 0xFF, 0xFF, 0xE0);
+			SDL_RenderFillRect(vng_ren, &caret);
+		}
 	}
 
 	for (int i = 0; i < SLOTS; i++) {
@@ -343,7 +530,12 @@ static void body (SDL_FRect area, void *ctx)
 
 void colour_toggle (void)
 {
-	if (win) { win_show(win, !win_visible(win)); return; }
+	if (win) {
+		bool on = !win_visible(win);
+		if (!on) field_stop(true);   /* a window put away must not still hold the keyboard */
+		win_show(win, on);
+		return;
+	}
 
 	SDL_FRect  a = { 24.0f, 48.0f, OPEN_W, OPEN_H };
 	SDL_FPoint m = { MIN_W, MIN_H };

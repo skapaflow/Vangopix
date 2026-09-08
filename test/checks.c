@@ -14,8 +14,44 @@
 #include "thumb.h"
 #include "win.h"
 #include "colour.h"
+#include "keys.h"
 #include "view.h"
 #include "file.h"
+
+/* Text and ENTER, the way core.c hands them to whoever owns the keyboard. */
+static void typed (const char *t)
+{
+	SDL_Event e;
+	SDL_zero(e);
+	e.type = SDL_EVENT_TEXT_INPUT;
+	e.text.text = t;
+	keys_event(&e);
+}
+
+static void enter (void)
+{
+	SDL_Event e;
+	SDL_zero(e);
+	e.type    = SDL_EVENT_KEY_DOWN;
+	e.key.key = SDLK_RETURN;
+	keys_event(&e);
+}
+
+/* Opens the field, types, commits - the gesture in one line, since the checks below are
+ * about what comes out and not about the clicking. */
+static void hex_type (const char *t)
+{
+	SDL_Event e;
+	SDL_zero(e);
+	e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+	e.button.button = SDL_BUTTON_LEFT;
+	e.button.x = 24.0f + 120.0f;
+	e.button.y = 48.0f + 132.0f;
+	win_event(&e);
+
+	typed(t);
+	enter();
+}
 
 /* A bare key press, the way core.c hands one to the tool. */
 static bool key (VNG_TAB *t, SDL_Keycode k, SDL_Keymod mod)
@@ -775,6 +811,47 @@ int main (void)
 		e.motion.x = 300.0f;
 		e.motion.y = 260.0f;
 		ok("and lets go when the button does", win_event(&e) == false);
+
+		/* ---- the hex field ----
+		 *
+		 * The whole path, not a piece of it: clicking the readout captures the keyboard,
+		 * typing goes through keys_event the way core.c routes it, and ENTER commits. It is
+		 * the second thing in the program to own the keyboard, so this is also a check that
+		 * keys.c does what it was built for.
+		 */
+		SDL_zero(e);
+		e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+		e.button.button = SDL_BUTTON_LEFT;
+		e.button.x = 24.0f + 120.0f;   /* the readout, right of the two slots */
+		e.button.y = 48.0f + 132.0f;   /* between the picker and the swatches */
+		win_event(&e);
+
+		SDL_zero(e);
+		e.type = SDL_EVENT_KEY_DOWN;
+		e.key.key = SDLK_TAB;
+		ok("WHILE TYPING, TAB IS THE FIELD'S AND NOT THE SIDEBAR'S", keys_event(&e));
+
+		typed("2E3440");
+		ok("nothing lands until ENTER does", tool_colour(0) != 0xFF2E3440u);
+
+		enter();
+		ok("A TYPED HEX BECOMES THE COLOUR", tool_colour(0) == 0xFF2E3440u);
+		ok("and the keyboard is handed back", keys_event(&e) == false);
+
+		/* Liberal in what it takes, because a colour is copied from somewhere else and
+		 * arrives in whatever shape that somewhere used. */
+		hex_type("#88C0D0");
+		ok("a leading hash is taken", tool_colour(0) == 0xFF88C0D0u);
+
+		hex_type("F0A");
+		ok("three digits are the shorthand, each doubled", tool_colour(0) == 0xFFFF00AAu);
+
+		hex_type("4080FF80");
+		ok("eight digits say the alpha outright", tool_colour(0) == 0x804080FFu);
+
+		Uint32 kept = tool_colour(0);
+		hex_type("zzz");
+		ok("and nonsense changes nothing", tool_colour(0) == kept);
 
 		colour_toggle();
 		ok("C puts it away", colour_visible() == false);
