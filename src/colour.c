@@ -67,14 +67,16 @@
  *
  * Its tip landing ON the inner edge made the arrow and the ring one shape: the white tip and
  * the coloured band met with nothing between them, so at a glance the marker read as part of
- * the wheel rather than as a thing pointing at it. One pixel of hole showing through is all it
- * takes to separate them.
+ * the wheel rather than as a thing pointing at it. A pixel and a half of hole showing through
+ * is all it takes to separate them - a hair over one because the tip is a POINT rather than a
+ * flat end, so a single pixel of clearance at the very tip is already less than that a step
+ * back along either edge of it.
  *
  * NOT scaled with the wheel, unlike everything else about the markers. This is not a
- * proportion - a gap is either visible or it is not, and one that grew to three pixels on a
+ * proportion - a gap is either visible or it is not, and one that grew to four pixels on a
  * stretched window would stop being a hairline and start being a distance.
  */
-#define MARK_GAP   1.0f
+#define MARK_GAP   1.5f
 #define SCALE_IN   1.0f
 #define SCALE_OUT  1.5f    /* the original's, and it wants to be the bolder of the two */
 
@@ -734,7 +736,7 @@ static void body (SDL_FRect area, void *ctx)
 	for (int b = 0; b < BARS; b++)
 		glyph_draw(GLYPH_POINTER, l.bar[b].x + BAR_W * 0.5f,
 		           l.bar[b].y + (1.0f - level[b]) * l.bar[b].h,
-		           90.0f, 0.8f, 0xFFFFFFFF);
+		           90.0f, 1.0f, 0xFFFFFFFF);
 
 	if (vng_text) {
 		char hex[16];

@@ -109,9 +109,16 @@ void glyph_draw (GLYPH g, float x, float y, float rot, float scale, Uint32 rgba)
 	const SHAPE *s = &shapes[g];
 	if (s->lot + 1 > MAX_PT) return;
 
-	/* The shadow first, one pixel down and right, so the colour draws over it rather than
-	 * under it. Without this pass a white glyph is invisible on white artwork. */
-	path(s->pt, s->lot, x + 1.0f, y + 1.0f, rot, scale, 0x00, 0x00, 0x00, 0xC0);
+	/*
+	 * The shadow first, one pixel down and right, so the colour draws over it rather than
+	 * under it. Without this pass a white glyph is invisible on white artwork.
+	 *
+	 * OPAQUE, not a wash. It was 0xC0, and a shadow at three quarters is a shadow that takes
+	 * the colour of whatever it lands on - over the hue ring it went red, green or blue and
+	 * stopped separating the glyph from the band at all. The point of this pass is to be the
+	 * one thing under the outline that is the same everywhere.
+	 */
+	path(s->pt, s->lot, x + 1.0f, y + 1.0f, rot, scale, 0x00, 0x00, 0x00, 0xFF);
 
 	path(s->pt, s->lot, x, y, rot, scale,
 	     (Uint8)((rgba >> 24) & 0xFF), (Uint8)((rgba >> 16) & 0xFF),
