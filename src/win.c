@@ -220,29 +220,34 @@ bool win_event (const SDL_Event *e)
 
 		raise(w);
 
-		if (e->button.button != SDL_BUTTON_LEFT) return true;
+		/* The frame answers the LEFT button only: dragging a window about with the right one
+		 * is not a gesture anybody makes, and reserving it here would take it away from the
+		 * inside - where it means something, since the two colours are one per button. */
+		bool on_frame = in_rect(head_rect(w), x, y) || in_rect(grip_rect(w), x, y);
 
-		if (in_rect(close_rect(w), x, y)) { close_armed = w; return true; }
+		if (e->button.button == SDL_BUTTON_LEFT) {
+			if (in_rect(close_rect(w), x, y)) { close_armed = w; return true; }
 
-		if (in_rect(grip_rect(w), x, y)) {
-			held = w;
-			stretching = true;
-			grab_x = x - (w->a.x + w->a.w);
-			grab_y = y - (w->a.y + w->a.h);
-			return true;
+			if (in_rect(grip_rect(w), x, y)) {
+				held = w;
+				stretching = true;
+				grab_x = x - (w->a.x + w->a.w);
+				grab_y = y - (w->a.y + w->a.h);
+				return true;
+			}
+
+			if (in_rect(head_rect(w), x, y)) {
+				held = w;
+				stretching = false;
+				grab_x = x - w->a.x;
+				grab_y = y - w->a.y;
+				return true;
+			}
 		}
 
-		if (in_rect(head_rect(w), x, y)) {
-			held = w;
-			stretching = false;
-			grab_x = x - w->a.x;
-			grab_y = y - w->a.y;
-			return true;
-		}
-
-		/* The interior. Whatever the owner says, the event stops here - it landed on a
-		 * window, and the sheet underneath must not see it. */
-		if (w->ev && w->ev(w->a, e, w->ctx))
+		/* The interior, EITHER BUTTON. Whatever the owner says, the event stops here - it
+		 * landed on a window, and the sheet underneath must not see it. */
+		if (!on_frame && w->ev && w->ev(w->a, e, w->ctx))
 			inner = w;
 		return true;
 	}

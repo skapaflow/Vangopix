@@ -47,7 +47,7 @@ static void hex_type (const char *t)
 	e.button.button = SDL_BUTTON_LEFT;
 	SDL_FRect c = win_area(win_top());
 	e.button.x = c.x + 100.0f;
-	e.button.y = c.y + c.h - 40.0f;
+	e.button.y = c.y + c.h - 28.0f;
 	win_event(&e);
 
 	typed(t);
@@ -835,8 +835,8 @@ int main (void)
 		SDL_zero(e);
 		e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
 		e.button.button = SDL_BUTTON_LEFT;
-		e.button.x = c.x + 100.0f;          /* the readout, right of the two slots */
-		e.button.y = c.y + c.h - 40.0f;     /* between the picker and the swatches */
+		e.button.x = c.x + 100.0f;       /* the hex box, under the wheel */
+		e.button.y = c.y + c.h - 28.0f;  /* above the band the stretch corner lives in */
 		win_event(&e);
 
 		SDL_zero(e);
@@ -865,6 +865,28 @@ int main (void)
 		Uint32 kept = tool_colour(0);
 		hex_type("zzz");
 		ok("and nonsense changes nothing", tool_colour(0) == kept);
+
+		/* WHICH COLOUR A PRESS FILLS IS SAID BY THE BUTTON, the way it is everywhere else in
+		 * this program - and the way the first Vangopix had it. */
+		tool_set_colour(0, 0xFF000000u);
+		tool_set_colour(1, 0xFF000000u);
+
+		SDL_zero(e);
+		e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+		e.button.button = SDL_BUTTON_RIGHT;
+		e.button.x = c.x + 90.0f;
+		e.button.y = c.y + 30.0f;
+		win_event(&e);
+
+		ok("THE RIGHT BUTTON FILLS COLOUR 2", tool_colour(1) != 0xFF000000u);
+		ok("and leaves colour 1 alone",       tool_colour(0) == 0xFF000000u);
+
+		SDL_zero(e);
+		e.type = SDL_EVENT_MOUSE_BUTTON_UP;
+		e.button.button = SDL_BUTTON_RIGHT;
+		e.button.x = c.x + 90.0f;
+		e.button.y = c.y + 30.0f;
+		win_event(&e);
 
 		colour_toggle();
 		ok("C puts it away", colour_visible() == false);

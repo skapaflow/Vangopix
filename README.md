@@ -255,16 +255,16 @@ Four sliders beside it — hue, saturation, value and alpha — each showing its
 the whole range with the others held, so what is under the pointer is what you would get. The
 alpha one is a real control, because in this program nothing *is* a colour.
 
-Click either of the two slots to say which one you are editing; the picker follows it, so a
-colour you absorb with `CTRL` out on the sheet turns up here too.
+**Which of the two colours you are filling is said by the mouse button** — left fills colour 1,
+right fills colour 2, the same rule as everywhere else here. Nothing in the window chooses
+between them and nothing shows them, because the bars at the bottom left already do, all the
+time. The picker follows whichever you last touched, so a colour you absorb with `CTRL` out on
+the sheet turns up here too.
 
 **Click the hex line and type.** `#2E3440`, `2E3440`, `4080FF80` with the alpha, or `F0A` for
 short — with or without the hash, because a colour copied from a published palette arrives in
 whatever shape that palette used. The first thing you type replaces what is there; backspace
 if you meant to edit instead. `ENTER` takes it, `ESC` drops it.
-
-Sixteen tiles at the bottom are the eight-to-sixteen you settle on: click one to load it,
-`SHIFT`+click to store the colour you have into it.
 
 ### The 1:1 panel
 

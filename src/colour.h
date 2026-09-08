@@ -38,12 +38,17 @@
  * IS a colour: the second slot starts transparent, rubbing out is drawing with nothing, and a
  * half transparent shade is a thing people want on purpose.
  *
- * SIXTEEN SWATCHES, and they are the "eight to sixteen" said back. Click loads one into the
- * slot being edited; SHIFT+click stores the current colour into it.
+ * WHICH OF THE TWO COLOURS A PRESS FILLS IS SAID BY THE MOUSE BUTTON: left fills colour 1,
+ * right fills colour 2. That is the first Vangopix's own arrangement - `if (mouse_left)
+ * color_front = color; if (mouse_right) color_back = color;` - and it is the rule this whole
+ * program already runs on.
  *
- * The window EDITS ONE SLOT AT A TIME and shows which - and it follows the slot rather than
- * owning it, so a colour absorbed with CTRL out on the sheet appears here without anything
- * having to be told.
+ * SO THERE IS NOTHING IN HERE FOR CHOOSING BETWEEN THEM, and nothing showing them either. Two
+ * chips inside this window would be a third way of saying what the mouse already says, beside
+ * a readout at the bottom of the screen that shows both all the time.
+ *
+ * The window FOLLOWS the slot rather than owning it, so a colour absorbed with CTRL out on
+ * the sheet appears here without anything having to be told.
  */
 
 extern void colour_toggle  (void);
