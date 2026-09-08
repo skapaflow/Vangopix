@@ -65,6 +65,22 @@
 #define SCALE_OUT  1.5f    /* the original's, and it wants to be the bolder of the two */
 
 /*
+ * THE RADIUS THOSE TWO SCALES WERE CHOSEN AT, and everything is measured against it so the
+ * arrows GROW WITH THE WHEEL.
+ *
+ * A marker that keeps its own size while the ring it presses on gets bigger stops being a
+ * marker: at a stretched window it reads as a speck stuck to the rim, and at a small one it
+ * swallows the ring. The whole geometry already follows the radius - the hole, the disc, where
+ * each tip lands - so the arrows have to as well, or they are the one thing in the wheel that
+ * does not agree with the rest of it.
+ *
+ * The slider markers are deliberately NOT scaled: a slider keeps its 16 pixel width however
+ * the window is pulled, and only grows taller, so an arrow that grew with the window would
+ * hang off the sides of the one thing it sits on.
+ */
+#define MARK_REF  70.0f
+
+/*
  * THE OUTER MARKER RIDES THE RIM, and this is the one proportion changed.
  *
  * The original put it at 85 of 70 - a fifth of a radius OUTSIDE the ring - and with a centre
@@ -95,7 +111,7 @@ static VNG_WIN *win = NULL;
 /* The picker's own state. HSV and not RGB, because the square and the bar ARE hue,
  * saturation and value - keeping RGB and converting both ways every frame would make a
  * grey ambiguous, since every hue is the same grey and the bar would jump. */
-static float h = 0.0f, s = 1.0f, v = 1.0f;
+static float h = 0.0f, s = 1.0f, v = 0.0f;
 static Uint8 alpha = 0xFF;
 
 /*
@@ -108,6 +124,9 @@ static Uint8 alpha = 0xFF;
  * way of saying something the mouse already says, next to a readout at the bottom of the
  * screen that already shows both.
  */
+/* v starts at 0 because START_1 is BLACK, and the two have to agree from the first frame: the
+ * picker only re-reads the slot when it finds it CHANGED, so a disc that opened saying red
+ * over a slot holding black would go on saying it until something else moved. */
 static int slot = 0;
 static Uint32 last = 0xFF000000u; /* what this window last wrote, to notice outside changes */
 
@@ -615,13 +634,14 @@ static void body (SDL_FRect area, void *ctx)
 	 */
 	{
 		/* Inside the hole, tip on the ring's INNER edge, pointing out. */
+		float sc  = SCALE_IN * (l.radius / MARK_REF);
 		float rad = h * (SDL_PI_F / 180.0f);
-		float at  = l.radius * RING_IN - MARK_TIP * SCALE_IN;
+		float at  = l.radius * RING_IN - MARK_TIP * sc;
 
 		glyph_draw(GLYPH_POINTER,
 		           l.centre.x + SDL_cosf(rad) * at,
 		           l.centre.y - SDL_sinf(rad) * at,
-		           h - 90.0f, SCALE_IN, 0xFFFFFFFF);
+		           h - 90.0f, sc, 0xFFFFFFFF);
 	}
 
 	float px, py;
@@ -638,14 +658,15 @@ static void body (SDL_FRect area, void *ctx)
 		 * THE SCISSORS COME OFF FOR THIS ONE CALL. Its tail stands outside the wheel and,
 		 * near the top of a small window, outside the window itself; cut short it stops
 		 * reading as a thing pressing on the ring. Every other line here stays clipped. */
+		float sc  = SCALE_OUT * (l.radius / MARK_REF);
 		float rad = deg * (SDL_PI_F / 180.0f);
-		float at  = l.radius + MARK_TIP * SCALE_OUT;
+		float at  = l.radius + MARK_TIP * sc;
 
 		win_unclip(win);
 		glyph_draw(GLYPH_POINTER,
 		           l.centre.x + SDL_cosf(rad) * at,
 		           l.centre.y - SDL_sinf(rad) * at,
-		           deg + 90.0f, SCALE_OUT, 0xFFFFFFFF);
+		           deg + 90.0f, sc, 0xFFFFFFFF);
 		win_clip(win);
 	}
 
