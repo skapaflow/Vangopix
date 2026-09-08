@@ -27,3 +27,4 @@ shot.png
 # The project list is per machine: it holds absolute paths to folders on THIS disk, so
 # committing it would hand every clone a list of directories that do not exist there.
 projects.vngproj
+build/

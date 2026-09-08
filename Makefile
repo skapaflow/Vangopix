@@ -10,6 +10,10 @@ ifeq ($(OS),Windows_NT)
     SHELL      = cmd.exe
     OUT        = vangopix.exe
     TEST_OUT   = checks.exe
+    # cmd.exe has no `mkdir -p`, and `mkdir` on an existing directory is an ERROR here -
+    # which would fail the build on every run after the first.
+    MKBUILD    = if not exist $(OBJDIR) mkdir $(OBJDIR)
+    RMBUILD    = if exist $(OBJDIR) rmdir /S /Q $(OBJDIR)
     SDL3      ?= C:/SDL3
     SDL3IMG   ?= C:/SDL3_image
     SDL_CFLAGS = -I$(SDL3)/include -I$(SDL3IMG)/include
@@ -20,6 +24,8 @@ ifeq ($(OS),Windows_NT)
 else
     OUT        = vangopix
     TEST_OUT   = checks
+    MKBUILD    = mkdir -p $(OBJDIR)
+    RMBUILD    = rm -rf $(OBJDIR)
     # pkg-config rather than hardcoded paths: on Linux and macOS the libraries come from
     # a package manager that already knows where it put them, and hardcoding would be
     # wrong on every distribution and on both homebrew prefixes.
@@ -59,16 +65,38 @@ LFLAGS  = $(SDL_LIBS)
 #   colour.c   the colour window: where a new colour comes from
 #   glyph.c    the line-art glyphs, drawn as wireframe paths
 #   text.c     glyphs packed into one atlas by stb_truetype
+OBJDIR = build
 SRC = src/main.c src/vangopix.c src/core.c src/keys.c src/tabs.c src/tabbar.c src/view.c src/resize.c src/project.c src/sidebar.c src/prompt.c src/file.c src/undo.c src/tool.c src/select.c src/thumb.c src/win.c src/colour.c src/glyph.c src/text.c
 DEP = $(wildcard src/*.h)
+OBJ = $(SRC:src/%.c=$(OBJDIR)/%.o)
 
 all: $(OUT) run
 
-# $(DEP) belongs on the list: without it, touching a header recompiles nothing and the
-# translation units end up with different views of the same struct - silent corruption
-# from an ABI mismatch, surfacing far from its cause.
-$(OUT): $(SRC) $(DEP) $(RES)
-	$(CC) $(CFLAGS) $(SRC) $(RES) -o $(OUT) $(LFLAGS)
+#
+# ONE OBJECT PER SOURCE, SO A ONE FILE EDIT COMPILES ONE FILE. Twenty translation units
+# rebuilt for a comment in colour.c is a wait that gets paid on every keystroke of the day,
+# and it is the reason a build stops being run often enough to catch things early.
+#
+# They go in build/ rather than beside the sources: src/ holds what was written, and a
+# directory that mixes the two makes `ls` useless and one stray *.o in a commit likely.
+# `make clean` throws the whole directory away, which is also the only honest way to force
+# a full rebuild.
+#
+# $(DEP) - every header - is on EVERY object rather than the real per-file dependency. It
+# is coarse: touching one header rebuilds all twenty, exactly as before. But the failure it
+# prevents is the one worth being crude about - two translation units holding different
+# views of the same struct, which is silent corruption surfacing far from its cause. The
+# precise answer is the compiler's own -MMD depfiles, and that is a change to make when
+# the header set is big enough to feel it.
+#
+$(OBJDIR)/%.o: src/%.c $(DEP) | $(OBJDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJDIR):
+	@$(MKBUILD)
+
+$(OUT): $(OBJ) $(RES)
+	$(CC) $(OBJ) $(RES) -o $(OUT) $(LFLAGS)
 
 run: $(OUT)
 	./$(OUT)
@@ -80,9 +108,16 @@ run: $(OUT)
 # or FAIL per claim.
 #
 # NOT part of `all`: a build should not open a window every time it succeeds.
-TEST_SRC = $(filter-out src/main.c,$(SRC))
-test: test/checks.c $(TEST_SRC) $(DEP)
-	$(CC) $(CFLAGS) test/checks.c $(TEST_SRC) -o $(TEST_OUT) $(LFLAGS)
+# It links THE SAME OBJECTS the program does, minus main.o - so a suite that passes has
+# tested the exact code that shipped, and running `make` after `make test` recompiles
+# nothing. main.o is the only one left out: two mains do not link.
+TEST_OBJ = $(filter-out $(OBJDIR)/main.o,$(OBJ))
+
+$(OBJDIR)/checks.o: test/checks.c $(DEP) | $(OBJDIR)
+	$(CC) $(CFLAGS) -c test/checks.c -o $@
+
+test: $(OBJDIR)/checks.o $(TEST_OBJ)
+	$(CC) $(OBJDIR)/checks.o $(TEST_OBJ) -o $(TEST_OUT) $(LFLAGS)
 	./$(TEST_OUT)
 
 # -mwindows drops the console, and only on Windows does it mean anything. It is now on by
@@ -124,6 +159,7 @@ clean:
 	@if exist $(OUT) del $(OUT)
 	@if exist $(TEST_OUT) del $(TEST_OUT)
 	@if exist $(subst /,\,$(RES)) del $(subst /,\,$(RES))
+	@$(RMBUILD)
 
 else
 
@@ -132,6 +168,7 @@ dll:
 
 clean:
 	rm -f $(OUT) $(TEST_OUT)
+	$(RMBUILD)
 
 endif
 

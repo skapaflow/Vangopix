@@ -81,15 +81,18 @@
 #define MARK_REF  70.0f
 
 /*
- * THE OUTER MARKER RIDES THE RIM, and this is the one proportion changed.
+ * WHERE THE OUTER MARKER'S TIP LANDS, as a fraction of the radius. THIS IS THE ONE KNOB for
+ * moving that arrow in or out: 1.0 puts its tip exactly on the ring's outer rim, less pulls
+ * it in over the ring, more pushes it out past the window.
  *
  * The original put it at 85 of 70 - a fifth of a radius OUTSIDE the ring - and with a centre
- * at (75, 90) that reached x = -10, which is off the left edge of its own window. It drew
- * there anyway, over whatever was behind, because nothing clipped it.
+ * at (75, 90) that reached x = -10, off the left edge of its own window. It drew there anyway,
+ * over whatever was behind, because nothing clipped it; here that is asked for by name, with
+ * win_unclip, rather than being what happens by default.
  *
- * win.c clips a window's interior for its owner, so here the same marker was being cut off
- * instead. Sitting it ON the rim keeps it inside by construction, and it reads better for it:
- * the arrow now touches the hue it is pointing at rather than floating a gap away from it.
+ * It sits on the rim because the arrow then TOUCHES the hue it points at instead of floating
+ * a gap away from it - and because the pair only reads as two fingers pressing the hue between
+ * them while both are actually on the ring.
  */
 #define MARK_OUT  1.0f
 
@@ -688,7 +691,7 @@ static void body (SDL_FRect area, void *ctx)
 		 * reading as a thing pressing on the ring. Every other line here stays clipped. */
 		float sc  = SCALE_OUT * (l.radius / MARK_REF);
 		float rad = deg * (SDL_PI_F / 180.0f);
-		float at  = l.radius + MARK_TIP * sc;
+		float at  = l.radius * MARK_OUT + MARK_TIP * sc;
 
 		win_unclip(win);
 		glyph_draw(GLYPH_POINTER,
