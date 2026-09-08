@@ -8,7 +8,6 @@
  * beside a character without covering it. */
 #define OPEN_SIDE  128.0f
 #define MIN_SIDE    32.0f
-#define MARGIN       8.0f
 
 static VNG_WIN *win = NULL;
 
@@ -74,18 +73,32 @@ static void body (SDL_FRect area, void *ctx)
 	SDL_RenderTexture(vng_ren, t->tex, &src, &dst);
 }
 
+/*
+ * IT COMES UP UNDER THE POINTER, centred on it, which is the first Vangopix's behaviour and
+ * the right one: the hand is already where the work is, so the panel arrives beside the thing
+ * being drawn without being dragged there. A fixed corner is a corner you have to pull it out
+ * of, every time.
+ *
+ * What it keeps across a hiding is its SIZE and everything about it except where it sits -
+ * because where it sits is the one thing that is answered better by asking the hand.
+ */
 void thumb_toggle (void)
 {
-	if (win) { win_show(win, !win_visible(win)); return; }
+	float mx, my;
+	SDL_GetMouseState(&mx, &my);
 
-	/* Opened in the bottom right the first time and never again: after that it is wherever it
-	 * was left, which is the whole reason it is a window. Parked beside the character being
-	 * drawn is what it is for. */
-	SDL_FRect  a = { vng_win_w - MARGIN - OPEN_SIDE,
-	                 vng_win_h - MARGIN - OPEN_SIDE, OPEN_SIDE, OPEN_SIDE };
+	if (win) {
+		bool on = !win_visible(win);
+		if (on) win_place(win, mx, my);
+		win_show(win, on);
+		return;
+	}
+
+	SDL_FRect  a = { 0.0f, 0.0f, OPEN_SIDE, OPEN_SIDE };
 	SDL_FPoint m = { MIN_SIDE, MIN_SIDE };
 
 	win = win_open("1:1", a, m, body, NULL, NULL);
+	win_place(win, mx, my);
 }
 
 bool thumb_visible (void) { return win_visible(win); }

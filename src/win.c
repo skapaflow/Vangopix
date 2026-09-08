@@ -79,6 +79,14 @@ static bool in_rect (SDL_FRect r, float x, float y)
 	return x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h;
 }
 
+VNG_WIN *win_top (void)
+{
+	VNG_WIN *found = NULL;
+	for (VNG_WIN *w = list; w; w = w->next)
+		if (w->shown) found = w;
+	return found;
+}
+
 SDL_FRect win_area (VNG_WIN *w)
 {
 	SDL_FRect none = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -96,10 +104,15 @@ bool win_hover (VNG_WIN *w)
 	return in_rect(outer(w), mx, my);
 }
 
+/* Declared here because showing a window raises it: a window being summoned is the one being
+ * asked for, so it cannot come up behind another. */
+static void raise (VNG_WIN *w);
+
 void win_show (VNG_WIN *w, bool on)
 {
 	if (!w) return;
 	w->shown = on;
+	if (on) raise(w);
 
 	/* Hiding whatever was being carried, rather than leaving a drag pointed at something
 	 * nobody can see. */
@@ -179,6 +192,20 @@ static void keep_reachable (VNG_WIN *w)
 	if (w->a.x > vng_win_w - KEEP)       w->a.x = vng_win_w - KEEP;
 	if (w->a.y - hh < 0.0f)              w->a.y = hh;
 	if (w->a.y - hh > vng_win_h - KEEP)  w->a.y = vng_win_h - KEEP + hh;
+}
+
+void win_place (VNG_WIN *w, float cx, float cy)
+{
+	if (!w) return;
+
+	/* Centred on the WHOLE window, head bar included - which is what "the middle of it lands
+	 * under the pointer" means to the eye, and what the original measured. */
+	SDL_FRect o = outer(w);
+
+	w->a.x += cx - (o.x + o.w * 0.5f);
+	w->a.y += cy - (o.y + o.h * 0.5f);
+
+	keep_reachable(w);
 }
 
 bool win_event (const SDL_Event *e)

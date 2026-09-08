@@ -53,14 +53,29 @@ typedef bool (*WIN_EVENT) (SDL_FRect area, const SDL_Event *e, void *ctx);
 
 /*
  * Opens a window. It is created VISIBLE, and it is never destroyed by being closed - hiding
- * and showing keep its position and size, which is what lets a panel be parked somewhere and
- * found there again. `min` is the smallest its interior may be stretched to.
+ * and showing keep its size and whatever the owner does not choose to change. `min` is the
+ * smallest its interior may be stretched to.
  */
 extern VNG_WIN *win_open (const char *title, SDL_FRect area, SDL_FPoint min,
                           WIN_DRAW draw, WIN_EVENT ev, void *ctx);
 
 extern void win_show    (VNG_WIN *w, bool on);
+
+/*
+ * Puts the WHOLE window - head bar included - centred on a point, and keeps it reachable.
+ *
+ * What summoning a window calls with the pointer's position, which is the first Vangopix's
+ * behaviour (`{mouse.x - w/2, mouse.y - h/2}` in its tool_core.c). A window that appears
+ * where the hand already is, is a window that appears where the work is: the alternative is a
+ * fixed corner you then have to drag it out of, every time.
+ */
+extern void win_place (VNG_WIN *w, float cx, float cy);
 extern bool win_visible (VNG_WIN *w);
+
+/* The frontmost visible window, or NULL. Showing one raises it, so this is also "the one that
+   was just summoned" - which is what a check needs when the thing it wants to click on comes
+   up wherever the pointer happened to be. */
+extern VNG_WIN *win_top (void);
 
 /* The interior, in screen pixels - what an owner needs to answer questions about itself
    outside its own draw, like where on the sheet it is looking. */

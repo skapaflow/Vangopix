@@ -675,19 +675,29 @@ static void body (SDL_FRect area, void *ctx)
 	}
 }
 
+/*
+ * IT COMES UP UNDER THE POINTER, centred on it - the first Vangopix's behaviour, and the same
+ * reason as the 1:1 panel: a window summoned to the hand needs no dragging to be where it is
+ * wanted.
+ */
 void colour_toggle (void)
 {
+	float mx, my;
+	SDL_GetMouseState(&mx, &my);
+
 	if (win) {
 		bool on = !win_visible(win);
 		if (!on) field_stop(true);   /* a window put away must not still hold the keyboard */
+		else     win_place(win, mx, my);
 		win_show(win, on);
 		return;
 	}
 
-	SDL_FRect  a = { 24.0f, 48.0f, OPEN_W, OPEN_H };
+	SDL_FRect  a = { 0.0f, 0.0f, OPEN_W, OPEN_H };
 	SDL_FPoint m = { MIN_W, MIN_H };
 
 	win = win_open("colour", a, m, body, on_event, NULL);
+	win_place(win, mx, my);
 }
 
 bool colour_visible (void) { return win_visible(win); }

@@ -29,11 +29,14 @@
  *
  *   3. `rec4i win = {250, 100, w, h}` carried two numbers that were never read. Gone.
  *
- * IT IS A WINDOW, and that is what the panel is FOR: parked beside the character being drawn,
- * at 1:1, so the eye never has to zoom out to ask how the work is going. A corner it cannot
- * leave would have been half the feature. win.c carries the frame - moving, stretching,
- * raising - and this file draws the inside; the position is kept when it is put away, so it
- * is found again where it was left.
+ * IT IS A WINDOW, and that is what the panel is FOR: beside the character being drawn, at
+ * 1:1, so the eye never has to zoom out to ask how the work is going. A corner it cannot leave
+ * would have been half the feature. win.c carries the frame - moving, stretching, raising -
+ * and this file draws the inside.
+ *
+ * IT COMES UP CENTRED ON THE POINTER, which is the first Vangopix's behaviour and the better
+ * answer to the same want: the hand is already where the work is, so the panel arrives beside
+ * the thing being drawn instead of being dragged there from a corner every time.
  *
  * It follows the camera rather than being panned separately, because there is one place you
  * are looking and two of them would have to be kept in step by hand. Click-to-navigate was

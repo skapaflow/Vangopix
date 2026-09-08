@@ -241,7 +241,8 @@ one undo.
 
 ### The colour window
 
-`C` raises it. It is where a colour that is **not on the sheet yet** comes from — everything
+`C` raises it, centred on your pointer like the 1:1 panel. It is where a colour that is **not
+on the sheet yet** comes from — everything
 else about colour here reads the drawing, and all of that needs a colour to already exist.
 
 **A hue ring, with the colour you are building sitting in the hole** — the result lives in the
@@ -272,11 +273,11 @@ shows the document at one art pixel to one screen pixel, cropped around whatever
 looking at. Pixel art is drawn at 800% and looked at at 100%, and this answers the question
 you ask twenty times an hour: what does this actually look like?
 
-**It is a window**: drag it by its bar, stretch it by the corner, and it stays where you put
-it — the point being to park it right beside the character you are drawing, so you never have
-to zoom out to see how the work is going. Put it away and it comes back where you left it.
-When the panel is showing only part of the document, hovering it outlines that part on the
-sheet.
+**It is a window**: drag it by its bar, stretch it by the corner. It comes up **centred on
+your pointer**, so it arrives beside the thing you are drawing rather than in a corner you
+then have to pull it out of — which is the point, since you want it next to the character while
+you work and never have to zoom out. When the panel is showing only part of the document,
+hovering it outlines that part on the sheet.
 
 (With a selection in hand, `V` flips it instead — same arrangement `R` has with the ellipse.)
 

@@ -45,8 +45,9 @@ static void hex_type (const char *t)
 	SDL_zero(e);
 	e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
 	e.button.button = SDL_BUTTON_LEFT;
-	e.button.x = 24.0f + 126.0f;
-	e.button.y = 48.0f + 162.0f;
+	SDL_FRect c = win_area(win_top());
+	e.button.x = c.x + 100.0f;
+	e.button.y = c.y + c.h - 40.0f;
 	win_event(&e);
 
 	typed(t);
@@ -736,25 +737,33 @@ int main (void)
 		SDL_zero(e);
 		e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
 		e.button.button = SDL_BUTTON_LEFT;
-		e.button.x = (float)vng_win_w - 70.0f;
-		e.button.y = (float)vng_win_h - 70.0f;
+		e.button.x = 200.0f;
+		e.button.y = 150.0f;
 
 		ok("down, no window takes the click", win_event(&e) == false);
 
 		thumb_toggle();
 		ok("V puts it up", thumb_visible());
+
+		/* It comes up centred on the pointer, and in a hidden window the pointer is wherever
+		 * the desktop's is - so it is put somewhere known before being aimed at. */
+		win_place(win_top(), 200.0f, 150.0f);
+		SDL_FRect a = win_area(win_top());
+
+		e.button.x = a.x + a.w * 0.5f;
+		e.button.y = a.y + a.h * 0.5f;
 		ok("UP, THE WINDOW TAKES THE CLICK RATHER THAN THE SHEET", win_event(&e));
 
-		e.button.x = 10.0f;
-		e.button.y = 10.0f;
+		e.button.x = a.x - 60.0f;
+		e.button.y = a.y - 60.0f;
 		ok("and takes nothing where it is not", win_event(&e) == false);
 
 		/* Motion is consumed only while something is being carried, so a stroke or a pan
 		 * begun on the sheet is not cut in half by crossing a window. */
 		SDL_zero(e);
 		e.type = SDL_EVENT_MOUSE_MOTION;
-		e.motion.x = (float)vng_win_w - 70.0f;
-		e.motion.y = (float)vng_win_h - 70.0f;
+		e.motion.x = a.x + a.w * 0.5f;
+		e.motion.y = a.y + a.h * 0.5f;
 		ok("MOTION CROSSES A WINDOW UNTOUCHED", win_event(&e) == false);
 
 		thumb_toggle();
@@ -774,14 +783,18 @@ int main (void)
 		colour_toggle();
 		ok("C puts the colour window up", colour_visible());
 
-		/* It opens at (24,48) and is 300x212 inside. The hue ring fills the left-hand block
-		 * of that, so a press well inside it has to change slot 1. */
+		/* Summoned to the pointer, so it is put somewhere known first and everything below is
+		 * measured from where it actually is. The hue ring fills the left of the interior, so
+		 * a press well inside that has to change slot 1. */
+		win_place(win_top(), 200.0f, 150.0f);
+		SDL_FRect c = win_area(win_top());
+
 		SDL_Event e;
 		SDL_zero(e);
 		e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
 		e.button.button = SDL_BUTTON_LEFT;
-		e.button.x = 24.0f + 90.0f;
-		e.button.y = 48.0f + 30.0f;
+		e.button.x = c.x + 90.0f;
+		e.button.y = c.y + 30.0f;
 
 		ok("the window takes the press", win_event(&e));
 		ok("A PRESS IN THE WHEEL WRITES THE SLOT", tool_colour(0) != 0xFF000000u);
@@ -793,23 +806,23 @@ int main (void)
 		 * a slider dragged past its own end is still being dragged. */
 		SDL_zero(e);
 		e.type = SDL_EVENT_MOUSE_MOTION;
-		e.motion.x = 24.0f + 20.0f;
-		e.motion.y = 48.0f + 100.0f;
+		e.motion.x = c.x + 20.0f;
+		e.motion.y = c.y + 100.0f;
 		ok("THE DRAG STAYS WITH THE WINDOW", win_event(&e));
 		ok("and moving around the wheel moves the hue", tool_colour(0) != first);
 
 		SDL_zero(e);
 		e.type = SDL_EVENT_MOUSE_BUTTON_UP;
 		e.button.button = SDL_BUTTON_LEFT;
-		e.button.x = 24.0f + 20.0f;
-		e.button.y = 48.0f + 100.0f;
+		e.button.x = c.x + 20.0f;
+		e.button.y = c.y + 100.0f;
 		win_event(&e);
 
 		/* Once the button is up the window has let go, and the sheet gets its events back. */
 		SDL_zero(e);
 		e.type = SDL_EVENT_MOUSE_MOTION;
-		e.motion.x = 300.0f;
-		e.motion.y = 260.0f;
+		e.motion.x = c.x - 80.0f;
+		e.motion.y = c.y - 80.0f;
 		ok("and lets go when the button does", win_event(&e) == false);
 
 		/* ---- the hex field ----
@@ -822,8 +835,8 @@ int main (void)
 		SDL_zero(e);
 		e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
 		e.button.button = SDL_BUTTON_LEFT;
-		e.button.x = 24.0f + 126.0f;   /* the readout, right of the two slots */
-		e.button.y = 48.0f + 162.0f;   /* between the picker and the swatches */
+		e.button.x = c.x + 100.0f;          /* the readout, right of the two slots */
+		e.button.y = c.y + c.h - 40.0f;     /* between the picker and the swatches */
 		win_event(&e);
 
 		SDL_zero(e);
