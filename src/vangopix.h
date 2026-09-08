@@ -14,10 +14,10 @@
 #include "text.h"
 
 #define VNG_NAME    "Vangopix"
-#define VNG_WIN_W   800
-#define VNG_WIN_H   600
-#define VNG_NEW_W   64      /* a fresh sheet, in document pixels */
-#define VNG_NEW_H   64
+#define VNG_WIN_W   1024
+#define VNG_WIN_H   768
+#define VNG_NEW_W   256      /* a fresh sheet, in document pixels */
+#define VNG_NEW_H   256
 
 /* The largest side a sheet may have. Not a matter of taste: the buffer is allocated as
    w * h * 4 with w and h as int, so a mistyped 640000 overflows the multiplication and

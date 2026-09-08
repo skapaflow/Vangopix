@@ -538,6 +538,15 @@ static bool on_event (SDL_FRect area, const SDL_Event *e, void *ctx)
 
 		float deg = SDL_atan2f(-dy, dx) * (180.0f / SDL_PI_F);
 		h = deg < 0.0f ? deg + 360.0f : deg;
+
+		/*
+		 * A HUE MEANS NOTHING AT VALUE ZERO - every one of them is black - so a wheel used on
+		 * a black colour would turn and turn and change nothing. Reaching for the ring is
+		 * asking for that hue, so the two channels that can swallow it are lifted out of the
+		 * way. The sliders are still there for anyone who wants to put them back.
+		 */
+		if (v <= 0.0f) v = 1.0f;
+		if (s <= 0.0f) s = 1.0f;
 		break;
 	}
 	case GRAB_BAR: {
@@ -561,31 +570,50 @@ static bool on_event (SDL_FRect area, const SDL_Event *e, void *ctx)
 /* ------------------------------------------------------------------------- the pixels */
 
 /*
- * A filled disc of one colour, laid over the same two tones every swatch in this program uses
- * so that a transparent colour reads as transparent here too.
+ * A filled disc of one colour, over a backing that says what is transparent about it.
  *
- * Row by row, because SDL draws no circles - and row by row is exactly what makes the two
- * tones easy: each row is split at the centre, which is the same left-half-lighter figure the
- * bars at the bottom of the screen show.
+ * THE BACKING IS THE DESK'S CHECKERBOARD, NOT THE BARS' TWO HALVES. Every swatch in this
+ * program shows alpha by laying the colour over two tones, and everywhere else the swatch is
+ * a RECTANGLE - where a split down the middle reads as the swatch convention it is. On a
+ * CIRCLE it reads as the disc being broken in two: a straight line across the middle of a
+ * round shape is a crack, because nothing about the shape explains it. The checkerboard has
+ * no middle to split on, and it is what the sheet, the selection's hole, the 1:1 panel and
+ * the desk itself all use - so a transparent colour means here what it means everywhere.
+ *
+ * Row by row, because SDL draws no circles, and the pattern is stepped out by hand because
+ * SDL_RenderTextureTiled cannot be clipped to anything but a rectangle. The phase is taken
+ * from the disc's bounding box, which is the origin the tiled call would have anchored to.
  */
 static void disc (float cx, float cy, float r, Uint32 c)
 {
 	if (r < 1.0f) return;
 
-	int ri = (int)r;
+	int   ri = (int)r;
+	float x0 = cx - r, y0 = cy - r;
 
 	for (int dy = -ri; dy <= ri; dy++) {
 		float half = SDL_sqrtf((float)(ri * ri - dy * dy));
 		float y    = cy + (float)dy;
+		float lo   = cx - half, hi = cx + half;
+		int   iy   = (int)SDL_floorf((y - y0) / (float)VNG_CHECK);
 
-		SDL_SetRenderDrawColor(vng_ren, 0x25, 0x25, 0x25, 0xFF);
-		SDL_RenderLine(vng_ren, cx, y, cx + half, y);
-		SDL_SetRenderDrawColor(vng_ren, 0x33, 0x33, 0x33, 0xFF);
-		SDL_RenderLine(vng_ren, cx - half, y, cx, y);
+		for (float x = lo; x < hi; ) {
+			int    ix   = (int)SDL_floorf((x - x0) / (float)VNG_CHECK);
+			float  next = x0 + (float)(ix + 1) * (float)VNG_CHECK;
+			Uint32 t    = ((ix + iy) & 1) ? VNG_CHECK_B : VNG_CHECK_A;
+
+			if (next <= x)  next = x + 1.0f;   /* never stall on a boundary landed on exactly */
+			if (next >  hi) next = hi;
+
+			SDL_SetRenderDrawColor(vng_ren, (Uint8)((t >> 16) & 0xFF), (Uint8)((t >> 8) & 0xFF),
+			                                (Uint8)(t & 0xFF), 0xFF);
+			SDL_RenderLine(vng_ren, x, y, next, y);
+			x = next;
+		}
 
 		SDL_SetRenderDrawColor(vng_ren, (Uint8)((c >> 16) & 0xFF), (Uint8)((c >> 8) & 0xFF),
 		                                (Uint8)(c & 0xFF), (Uint8)((c >> 24) & 0xFF));
-		SDL_RenderLine(vng_ren, cx - half, y, cx + half, y);
+		SDL_RenderLine(vng_ren, lo, y, hi, y);
 	}
 
 	/* A rim, so a pale colour still has an edge against the ring's hole. */

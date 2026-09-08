@@ -23,13 +23,16 @@
  * It is drawn in SCREEN space, not document space - it is the table the paper lies on,
  * so it must not slide when the camera pans, or it would read as part of the artwork.
  */
-#define CHECK       6
-/* 0xAARRGGBB, to match the ARGB8888 the texture is created with. The first Vangopix
- * wrote these as 0xRRGGBBAA in its config.ini, and transcribing that shape straight into
- * an RGBA32 texture is how this first came out red: RGBA32 orders the BYTES R,G,B,A, so
- * a little endian machine reads 0x252525FF back as red 0xFF with alpha 0x25. */
-#define CHECK_A     0xFF252525
-#define CHECK_B     0xFF303030
+/* The numbers live in core.h now, because a shape SDL cannot clip to has to lay the same
+ * pattern down by hand and the two must not drift apart.
+ *
+ * 0xAARRGGBB, to match the ARGB8888 the texture is created with. The first Vangopix wrote
+ * these as 0xRRGGBBAA in its config.ini, and transcribing that shape straight into an RGBA32
+ * texture is how this first came out red: RGBA32 orders the BYTES R,G,B,A, so a little endian
+ * machine reads 0x252525FF back as red 0xFF with alpha 0x25. */
+#define CHECK       VNG_CHECK
+#define CHECK_A     VNG_CHECK_A
+#define CHECK_B     VNG_CHECK_B
 
 static SDL_Texture *checker = NULL;
 
