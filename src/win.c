@@ -245,10 +245,33 @@ bool win_event (const SDL_Event *e)
 			}
 		}
 
-		/* The interior, EITHER BUTTON. Whatever the owner says, the event stops here - it
-		 * landed on a window, and the sheet underneath must not see it. */
-		if (!on_frame && w->ev && w->ev(w->a, e, w->ctx))
-			inner = w;
+		/*
+		 * The interior, EITHER BUTTON - and EVERYTHING THAT IS NOT A WIDGET IS SOMEWHERE TO
+		 * TAKE HOLD OF THE WINDOW.
+		 *
+		 * That is the first Vangopix's arrangement, read from the other side: its windows
+		 * dragged from anywhere by default and each widget switched it off under itself
+		 * (`p->drag = false` in __palette_wheel__ and in the sliders), while gui_thumbnail
+		 * switched nothing off and so could be grabbed anywhere at all.
+		 *
+		 * The WIN_EVENT return value already carries exactly that: an owner that took the
+		 * press says so, and one that did not has just said the window may have it. A title
+		 * bar you must hit is a poor handle on a small parked panel, and the 1:1 panel has no
+		 * widgets in it whatsoever.
+		 *
+		 * Whatever happens, the event stops here: it landed on a window, and the sheet
+		 * underneath must not see it.
+		 */
+		if (on_frame) return true;
+
+		if (w->ev && w->ev(w->a, e, w->ctx)) { inner = w; return true; }
+
+		if (e->button.button == SDL_BUTTON_LEFT) {
+			held = w;
+			stretching = false;
+			grab_x = x - w->a.x;
+			grab_y = y - w->a.y;
+		}
 		return true;
 	}
 

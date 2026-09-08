@@ -61,7 +61,7 @@
  * instead. Sitting it ON the rim keeps it inside by construction, and it reads better for it:
  * the arrow now touches the hue it is pointing at rather than floating a gap away from it.
  */
-#define MARK_OUT  1.0f
+#define MARK_OUT  1.5f
 
 /* Half a pointer glyph and its shadow. The wheel is held this far in from the space it is
  * given, so the marker at the rim has room for its own body. */
@@ -476,7 +476,8 @@ static bool on_event (SDL_FRect area, const SDL_Event *e, void *ctx)
 		/* The button decides which colour this press is filling, before anything is read. */
 		slot = (e->button.button == SDL_BUTTON_RIGHT) ? 1 : 0;
 
-		if (in_rect(l.hex, x, y)) { if (!editing) field_start(); return false; }
+		/* Taken, so the window does not read it as somewhere to be dragged from. */
+		if (in_rect(l.hex, x, y)) { if (!editing) field_start(); return true; }
 
 		/* ANYWHERE INSIDE THE WHEEL'S REACH TAKES THE HUE, not only the ring itself. Aiming
 		 * at a twenty pixel band is a worse gesture than pointing at a direction, and a
@@ -617,7 +618,7 @@ static void body (SDL_FRect area, void *ctx)
 		glyph_draw(GLYPH_POINTER,
 		           l.centre.x + SDL_cosf(rad) * l.radius * MARK_OUT,
 		           l.centre.y - SDL_sinf(rad) * l.radius * MARK_OUT,
-		           deg + 90.0f, l.radius / 70.0f * 1.5f, 0xFFFFFFFF);
+		           deg + 90.0f, l.radius / 50.0f * 1.5f, 0xFFFFFFFF);
 	}
 
 	for (int b = 0; b < BARS; b++) {

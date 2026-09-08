@@ -24,9 +24,13 @@
  * reg_id[256] plus a hash to find a window by string, when the pointer is the identity
  * everywhere else in this program; and three globals for one list.
  *
- * THE INTERIOR IS CLIPPED FOR THE OWNER, so a window cannot spill onto the sheet by
- * accident - the one service a frame can offer that its owner would otherwise have to
- * remember.
+ * THE INTERIOR IS CLIPPED FOR THE OWNER, so a window cannot spill onto the sheet by accident
+ * - the one service a frame can offer that its owner would otherwise have to remember on every
+ * line it draws.
+ *
+ * It cuts BOTH ways, and that is the point: it also caught the colour wheel's rim marker
+ * hanging a fifth of a radius past its own window, which the first Vangopix drew over whatever
+ * was behind and never noticed. A frame that clips is a frame that reports.
  */
 
 typedef struct _vng_win_ VNG_WIN;
@@ -38,8 +42,11 @@ typedef void (*WIN_DRAW) (SDL_FRect area, void *ctx);
  * The inside's events. Called for a press that lands in the interior, and then for every
  * motion and the release that follow it, until the button comes up - so an owner that has
  * taken hold of something keeps receiving the drag even when the pointer wanders off the
- * window. Returning true on the press is what asks for that; a window whose owner wants
- * nothing simply passes NULL.
+ * window. Returning true on the press is what asks for that.
+ *
+ * RETURNING FALSE HANDS THE PRESS TO THE WINDOW, which drags. Everything that is not a widget
+ * is somewhere to take hold of the frame, and a window whose owner wants nothing at all simply
+ * passes NULL here and can be grabbed anywhere inside it.
  */
 typedef bool (*WIN_EVENT) (SDL_FRect area, const SDL_Event *e, void *ctx);
 

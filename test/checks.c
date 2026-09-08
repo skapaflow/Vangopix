@@ -754,16 +754,38 @@ int main (void)
 		e.button.y = a.y + a.h * 0.5f;
 		ok("UP, THE WINDOW TAKES THE CLICK RATHER THAN THE SHEET", win_event(&e));
 
-		e.button.x = a.x - 60.0f;
-		e.button.y = a.y - 60.0f;
-		ok("and takes nothing where it is not", win_event(&e) == false);
-
-		/* Motion is consumed only while something is being carried, so a stroke or a pan
-		 * begun on the sheet is not cut in half by crossing a window. */
+		/* EVERYTHING THAT IS NOT A WIDGET IS SOMEWHERE TO TAKE HOLD OF IT, and this panel has
+		 * no widgets at all - so that press was a grab, and moving now moves the window. */
 		SDL_zero(e);
 		e.type = SDL_EVENT_MOUSE_MOTION;
-		e.motion.x = a.x + a.w * 0.5f;
-		e.motion.y = a.y + a.h * 0.5f;
+		e.motion.x = a.x + a.w * 0.5f + 40.0f;
+		e.motion.y = a.y + a.h * 0.5f + 25.0f;
+		win_event(&e);
+
+		SDL_FRect moved = win_area(win_top());
+		ok("A PRESS ANYWHERE INSIDE DRAGS THE WINDOW",
+		   moved.x > a.x + 35.0f && moved.y > a.y + 20.0f);
+
+		SDL_zero(e);
+		e.type = SDL_EVENT_MOUSE_BUTTON_UP;
+		e.button.button = SDL_BUTTON_LEFT;
+		e.button.x = moved.x;
+		e.button.y = moved.y;
+		win_event(&e);
+
+		SDL_zero(e);
+		e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+		e.button.button = SDL_BUTTON_LEFT;
+		e.button.x = moved.x - 60.0f;
+		e.button.y = moved.y - 60.0f;
+		ok("and takes nothing where it is not", win_event(&e) == false);
+
+		/* With nothing being carried, motion passes through - so a stroke or a pan begun on
+		 * the sheet is not cut in half by crossing a window. */
+		SDL_zero(e);
+		e.type = SDL_EVENT_MOUSE_MOTION;
+		e.motion.x = moved.x + moved.w * 0.5f;
+		e.motion.y = moved.y + moved.h * 0.5f;
 		ok("MOTION CROSSES A WINDOW UNTOUCHED", win_event(&e) == false);
 
 		thumb_toggle();
