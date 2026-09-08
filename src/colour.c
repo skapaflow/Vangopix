@@ -23,7 +23,7 @@
  * for now.
  */
 #define OPEN_W  280.0f
-#define OPEN_H  188.0f
+#define OPEN_H  200.0f
 #define MIN_W   250.0f
 #define MIN_H   150.0f
 
@@ -49,7 +49,23 @@
 #define RING_IN   (50.0f / 70.0f)
 #define DISC      (30.0f / 70.0f)
 #define MARK_IN   (40.0f / 70.0f)
-#define MARK_OUT  (85.0f / 70.0f)
+
+/*
+ * THE OUTER MARKER RIDES THE RIM, and this is the one proportion changed.
+ *
+ * The original put it at 85 of 70 - a fifth of a radius OUTSIDE the ring - and with a centre
+ * at (75, 90) that reached x = -10, which is off the left edge of its own window. It drew
+ * there anyway, over whatever was behind, because nothing clipped it.
+ *
+ * win.c clips a window's interior for its owner, so here the same marker was being cut off
+ * instead. Sitting it ON the rim keeps it inside by construction, and it reads better for it:
+ * the arrow now touches the hue it is pointing at rather than floating a gap away from it.
+ */
+#define MARK_OUT  1.0f
+
+/* Half a pointer glyph and its shadow. The wheel is held this far in from the space it is
+ * given, so the marker at the rim has room for its own body. */
+#define MARK_PAD  10.0f
 #define GAP       6.0f
 
 /* The sliders are generated small and stretched: a one-channel ramp is smooth by definition,
@@ -312,13 +328,15 @@ static LAYOUT layout (SDL_FRect r)
 	                     bars_x - LEFT * 2.0f, HEX_H };
 
 	/* The wheel is SQUARE, because a ring squeezed into an oblong is an ellipse and an ellipse
-	 * says the hues are not evenly spaced. It fills what is left above the hex box. */
-	float box = bars_x - LEFT * 2.0f;
-	float lid = l.hex.y - r.y - GAP - 2.0f;
+	 * says the hues are not evenly spaced. It fills what is left above the hex box, LESS the
+	 * pad the rim marker needs for its own body - a marker cut in half by the window's edge is
+	 * what happens otherwise, since win.c clips the interior. */
+	float box = bars_x - LEFT * 2.0f - MARK_PAD * 2.0f;
+	float lid = l.hex.y - r.y - GAP - MARK_PAD * 2.0f;
 	if (box > lid)  box = lid;
 	if (box < 8.0f) box = 8.0f;
 
-	l.wheel  = (SDL_FRect){ r.x + (bars_x - box) * 0.5f, r.y + 2.0f, box, box };
+	l.wheel  = (SDL_FRect){ r.x + (bars_x - box) * 0.5f, r.y + MARK_PAD, box, box };
 	l.centre = (SDL_FPoint){ l.wheel.x + box * 0.5f, l.wheel.y + box * 0.5f };
 	l.radius = box * 0.5f;
 
@@ -584,7 +602,7 @@ static void body (SDL_FRect area, void *ctx)
 		float rad = h * (SDL_PI_F / 180.0f);
 		float mx  = l.centre.x + SDL_cosf(rad) * l.radius * MARK_IN;
 		float my  = l.centre.y - SDL_sinf(rad) * l.radius * MARK_IN;
-		glyph_draw(GLYPH_POINTER, mx, my, h + 90.0f, l.radius / 70.0f, 0xFFFFFFFF);
+		glyph_draw(GLYPH_POINTER, mx, my, h - 90.0f, l.radius / 70.0f, 0xFFFFFFFF);
 	}
 
 	float px, py;
@@ -599,7 +617,7 @@ static void body (SDL_FRect area, void *ctx)
 		glyph_draw(GLYPH_POINTER,
 		           l.centre.x + SDL_cosf(rad) * l.radius * MARK_OUT,
 		           l.centre.y - SDL_sinf(rad) * l.radius * MARK_OUT,
-		           deg - 90.0f, l.radius / 70.0f * 1.5f, 0xFFFFFFFF);
+		           deg + 90.0f, l.radius / 70.0f * 1.5f, 0xFFFFFFFF);
 	}
 
 	for (int b = 0; b < BARS; b++) {
