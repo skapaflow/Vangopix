@@ -13,6 +13,10 @@
  *
  *      Q  pencil     W  line       E  rect      R  ellipse
  *      A  eraser     S  bucket     D  spray     F  change-colours
+ *      Z  select
+ *
+ * The select tool draws nothing: select.c owns the pointer while it is current, and comes
+ * before this file in the chain.
  *
  * A KEY IS ONLY A TOOL KEY WHEN IT IS BARE. CTRL+S saves and S is the bucket; the two are
  * told apart by asking whether ANY modifier is down, not by asking about the one modifier
@@ -41,6 +45,7 @@ typedef enum {
 	T_BUCKET,
 	T_SPRAY,
 	T_CHANGE,
+	T_SELECT,
 	T_LOT
 } TOOL;
 
@@ -61,6 +66,10 @@ extern void tool_frame (VNG_TAB *t);
 extern void tool_draw (VNG_TAB *t);
 
 extern TOOL tool_current (void);
+
+/* Puts a tool in hand from outside - what CTRL+V and CTRL+A call, since a paste with no way
+   to move what was pasted is a gesture that stops halfway. */
+extern void tool_set (TOOL t);
 extern int  tool_tip_size (void);   /* of the current tool */
 
 /*

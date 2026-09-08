@@ -27,6 +27,7 @@ around that — opening, viewing, framing, sizing and saving.
 | keyboard | one owner at a time, so a field being open silences every shortcut |
 | undo | per document, made of pixel carries and resizes rather than snapshots |
 | drawing | eight tools on `Q W E R / A S D F`, each with its own tip size |
+| selection | mark, move, copy and paste between documents, flip, rotate, invert |
 | colour | two, one per mouse button, filled by `CTRL`+click and shown as hex |
 | transparency | checkerboard behind the sheet, black frame around it |
 | text | one atlas, packed by stb_truetype |
@@ -107,6 +108,11 @@ drawing near the border.
 | `SHIFT` while dragging a grip | put the corner on the 8 pixel grid |
 | `Q` `W` `E` `R` | pencil, line, rect, ellipse |
 | `A` `S` `D` `F` | eraser, bucket, spray, change-colours |
+| `Z` | select |
+| `CTRL+A` `CTRL+C` `CTRL+X` `CTRL+V` | select all, copy, cut, paste |
+| `V` `H` `I` `R`, with a selection | flip, flip, invert, rotate |
+| `DELETE`, with a selection | clear it |
+| `ESC`, with a selection | let it go |
 | `SHIFT` + wheel | tip size, per tool |
 | `SHIFT` + click, pencil | draw a straight line from the last point |
 | `SHIFT` + drag a line | snap to the pixel-art slopes: 2:1, 1:1, 1:2 |
@@ -180,6 +186,7 @@ the names:
 | --- | --- | --- | --- |
 | `Q` pencil | `W` line | `E` rect | `R` ellipse |
 | `A` eraser | `S` bucket | `D` spray | `F` change-colours |
+| `Z` select | | | |
 
 Left button draws colour 1, right button draws colour 2. The line, the rectangle and the
 ellipse are dragged: press where it starts, drag, release where it ends, and what you see
@@ -226,6 +233,23 @@ answers, carried over vertex for vertex.
 
 A stroke joins its samples, so a fast hand draws a line and not a row of dots. One stroke is
 one undo.
+
+### The selection
+
+`Z` takes it. Drag a rectangle, then drag again from inside it to pick the pixels up and
+carry them; click away to put them down. `CTRL+C`, `CTRL+X` and `CTRL+V` copy, cut and paste,
+and the clipboard crosses between documents — copy in one tab, switch, paste in another.
+`CTRL+A` takes the whole sheet, `DELETE` clears the selection, `ESC` lets it go.
+
+While something is selected, `V` and `H` flip it, `I` inverts its colours and `R` turns it a
+quarter clockwise. Those are the only bare keys in the program that mean something different
+depending on state — allowed because both halves of the condition are on screen: the select
+tool is in hand and a rectangle is marked. With nothing selected, `R` is the ellipse again.
+
+**Nothing is written to the sheet while a selection floats.** The hole where it came from is
+*drawn*, not dug, so letting go of a float costs nothing and leaves nothing to undo. Putting
+one down is a single undo step — the old place emptied and the new place written together,
+which is what makes nudging a selection by one pixel come out right.
 
 ### Two colours, one per mouse button
 

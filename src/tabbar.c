@@ -99,8 +99,7 @@ bool tabbar_event (const SDL_Event *e)
 		/* Selecting happens on press, not on release: the tab has to be the current
 		 * one before the drag starts, or dragging would reorder a document that is
 		 * not the one on screen. */
-		vng_tab = t;
-		vng_tab_title();
+		vng_tab_show(t);
 
 		held     = t;
 		dragging = false;

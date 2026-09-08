@@ -11,6 +11,7 @@
 #include "file.h"
 #include "undo.h"
 #include "tool.h"
+#include "select.h"
 
 /*
  * The desk: a grey checkerboard, the size and the two greys taken from what the first
@@ -182,6 +183,11 @@ void vangopix_input (void)
 		/* Then the camera. It answers the wheel and the pan drag; anything it does not
 		 * want falls through to the tool and then to the keys below. */
 		if (view_event(&e, vng_tab))
+			continue;
+
+		/* The selection, just before the tool: while a float is being carried the pointer is
+		 * its, and a drawing tool must not see those drags. */
+		if (select_event(&e, vng_tab))
 			continue;
 
 		/* AND LAST, THE TOOL. It comes after everything that can claim the same button -
@@ -373,6 +379,7 @@ void vangopix_core (void)
 		tool_frame(t);
 
 		draw_sheet(t);
+		select_draw(t);    /* the float and its marching rectangle, over the sheet */
 		tool_draw(t);      /* the tip outline and the glyph, under the panels */
 		resize_draw(t);
 		if (overlay) draw_overlay(t, t->zoom);

@@ -42,6 +42,12 @@ static const SDL_FPoint vchange[] = {
 	{ -1,  3},{ -1,  5},{ -5,  1},{ -1, -3},{ -1, -1},{  1, -1},{  1, -5},{ -6, -5}
 };
 
+static const SDL_FPoint vselect[] = {
+	{ -5, -4},{ -7, -4},{ -7, -6},{ -5, -6},{ -5, -4},{ -5,  6},{ -7,  6},{ -7,  8},{ -5,  8},
+	{ -5,  6},{  5,  6},{  7,  6},{  7,  8},{  5,  8},{  5,  6},{  5, -4},{  5, -6},{  7, -6},
+	{  7, -4},{  5, -4},{  5, -4}
+};
+
 static const SDL_FPoint vpick[] = {
 	{  1, -3},{  4,  0},{  1, -3},{ -4,  2},{ -6,  4},{ -7,  6},{ -7,  8},{ -5,  8},{ -3,  7},
 	{ -1,  5},{  4,  0},{  5,  1},{  6,  0},{  6, -1},{  2, -5},{  6, -1},{  8, -3},{  9, -4},
@@ -60,6 +66,7 @@ static const SHAPE shapes[GLYPH_LOT] = {
 	{ vbucket,  (int)SDL_arraysize(vbucket)  },
 	{ vspray,   (int)SDL_arraysize(vspray)   },
 	{ vchange,  (int)SDL_arraysize(vchange)  },
+	{ vselect,  (int)SDL_arraysize(vselect)  },
 	{ vpick,    (int)SDL_arraysize(vpick)    },
 };
 

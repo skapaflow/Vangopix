@@ -1,5 +1,6 @@
 #include "tabs.h"
 #include "undo.h"
+#include "select.h"
 
 VNG_TAB *vng_tabs = NULL;
 VNG_TAB *vng_tab  = NULL;
@@ -286,8 +287,7 @@ VNG_TAB *vng_tab_new (int w, int h)
 	if (!tab_make_texture(t)) { SDL_free(t->pixels); SDL_free(t); return NULL; }
 
 	tab_link(t);
-	vng_tab = t;
-	vng_tab_title();
+	vng_tab_show(t);
 	return t;
 }
 
@@ -342,8 +342,7 @@ VNG_TAB *vng_tab_open (const char *path)
 	}
 
 	tab_link(t);
-	vng_tab = t;
-	vng_tab_title();
+	vng_tab_show(t);
 	return t;
 }
 
@@ -366,6 +365,7 @@ void vng_tab_close (VNG_TAB *t)
 	if (t->tex) SDL_DestroyTexture(t->tex);
 	draw_buffers_free(t);
 	undo_free(t->undo);
+	select_free(t->sel);
 	SDL_free(t->pixels);
 	SDL_free(t->path);
 	SDL_free(t);
@@ -388,7 +388,17 @@ void vng_tab_step (int dir)
 	if (!n) n = dir > 0 ? vng_tabs : tail;
 	if (!n || n == vng_tab) return;
 
-	vng_tab = n;
+	vng_tab_show(n);
+}
+
+void vng_tab_show (VNG_TAB *t)
+{
+	if (!t || t == vng_tab) return;
+
+	/* The float is put down before the sheet under it goes away. */
+	select_commit(vng_tab);
+
+	vng_tab = t;
 	vng_tab_title();
 }
 
@@ -583,6 +593,7 @@ void vng_tabs_free (void)
 		if (p->tex) SDL_DestroyTexture(p->tex);
 		draw_buffers_free(p);
 		undo_free(p->undo);
+		select_free(p->sel);
 		SDL_free(p->pixels);
 		SDL_free(p->path);
 		SDL_free(p);

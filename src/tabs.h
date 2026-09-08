@@ -4,6 +4,7 @@
 #include "vangopix.h"
 
 typedef struct _vng_undo_ VNG_UNDO;   /* undo.h owns it; opaque from here */
+typedef struct _vng_sel_  VNG_SEL;    /* select.h, likewise */
 
 /*
  * A TAB IS A DOCUMENT. There is no second structure.
@@ -56,6 +57,11 @@ typedef struct _vng_tab_ {
 
 	VNG_UNDO *undo;            /* NULL until the document is first changed */
 
+	/* The selection is PER TAB, which is half of what makes copying between documents
+	 * simple: the clipboard is one buffer for the program and a float belongs to the sheet
+	 * it is over, so it can neither leak into another tab nor outlive this one. */
+	VNG_SEL  *sel;
+
 	/* The view is PER TAB, not global: switching tabs must put the drawing back
 	 * where the eye left it, same zoom and same corner. A global view makes every
 	 * switch cost a manual reframing. */
@@ -101,6 +107,19 @@ extern void vng_tab_stroke_close (VNG_TAB *t);
 extern VNG_TAB *vng_tab_new   (int w, int h);
 extern VNG_TAB *vng_tab_open  (const char *path);
 extern void     vng_tab_close (VNG_TAB *t);
+/*
+ * THE ONE WAY TO CHANGE WHICH DOCUMENT IS ON SCREEN.
+ *
+ * It exists because a switch is not just an assignment: a floating selection over the
+ * OUTGOING sheet has to be put down first, or it is lost the moment the tab it belongs to
+ * stops being drawn. That is one of the bugs the first Vangopix had between tabs, and
+ * scattering the fix across every place that assigned the pointer is how it would come back.
+ *
+ * vng_tab_close is the exception and assigns directly: by the time it picks a fallback, the
+ * tab that was current has already been freed, and there is nothing left to commit into.
+ */
+extern void     vng_tab_show  (VNG_TAB *t);
+
 extern void     vng_tab_step  (int dir);
 extern void     vng_tab_move  (VNG_TAB *t, int index);
 

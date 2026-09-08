@@ -10,6 +10,7 @@
 #include "tabs.h"
 #include "undo.h"
 #include "tool.h"
+#include "select.h"
 #include "view.h"
 #include "file.h"
 
@@ -21,6 +22,9 @@ static bool key (VNG_TAB *t, SDL_Keycode k, SDL_Keymod mod)
 	e.type     = SDL_EVENT_KEY_DOWN;
 	e.key.key  = k;
 	e.key.mod  = mod;
+	/* The real chain, in core.c's order: the selection is offered every event before the
+	 * tool is, and a test that skipped it would be testing a program that does not exist. */
+	if (select_event(&e, t)) return true;
 	return tool_event(&e, t);
 }
 
@@ -42,7 +46,8 @@ static void mouse (VNG_TAB *t, Uint32 type, Uint8 btn, float px, float py)
 		e.button.x = s.x;
 		e.button.y = s.y;
 	}
-	tool_event(&e, t);
+	if (!select_event(&e, t))
+		tool_event(&e, t);
 }
 
 static int fails = 0;
@@ -519,6 +524,143 @@ int main (void)
 		ok("and still stopped at the wall", f->pixels[0] == paper);
 		ok("the barrier was one undo too",
 		   undo_undo(f) && f->pixels[8 * 20 + 8] == junk);
+	}
+
+	/* ---- the selection ---- */
+	{
+		VNG_TAB *a = vng_tab_new(16, 16);
+		view_sheet_rect(a);
+
+		/* A recognisable 3x3 block at (2,2). */
+		for (int j = 0; j < 3; j++)
+			for (int i = 0; i < 3; i++)
+				a->pixels[(2 + j) * 16 + (2 + i)] = 0xFF000000u | (Uint32)(j * 3 + i + 1);
+
+		Uint32 fresh[16 * 16];
+		SDL_memcpy(fresh, a->pixels, sizeof fresh);
+		undo_mark_saved(a);
+
+		key(a, SDLK_Z, SDL_KMOD_NONE);
+		ok("Z takes the select tool", tool_current() == T_SELECT);
+
+		/* Mark the block. */
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 2, 2);
+		mouse(a, SDL_EVENT_MOUSE_MOTION,      0,               4, 4);
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 4, 4);
+		ok("marking wrote nothing to the document",
+		   SDL_memcmp(a->pixels, fresh, sizeof fresh) == 0);
+
+		/* Take hold of it and carry it four to the right. NOTHING may be written yet. */
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 3, 3);
+		mouse(a, SDL_EVENT_MOUSE_MOTION,      0,               7, 3);
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 7, 3);
+		ok("A FLOAT WRITES NOTHING UNTIL IT IS PUT DOWN",
+		   SDL_memcmp(a->pixels, fresh, sizeof fresh) == 0);
+
+		/* Clicking away puts it down. */
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 12, 12);
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 12, 12);
+
+		ok("the move landed four to the right", a->pixels[2 * 16 + 6] == 0xFF000001u);
+		ok("and left a hole behind it",         a->pixels[2 * 16 + 2] == 0x00000000u);
+		ok("A MOVE IS ONE UNDO STEP",           undo_undo(a));
+		ok("which puts the block back whole",
+		   SDL_memcmp(a->pixels, fresh, sizeof fresh) == 0);
+
+		/* A NUDGE: source and destination overlap, which is the case that catches a naive
+		 * clear-then-write. One to the right. */
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 2, 2);
+		mouse(a, SDL_EVENT_MOUSE_MOTION,      0,               4, 4);
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 4, 4);
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 3, 3);
+		mouse(a, SDL_EVENT_MOUSE_MOTION,      0,               4, 3);
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 4, 3);
+		select_commit(a);
+
+		ok("AN OVERLAPPING NUDGE KEEPS EVERY PIXEL",
+		   a->pixels[2 * 16 + 3] == 0xFF000001u && a->pixels[2 * 16 + 5] == 0xFF000003u);
+		ok("and empties only the column it left", a->pixels[2 * 16 + 2] == 0x00000000u);
+		ok("the nudge undoes cleanly",
+		   undo_undo(a) && SDL_memcmp(a->pixels, fresh, sizeof fresh) == 0);
+
+		/* ESC gives a float back, and leaves NO undo step, because nothing was written. */
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 2, 2);
+		mouse(a, SDL_EVENT_MOUSE_MOTION,      0,               4, 4);
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 4, 4);
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 3, 3);
+		mouse(a, SDL_EVENT_MOUSE_MOTION,      0,               9, 9);
+		key(a, SDLK_ESCAPE, SDL_KMOD_NONE);
+		ok("ESC gives an abandoned float back",
+		   SDL_memcmp(a->pixels, fresh, sizeof fresh) == 0);
+		ok("and leaves nothing to undo", undo_undo(a) == false);
+
+		/* ---- ACROSS TABS, which is what broke in the first Vangopix ---- */
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 2, 2);
+		mouse(a, SDL_EVENT_MOUSE_MOTION,      0,               4, 4);
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 4, 4);
+		key(a, SDLK_C, SDL_KMOD_CTRL);
+
+		VNG_TAB *b = vng_tab_new(16, 16);
+		view_sheet_rect(b);
+		undo_mark_saved(b);
+
+		select_paste(b, 8, 8);   /* CTRL+V with the pointer here */
+		select_commit(b);
+
+		int landed = 0;
+		for (int i = 0; i < 16 * 16; i++)
+			if ((b->pixels[i] & 0x00FFFFFFu) >= 1 && (b->pixels[i] & 0x00FFFFFFu) <= 9)
+				landed++;
+		ok("A COPY CROSSES INTO ANOTHER TAB", landed == 9);
+		ok("and the tab it came from is untouched",
+		   SDL_memcmp(a->pixels, fresh, sizeof fresh) == 0);
+		ok("the paste is one undo in the tab it landed in", undo_undo(b));
+
+		/* Switching away puts a float down instead of losing it. vng_tab_show commits the
+		 * OUTGOING tab, so `a` has to be the one on screen for the question to be asked. */
+		vng_tab_show(a);
+		select_paste(a, 10, 10);
+		vng_tab_show(b);
+		ok("SWITCHING TABS PUTS A FLOAT DOWN RATHER THAN LOSING IT",
+		   SDL_memcmp(a->pixels, fresh, sizeof fresh) != 0);
+
+		undo_undo(a);
+		key(a, SDLK_ESCAPE, SDL_KMOD_NONE);   /* and no mark left over for the next block */
+		ok("and undoing that leaves the sheet as it was",
+		   SDL_memcmp(a->pixels, fresh, sizeof fresh) == 0);
+
+		/* Rotating a square block four times is the identity, which is the cheapest way to
+		 * catch an off-by-one in the turn. */
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 2, 2);
+		mouse(a, SDL_EVENT_MOUSE_MOTION,      0,               4, 4);
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 4, 4);
+		for (int i = 0; i < 4; i++) key(a, SDLK_R, SDL_KMOD_NONE);
+		select_commit(a);
+		ok("FOUR QUARTER TURNS ARE THE IDENTITY",
+		   SDL_memcmp(a->pixels, fresh, sizeof fresh) == 0);
+		undo_undo(a);
+
+		/* A rectangle STAYS MARKED after its float is put down, which is what every editor
+		 * does - so the next block has to let go of it or its press would take hold of this
+		 * one instead of marking a new one. */
+		key(a, SDLK_ESCAPE, SDL_KMOD_NONE);
+
+		/* And two flips are too. */
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 2, 2);
+		mouse(a, SDL_EVENT_MOUSE_MOTION,      0,               4, 4);
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 4, 4);
+		key(a, SDLK_H, SDL_KMOD_NONE);
+		key(a, SDLK_H, SDL_KMOD_NONE);
+		select_commit(a);
+		ok("TWO FLIPS ARE THE IDENTITY",
+		   SDL_memcmp(a->pixels, fresh, sizeof fresh) == 0);
+		undo_undo(a);
+
+		/* Bare R is the ellipse again once there is no selection to turn. */
+		key(a, SDLK_ESCAPE, SDL_KMOD_NONE);
+		key(a, SDLK_R, SDL_KMOD_NONE);
+		ok("with nothing selected, bare R is the ellipse once more",
+		   tool_current() == T_ELLIPSE);
 	}
 
 	/* ---- what a save dialog's answer means ----

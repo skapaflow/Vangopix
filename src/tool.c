@@ -63,12 +63,12 @@ static TOOL current = T_PENCIL;
 
 /* Sizes and steps, both the first Vangopix's: vng_tool.tool_size in its tool_core.c, and the
  * scale_step it sets per case in the same switch. */
-static int size[T_LOT] = { 1, 1, 1, 1, 20, 1, 20, 1 };
+static int size[T_LOT] = { 1, 1, 1, 1, 20, 1, 20, 1, 1 };
 
 /* A step of ZERO means the tool has no size, and the wheel says so by doing nothing. The
  * bucket fills a region: there is no tip to make bigger, and letting SHIFT+wheel give it a
  * number produced an outline that grew on screen and changed nothing at all. */
-static const int step[T_LOT] = { 1, 1, 1, 1,  5, 0,  3, 3 };
+static const int step[T_LOT] = { 1, 1, 1, 1,  5, 0,  3, 3, 0 };
 
 /*
  * The change-colours limiter: 0 the whole sheet, 1 a circle, 2 a square. SHIFT+TAB swaps
@@ -116,6 +116,7 @@ static bool anchored (TOOL t) { return t == T_LINE || t == T_RECT || t == T_ELLI
 static bool writes_through (Uint32 c) { return ((c >> 24) & 0xFF) != 0xFF; }
 
 TOOL tool_current  (void) { return current; }
+void tool_set (TOOL t) { if (t >= 0 && t < T_LOT) current = t; }
 int  tool_tip_size (void) { return size[current]; }
 
 Uint32 tool_colour (int slot) { return colour[slot == 1 ? 1 : 0]; }
@@ -591,6 +592,7 @@ static bool tool_key (SDL_Keycode k, TOOL *out)
 	case SDLK_S: *out = T_BUCKET;  return true;
 	case SDLK_D: *out = T_SPRAY;   return true;
 	case SDLK_F: *out = T_CHANGE;  return true;
+	case SDLK_Z: *out = T_SELECT;  return true;
 	default: return false;
 	}
 }
@@ -677,6 +679,10 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 	case SDL_EVENT_MOUSE_BUTTON_DOWN: {
 		if (e->button.button != SDL_BUTTON_LEFT &&
 		    e->button.button != SDL_BUTTON_RIGHT) return false;
+
+		/* The select tool marks and moves; it lays down no pixels of its own. Its drags are
+		 * select.c's, and select.c has already had them. */
+		if (current == T_SELECT) return false;
 
 		int x, y;
 		pixel_of(t, e->button.x, e->button.y, &x, &y);
@@ -1105,7 +1111,10 @@ void tool_draw (VNG_TAB *t)
 
 	/* A tip bigger than one pixel is outlined at any zoom, because its SIZE is what has to be
 	 * visible before it is used. A single pixel needs the zoom to be worth outlining. */
-	if (on && inside(t, x, y) && (t->zoom >= OUTLINE_ZOOM || size[current] > 1))
+	/* The select tool has no tip, so it outlines nothing: the marching rectangle is already
+	 * saying where things are. */
+	if (on && current != T_SELECT && inside(t, x, y) &&
+	    (t->zoom >= OUTLINE_ZOOM || size[current] > 1))
 		outline(t, x, y);
 
 	/*
