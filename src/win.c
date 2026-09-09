@@ -1,13 +1,13 @@
 #include "win.h"
+#include "ui.h"
 
+/* A hairline stays a hairline whatever the face does - see ui.h on why text scales and a
+   one pixel edge does not. Everything else here now comes from the face. */
 #define BORDER   1.0f
-#define CLOSE_W 14.0f
-#define GRIP    12.0f    /* the stretch corner, bottom right */
-#define PAD      5.0f
 
 /* Enough of the head must stay on screen to take hold of again. A window dragged off the
  * bottom of a window that is then made smaller is otherwise gone for good. */
-#define KEEP    24.0f
+#define KEEP    (ui_head() + ui_pad())
 
 struct _vng_win_ {
 	char      title[48];
@@ -37,11 +37,11 @@ static VNG_WIN *inner = NULL;
  * fires if the button comes back up over the same box. */
 static VNG_WIN *close_armed = NULL;
 
-static float head_h (void)
-{
-	float h = vng_text ? text_line_height(vng_text) : 0.0f;
-	return h > 1.0f ? h + 4.0f : 18.0f;
-}
+/*
+ * THE HEAD ALREADY CAME FROM THE FACE, and it was the only thing that did - the close box
+ * inside it was a flat 14 in a bar that had grown to 20. ui.h finishes the job.
+ */
+static float head_h (void) { return ui_head(); }
 
 /* The whole window, frame included. The interior is what everything else is measured from,
  * because the interior is the part that means anything. */
@@ -64,7 +64,8 @@ static SDL_FRect head_rect (VNG_WIN *w)
 static SDL_FRect close_rect (VNG_WIN *w)
 {
 	SDL_FRect h = head_rect(w);
-	SDL_FRect r = { h.x + h.w - CLOSE_W - PAD * 0.5f, h.y, CLOSE_W, h.h };
+	float    c = ui_close();
+	SDL_FRect r = { h.x + h.w - c - ui_pad() * 0.5f, h.y, c, h.h };
 	return r;
 }
 
@@ -75,8 +76,9 @@ static SDL_FRect grip_rect (VNG_WIN *w)
 	SDL_FRect none = { 0.0f, 0.0f, 0.0f, 0.0f };
 	if (w->fixed) return none;
 
+	float     g = ui_grip();
 	SDL_FRect o = outer(w);
-	SDL_FRect r = { o.x + o.w - GRIP, o.y + o.h - GRIP, GRIP, GRIP };
+	SDL_FRect r = { o.x + o.w - g, o.y + o.h - g, g, g };
 	return r;
 }
 
@@ -395,11 +397,16 @@ void win_draw (void)
 			 * that rule lives so a title and a tab agree. */
 			char name[48];
 			text_fit(vng_text, name, sizeof name, w->title,
-			         h.w - CLOSE_W - PAD * 3.0f);
-			text_print(vng_text, h.x + PAD, h.y + 2.0f, 0xB4B4B4FF, "%s", name);
+			         h.w - ui_close() - ui_pad() * 3.0f);
+			text_print(vng_text, h.x + ui_pad(), h.y + ui_pad(), 0xB4B4B4FF, "%s", name);
 
 			SDL_FRect c = close_rect(w);
-			text_print(vng_text, c.x + 4.0f, c.y + 2.0f,
+			/* Centred in the box rather than pinned to its corner, so it stays in the
+			 * middle of whatever the face makes the head. */
+			float cw, ch;
+			text_measure(vng_text, "x", &cw, &ch);
+			text_print(vng_text, c.x + SDL_floorf((c.w - cw) * 0.5f),
+			           c.y + SDL_floorf((c.h - ch) * 0.5f),
 			           in_rect(c, mx, my) ? 0xFF6060FF : 0x707070FF, "x");
 		}
 
@@ -408,7 +415,7 @@ void win_draw (void)
 		SDL_FRect g = grip_rect(w);
 		if (g.w > 0.0f) {
 			SDL_SetRenderDrawColor(vng_ren, 0x60, 0x60, 0x60, 0xFF);
-			for (float i = 3.0f; i < GRIP; i += 4.0f)
+			for (float i = 3.0f; i < g.w; i += 4.0f)
 				SDL_RenderLine(vng_ren, g.x + g.w - i, g.y + g.h - 2.0f,
 				                        g.x + g.w - 2.0f, g.y + g.h - i);
 		}

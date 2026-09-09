@@ -1,4 +1,5 @@
 #include "core.h"
+#include "ui.h"
 #include "primitives.h"
 #include "vangopix.h"
 #include "tabs.h"
@@ -491,8 +492,8 @@ static void draw_sheet (VNG_TAB *t)
  * vangopix_zoom_text below. Two readouts of one number in different units is a small trap that costs
  * somebody an afternoon exactly once.
  */
-#define ZOOM_MARGIN  8.0f    /* SLOT_MARGIN in tool.c, which is the other end of this line */
-#define ZOOM_PAD     4.0f
+#define ZOOM_MARGIN  (ui_pad() * 2.0f)   /* SLOT_MARGIN in tool.c, the other end of this line */
+#define ZOOM_PAD     ui_pad()
 
 /*
  * THE ZOOM AS A MULTIPLIER, WHICH IS THE UNIT THIS PROGRAM ALREADY THINKS IN. Every note about

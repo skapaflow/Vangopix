@@ -1,4 +1,5 @@
 #include "colour.h"
+#include "ui.h"
 #include "win.h"
 #include "tool.h"
 #include "core.h"
@@ -33,8 +34,8 @@
 #define RIGHT    14.0f    /* 280 - (250 + 16), what the original left past the last slider */
 #define BAR_W    20.0f
 #define BAR_STEP 30.0f    /* 190 - 160 */
-#define HEX_H    20.0f
-#define FOOT     18.0f    /* the band the stretch corner lives in */
+#define HEX_H    ui_row()
+#define FOOT     (ui_grip() + ui_pad())   /* the band the stretch corner lives in */
 
 #define BARS      4       /* hue, saturation, value, alpha */
 

@@ -1,4 +1,5 @@
 #include "tool.h"
+#include "ui.h"
 #include "view.h"
 #include "keys.h"
 #include "glyph.h"
@@ -30,7 +31,7 @@
 /* How far off the pointer the hex readout sits, and the padding inside its bar. */
 #define READ_OFF_X  14.0f
 #define READ_OFF_Y  16.0f
-#define READ_PAD     4.0f
+#define READ_PAD     ui_pad()
 
 /*
  * WHERE THE TOOL GLYPH HANGS, AND THE NUMBERS ARE THE FIRST VANGOPIX'S OWN:
@@ -45,8 +46,8 @@
 #define GLYPH_REACH   12.0f   /* how far a glyph extends from its origin, for the flip */
 
 /* The loaded colours sit this far from the corner, with this much between them. */
-#define SLOT_MARGIN  8.0f
-#define SLOT_GAP     6.0f
+#define SLOT_MARGIN  (ui_pad() * 2.0f)
+#define SLOT_GAP     (ui_pad() + 2.0f)
 
 /* The largest tip. Past this a stroke is not a brush any more, and the outline stops meaning
  * anything on screen. */
@@ -984,8 +985,10 @@ static void label (const char *text, float mx, float my)
 	if (r.y < tabbar_height()) r.y = my - GLYPH_OFF_Y * 2.0f;
 	if (r.x + r.w > vng_win_w) r.x = mx - GLYPH_OFF_X * 2.0f - r.w;
 
-	SDL_SetRenderDrawColor(vng_ren, 0x00, 0x00, 0x00, 0xC0);
-	SDL_RenderFillRect(vng_ren, &r);
+	/* Through the primitives for the blend, the same reason swatch() goes that way: this file
+	 * sets the draw blend mode nowhere, so three quarters of a shadow was a full one whenever
+	 * nothing else on screen had turned blending on. */
+	prim_fill(r, 0xC0000000u);
 	text_print(vng_text, r.x + READ_PAD, r.y + 1.0f, 0xFFD060FF, "%s", text);
 }
 
@@ -1047,14 +1050,25 @@ static void swatch (SDL_FRect r, Uint32 argb)
 {
 	SDL_FRect half = { r.x, r.y, r.w * 0.5f, r.h };
 
-	SDL_SetRenderDrawColor(vng_ren, 0x25, 0x25, 0x25, 0xFF);
-	SDL_RenderFillRect(vng_ren, &r);
-	SDL_SetRenderDrawColor(vng_ren, 0x33, 0x33, 0x33, 0xFF);
-	SDL_RenderFillRect(vng_ren, &half);
-
-	SDL_SetRenderDrawColor(vng_ren, (Uint8)((argb >> 16) & 0xFF), (Uint8)((argb >> 8) & 0xFF),
-	                                (Uint8)(argb & 0xFF), (Uint8)((argb >> 24) & 0xFF));
-	SDL_RenderFillRect(vng_ren, &r);
+	/*
+	 * THROUGH THE PRIMITIVES, AND THAT IS THE WHOLE FIX. These three rectangles were drawn
+	 * with SDL_SetRenderDrawColor and SDL_RenderFillRect directly, and nothing in this file
+	 * ever set the draw blend mode - so the colour on top was composited with whatever mode
+	 * the frame happened to have left behind.
+	 *
+	 * On a fresh program that is SDL's default, BLENDMODE_NONE. select_draw and thumb_draw
+	 * both set BLEND, but both return early when there is no selection and no 1:1 panel,
+	 * BEFORE reaching the line that does. So colour 2 - which starts as nothing - was written
+	 * as a literal zero and came out solid black over the two tones it is supposed to let
+	 * through, and then repaired itself the moment anything else on screen turned blending on.
+	 * A readout that is right only when something unrelated is open is worse than one that is
+	 * always wrong, because nobody believes the bug report.
+	 *
+	 * prim_fill states the blend in one place for every caller, which is why it was put there.
+	 */
+	prim_fill(r,    0xFF252525u);
+	prim_fill(half, 0xFF333333u);
+	prim_fill(r,    argb);
 }
 
 /*
@@ -1093,8 +1107,9 @@ void tool_bar_draw (SDL_FRect bar, Uint32 argb)
 {
 	swatch(bar, argb);
 
-	SDL_SetRenderDrawColor(vng_ren, 0x00, 0x00, 0x00, 0xB0);
-	SDL_RenderRect(vng_ren, &bar);
+	/* The rim, at seven tenths - which it only ever was when something else had turned
+	 * blending on. Through the primitives now, like everything else here. */
+	prim_rect(bar, 0xB0000000u);
 
 	if (!vng_text) return;
 
@@ -1113,7 +1128,7 @@ void tool_bar_size (float *w, float *h)
 	if (vng_text) text_measure(vng_text, "88888888", &tw, &th);
 
 	*w = tw + READ_PAD * 2.0f;
-	*h = th + 2.0f;
+	*h = th + ui_pad();
 }
 
 /* The colour under the pointer while CTRL is held: the answer to "what would I get", which

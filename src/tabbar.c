@@ -1,13 +1,14 @@
 #include "tabbar.h"
+#include "ui.h"
 #include "file.h"
 #include "tabs.h"
 
-#define BAR_H     26.0f
-#define TAB_MIN   64.0f     /* below this a name is unreadable and the bar is useless */
-#define TAB_MAX  180.0f     /* above this two tabs look like a menu, not like tabs     */
+#define BAR_H     (ui_row() + ui_pad())
+#define TAB_MIN   (ui_cell() * 8.0f)     /* below this a name is unreadable and the bar is useless */
+#define TAB_MAX   (ui_cell() * 22.0f)     /* above this two tabs look like a menu, not like tabs     */
 #define PLUS_W    26.0f     /* the [+] that opens a fresh sheet                        */
-#define CLOSE_W   16.0f
-#define PAD        7.0f
+#define CLOSE_W   ui_close()
+#define PAD       (ui_pad() + 3.0f)
 #define DRAG_SLOP  4.0f     /* travel before a click becomes a drag                    */
 
 static bool visible = false;

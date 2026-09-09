@@ -42,15 +42,32 @@ static const char *const vng_fonts[] = {
 	"font/DejaVuSansMono.ttf",  /* monospaced, redistributable, committed */
 	"font/FreeSans.ttf",        /* proportional; only if the first is gone */
 };
-#define VNG_FONT_SIZE 16.0f
+/*
+ * TWENTY, AND IT MOVED FROM SIXTEEN ONLY ONCE THE LAYOUT FOLLOWED IT.
+ *
+ * Every window in this program was ported from the first Vangopix, which drew text with a 6x6
+ * BITMAP font: its list rows, buttons and form fields were sized around text six to eighteen
+ * pixels high. Carried over literally, they were holding a sixteen pixel line - which is why
+ * so much of it read as cramped, and why one button was thirteen pixels tall for text that
+ * measured sixteen.
+ *
+ * Raising this before ui.h existed would have made that worse rather than better: the boxes
+ * were fixed and the text inside them would simply have overflowed. Now every rectangle that
+ * holds text is stated as a multiple of ui_line(), ui_row() or ui_cell(), so this one number
+ * moves all of them together. Anything holding PIXELS - the palette's swatch cell, the colour
+ * discs, the wheel - is deliberately untouched by it. See ui.h.
+ */
+#define VNG_FONT_SIZE 20.0f
 
 /*
- * The small face. Eleven, because that is what makes "COLOR" fit the palette button, and that
- * button is the first Vangopix's own rectangle: 36 x 13, sized around a 6x6 bitmap font where
- * five characters came to thirty pixels. DejaVu Sans Mono advances about 0.6 of its size, so
- * eleven gives roughly 6.6 a character - thirty-three across, and a line just inside thirteen.
+ * The small face, for a label in a box that the main one would fill - the palette's COLOR
+ * button, the animation window's row of words, a form's field names.
+ *
+ * SEVEN TENTHS OF THE MAIN FACE, which is the ratio that was already working at 11 against 16.
+ * It is a ratio and not a second constant on purpose: two independent sizes drift, and the
+ * whole point of the number above is that one knob moves the interface.
  */
-#define VNG_FONT_SMALL 11.0f
+#define VNG_FONT_SMALL 14.0f
 
 char *vangopix_asset (const char *relative)
 {

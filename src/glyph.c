@@ -98,6 +98,12 @@ static void path (const SDL_FPoint *pt, int lot, float x, float y, float rot, fl
 	}
 	out[lot] = out[0];   /* closes it */
 
+	/* The blend is stated here rather than inherited. Nothing this file draws is translucent
+	 * today - the shadow was deliberately made opaque, because three quarters of one takes the
+	 * colour of whatever it lands on - but a path that accepts an alpha and does not blend it
+	 * is the defect that was just found in the colour readouts, and leaving one instance of a
+	 * class is how it comes back. */
+	SDL_SetRenderDrawBlendMode(vng_ren, SDL_BLENDMODE_BLEND);
 	SDL_SetRenderDrawColor(vng_ren, r, g, b, a);
 	SDL_RenderLines(vng_ren, out, lot + 1);
 }

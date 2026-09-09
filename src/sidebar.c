@@ -1,12 +1,13 @@
 #include "sidebar.h"
+#include "ui.h"
 #include "project.h"
 #include "tabbar.h"
 #include "tabs.h"
 
-#define BAR_W     260.0f
-#define PAD         8.0f
-#define INDENT     12.0f
-#define CLOSE_W    14.0f
+#define BAR_W     (ui_cell() * 32.0f)
+#define PAD       (ui_pad() * 2.0f)
+#define INDENT    (ui_pad() * 3.0f)
+#define CLOSE_W   ui_close()
 #define MAX_ROWS  4096   /* what a person can scroll through before giving up and using
                           * a file manager. A deep tree past this is truncated, not
                           * crashed - see rows_build. */

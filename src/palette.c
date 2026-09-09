@@ -1,4 +1,5 @@
 #include "palette.h"
+#include "ui.h"
 #include "win.h"
 #include "tool.h"
 #include "core.h"
@@ -35,10 +36,19 @@
  * sitting at its OWN window's depth rather than under all of them, and that only shows if
  * something is parked between the two.
  */
-#define BOX_W    64.0f    /* the original's whole window, and it does not stretch */
-#define BOX_H    70.0f
+/*
+ * THE BOX IS AS BIG AS WHAT IS IN IT, which is 64 wide for the two discs and then whatever
+ * the button below them needs.
+ *
+ * It was a flat 64 x 70, sized when that button was thirteen pixels tall. The moment the
+ * button became a row of the loaded face it ran twelve pixels out of the bottom of its own
+ * window - which is this whole exercise in miniature, and the reason a box that holds text
+ * may not be a constant.
+ */
+#define BOX_W    (BTN_X + BTN_W + ui_pad() > 64.0f ? BTN_X + BTN_W + ui_pad() : 64.0f)
+#define BOX_H    (BTN_Y + BTN_H + ui_pad())
 #define GAP       4.0f    /* p->s.x + p->s.w + 4: from the window's OUTER edge */
-#define COUNT_H  16.0f    /* the band "%d colors" was printed in, at g.y - 16 */
+#define COUNT_H  ui_line()  /* the band "%d colors" was printed in, at g.y - 16 */
 #define CELL     20.0f    /* gd, passed as 20 at BOTH call sites - see palette.h */
 #define CHECK       5     /* DIV_NULL(gd, 4) in __generate_tile__: four squares to a cell */
 
@@ -74,8 +84,8 @@
 
 #define BTN_X    13.0f    /* the "COLOR" button, less the head */
 #define BTN_Y    52.0f
-#define BTN_W    36.0f
-#define BTN_H    13.0f
+#define BTN_W    (ui_cell() * 5.0f)   /* the five characters of COLOR */
+#define BTN_H    ui_row()
 #define BTN_TEXT "COLOR"
 
 #define RADIUS   20.0f    /* both circles */
@@ -91,7 +101,7 @@
 #define LIST_Y  100.0f
 #define LIST_W  200.0f
 #define LIST_H  200.0f
-#define ROW      20.0f    /* font_size in gui_list_palette */
+#define ROW      ui_row()   /* font_size in gui_list_palette */
 
 /*
  * THE SHAPE OF THE GRID, AND IT IS THE ONE THING BOTH SUMMONINGS READ.

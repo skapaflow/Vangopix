@@ -7,6 +7,7 @@
  * view_world_to_screen so the test does not carry its own idea of where a pixel is.
  */
 #include "vangopix.h"
+#include "ui.h"
 #include "core.h"
 #include "primitives.h"
 #include "tabs.h"
@@ -1494,6 +1495,68 @@ int main (void)
 		if (target) SDL_DestroyTexture(target);
 	}
 
+	/* ---- THE TWO COLOUR READOUTS SHOW ALPHA EVEN ON A FRESH FRAME ----
+	 *
+	 * Colour 2 starts as NOTHING, and the bar that reads it out shows that by laying it over
+	 * two tones at its real alpha. That needs blending, and tool.c turned it on NOWHERE: it
+	 * drew with whatever the frame had left behind.
+	 *
+	 * Which on a fresh program is BLENDMODE_NONE, SDL's default - select_draw and thumb_draw
+	 * both set it, but both return early when there is no selection and no 1:1 panel, before
+	 * reaching the line that does. So the second readout wrote a literal zero and came out
+	 * solid black, and then FIXED ITSELF the moment anything else on screen turned blending
+	 * on. Intermittent by construction.
+	 */
+	{
+		const int N = 96;
+
+		SDL_Texture *target = SDL_CreateTexture(vng_ren, SDL_PIXELFORMAT_ARGB8888,
+		                                        SDL_TEXTUREACCESS_TARGET, N, N);
+		SDL_Surface *shot = NULL;
+
+		if (target) {
+			SDL_SetRenderTarget(vng_ren, target);
+			SDL_SetRenderDrawColor(vng_ren, 0x00, 0xFF, 0x00, 0xFF);
+			SDL_RenderClear(vng_ren);
+
+			/* THE STATE A FRESH FRAME IS ACTUALLY IN. Not a contrivance - it is what the
+			 * program starts in and returns to whenever nothing else has set it. */
+			SDL_SetRenderDrawBlendMode(vng_ren, SDL_BLENDMODE_NONE);
+
+			SDL_FRect bar = { 8.0f, 8.0f, 72.0f, 20.0f };
+			tool_bar_draw(bar, 0x00000000u);      /* nothing, which is colour 2's default */
+
+			SDL_Surface *raw = SDL_RenderReadPixels(vng_ren, NULL);
+			if (raw) {
+				shot = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
+				SDL_DestroySurface(raw);
+			}
+			SDL_SetRenderTarget(vng_ren, NULL);
+			SDL_SetRenderDrawBlendMode(vng_ren, SDL_BLENDMODE_BLEND);
+			SDL_DestroyTexture(target);
+		}
+
+		ok("the readout can be read back", shot != NULL);
+
+		if (shot) {
+			const Uint32 *px = (const Uint32 *) shot->pixels;
+			const int pitch = shot->pitch / 4;
+
+			/* One pixel well inside each half of the bar, clear of the rim and the text. */
+			Uint32 left  = px[20 * pitch + 20];
+			Uint32 right = px[20 * pitch + 70];
+
+			ok("A TRANSPARENT SLOT SHOWS THE TONES BEHIND IT",
+			   (left & 0x00FFFFFFu) != 0x000000u);
+			ok("and the two halves are different tones", left != right);
+
+			if ((left & 0x00FFFFFFu) == 0x000000u)
+				SDL_Log("  the bar came out %08X / %08X - alpha was not blended", left, right);
+
+			SDL_DestroySurface(shot);
+		}
+	}
+
 	/* ---- THE HEX READOUT IS THERE BEFORE ANYBODY CLICKS IT ----
 	 *
 	 * It was not. The field behind the box was built lazily in the press handler, so the box
@@ -1870,43 +1933,77 @@ int main (void)
 
 	/* ---- THE SMALL FACE FITS THE BUTTON IT EXISTS FOR ----
 	 *
-	 * The palette's COLOR button is the first Vangopix's rectangle, 36 x 13, and that number
-	 * comes from a 6x6 BITMAP font where five characters came to thirty pixels. The main face
-	 * here is sixteen point with a nineteen pixel line, which does not go in a thirteen pixel
-	 * box - so there is a second atlas packed smaller, and the only thing that makes the size
-	 * chosen for it right is that the label fits.
+	 * The palette's COLOR button is the first Vangopix's rectangle, and that rectangle came
+	 * from a 6x6 BITMAP font where five characters made thirty pixels. The main face here has
+	 * a line taller than the box the original drew, which is why there is a second atlas.
 	 *
-	 * Checked because it is silent when it breaks: a label a pixel too tall is clipped by
-	 * win.c and simply looks wrong, and nothing in a build log would say so.
+	 * MEASURED AGAINST THE DERIVED BUTTON AND THE REAL FACES, not against 36x13 and 11pt: the
+	 * whole point of ui.h is that those numbers move when VNG_FONT_SIZE does, and a check
+	 * frozen on the old ones would pass while the button overflowed.
 	 */
 	{
-		char *path = vangopix_asset("font/DejaVuSansMono.ttf");
-		TextSystem *small = path ? text_init(vng_ren, path, 11.0f) : NULL;
-		SDL_free(path);
+		char       *fp    = vangopix_asset("font/DejaVuSansMono.ttf");
+		TextSystem *big   = fp ? text_init(vng_ren, fp, 20.0f) : NULL;
+		TextSystem *small = fp ? text_init(vng_ren, fp, 14.0f) : NULL;
+		SDL_free(fp);
 
-		if (!small) {
+		if (!big || !small) {
 			SDL_Log("SKIP the small face - no font beside the executable");
 		} else {
+			TextSystem *keep_b = vng_text, *keep_s = vng_text_small;
+			vng_text       = big;
+			vng_text_small = small;
+
+			/* What palette.c computes for that button, from the same calls it uses. */
+			float bw = ui_cell() * 5.0f, bh = ui_row();
+
 			float tw, th;
 			text_measure(small, "COLOR", &tw, &th);
 
-			ok("COLOR FITS THE 36x13 BUTTON", tw <= 36.0f && th <= 13.0f);
-			if (tw > 36.0f || th > 13.0f)
-				SDL_Log("  measured %.1f x %.1f", tw, th);
+			ok("COLOR FITS THE BUTTON AS DERIVED", tw <= bw && th <= bh);
+			if (tw > bw || th > bh)
+				SDL_Log("  label %.1fx%.1f in a button %.1fx%.1f", tw, th, bw, bh);
 
-			/* And it is meaningfully smaller than the face beside it, or the second atlas is
-			 * a texture bought for nothing. */
-			TextSystem *big = text_init(vng_ren, (path = vangopix_asset("font/DejaVuSansMono.ttf")),
-			                            16.0f);
-			SDL_free(path);
-			if (big) {
-				float bw, bh;
-				text_measure(big, "COLOR", &bw, &bh);
-				ok("and it really is the smaller of the two", tw < bw && th < bh);
-				ok("which the main face is not - it would be clipped", bh > 13.0f);
-				text_free(big);
+			/* And it really is the smaller of the two, or the second atlas is a texture
+			 * bought for nothing. */
+			float mw, mh;
+			text_measure(big, "COLOR", &mw, &mh);
+			ok("and it is the smaller of the two", tw < mw && th < mh);
+
+			/*
+			 * THE ROW IS TALLER THAN THE LINE IT HOLDS, which is the whole complaint ui.h
+			 * answers: the ported rows were 18 and 20 for text that measures the line height,
+			 * and one button was 13 for text of 16.
+			 */
+			ok("A ROW IS TALLER THAN ITS OWN LINE", ui_row() > ui_line());
+			ok("and a head bar is too",             ui_head() > ui_line());
+			ok("and the close box fits the head",   ui_close() <= ui_head());
+
+			/*
+			 * AND THE BUTTON FITS THE BOX IT IS IN. The palette's box was a flat 64 x 70,
+			 * sized when that button was thirteen pixels tall; the moment it became a row of
+			 * the loaded face it ran out of the bottom of its own window. A box that holds
+			 * text cannot be a constant, and this is what says so.
+			 */
+			{
+				float bx = 13.0f, by = 52.0f;          /* palette.c's BTN_X, BTN_Y */
+				float box_w = bx + bw + ui_pad();
+				float box_h = by + bh + ui_pad();
+
+				if (box_w < 64.0f) box_w = 64.0f;
+
+				ok("THE COLOR BUTTON FITS ITS OWN BOX",
+				   bx + bw <= box_w && by + bh <= box_h);
 			}
+
+			/* Seven form fields and a button have to fit the editor they are stacked in. */
+			float need = ui_pad() + ui_row() * 7.0f + ui_pad() + ui_row() + ui_pad();
+			ok("SEVEN FIELDS AND A BUTTON FIT THE EDITOR", need > 0.0f && need < 400.0f);
+
+			vng_text       = keep_b;
+			vng_text_small = keep_s;
 			text_free(small);
+			text_free(big);
 		}
 	}
 

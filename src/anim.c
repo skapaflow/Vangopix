@@ -1,4 +1,5 @@
 #include "anim.h"
+#include "ui.h"
 #include "win.h"
 #include "core.h"
 #include "keys.h"
@@ -11,7 +12,7 @@
  *
  *   tool_core.c:153       winmgr_create(menu_animation, "animation", {mouse.x-75, mouse.y-60, 150, 120})
  *   menu_animation:261    winmgr_limit(p, 150, 120)
- *   menu_animation:274-6  the row-step buttons at (cx-20, y+HEAD+8) and (cx+20, y+HEAD+8)
+ *   menu_animation:274-6  the row-step buttons at (cx-20, y+head+8) and (cx+20, y+head+8)
  *   menu_animation:347    the icon strip at y + 56, three 20x20 boxes at +0, +25, +50
  *   menu_animation:350    the work area {x+5, y+79, w-10, h-84}, rows 20 tall
  *   menu_animation:293-4  the zoom step 0.8, floored at 1.0
@@ -24,29 +25,40 @@
  * The original's head was 18; win.c measures its own from the loaded face, so anything that
  * was quoted against a window edge is re-derived from the interior rather than assuming 18.
  */
-#define OPEN_W    150.0f
-#define OPEN_H    120.0f
-#define HEAD       18.0f    /* WINMGR_HEAD, only to convert the original's window offsets */
-
-#define STEP_Y      8.0f    /* the row-step buttons: y + HEAD + 8, so 8 into the interior */
-#define STEP_DX    20.0f
-#define ICON_Y     38.0f    /* the icon strip: y + 56, less the head */
-#define ICON_W     20.0f
-#define ICON_DX    25.0f
-#define LIST_Y     61.0f    /* the work area: y + 79, less the head */
-#define LIST_TRIM  66.0f    /* h - 84, expressed against the interior instead */
-#define ROW        20.0f
+/*
+ * THE BANDS ARE STACKED FROM THE FACE, NOT COPIED AS OFFSETS.
+ *
+ * The original's 8, 56, 79 and its 20px rows were measured against a 6x6 BITMAP font. Carried
+ * over literally they gave a list row four pixels taller than the text in it, and an editor
+ * row of 18 for a line of 16 - two pixels of slack for seven stacked fields. So the offsets
+ * are now the bands added up: pad, a row of buttons, pad, a row of icons, pad, the list. The
+ * arrangement is the original's; only the arithmetic is honest about what it is holding.
+ */
+#define OPEN_W    (ui_cell() * 18.0f)
+#define OPEN_H    (STEP_Y + ROW + ui_pad() + ROW + ui_pad() + ROW * 3.0f + ui_pad())
+#define STEP_Y     ui_pad()                       /* the row-step buttons */
+#define STEP_DX    (ui_cell() * 2.5f)
+#define ICON_Y     (STEP_Y + ROW + ui_pad())      /* the icon strip, under them */
+#define ICON_W     (ui_cell() * 4.0f)
+#define ICON_DX    (ICON_W + ui_pad())
+#define LIST_Y     (ICON_Y + ROW + ui_pad())      /* the work area, under that */
+#define LIST_TRIM  (LIST_Y + ui_pad())
+#define ROW        ui_row()
 
 #define ZOOM_STEP   0.8f
 #define ZOOM_MIN    1.0f
 #define ZOOM_MAX   16.0f    /* the original had no ceiling and the preview is unclipped */
 
-#define EDIT_W    150.0f
-#define EDIT_H    200.0f
-#define EDIT_ROW   18.0f
-#define EDIT_TOP    7.0f    /* 25, less the head */
-#define EDIT_PAD    5.0f
 #define FIELDS      7
+
+/* Seven boxes, a button and the padding around them - added up rather than assumed at 200,
+   which is what let the original's rows be shorter than their own text. */
+#define EDIT_ROW   ui_row()
+#define EDIT_TOP   ui_pad()
+#define EDIT_PAD   ui_pad()
+#define EDIT_BTN   ui_row()
+#define EDIT_W     (ui_cell() * 20.0f)
+#define EDIT_H     (EDIT_TOP + EDIT_ROW * (float)FIELDS + ui_pad() + EDIT_BTN + ui_pad())
 
 /* The preview's four backgrounds, cycled by the right button. 0xRRGGBBAA there, 0xAARRGGBB
    here - the conversion that has caught this program twice. The last is NOTHING, which is
@@ -286,8 +298,8 @@ static SDL_FRect edit_rect (SDL_FRect a, int i)
 
 static SDL_FRect edit_button (SDL_FRect a)
 {
-	float w = 60.0f, h = 16.0f;
-	SDL_FRect r = { a.x + 32.0f, a.y + a.h - h - 4.0f, w, h };
+	float w = ui_cell() * 7.0f, h = EDIT_BTN;
+	SDL_FRect r = { a.x + SDL_floorf((a.w - w) * 0.5f), a.y + a.h - h - ui_pad(), w, h };
 	return r;
 }
 
@@ -409,20 +421,21 @@ static int rows_in (VNG_TAB *t)
 static SDL_FRect step_rect (SDL_FRect a, int right)
 {
 	float cx = a.x + a.w * 0.5f;
-	SDL_FRect r = { cx + (right ? STEP_DX - 10.0f : -STEP_DX - 10.0f),
-	                a.y + STEP_Y, 20.0f, 16.0f };
+	float w = ui_cell() * 2.5f;
+	SDL_FRect r = { cx + (right ? STEP_DX : -STEP_DX - w), a.y + STEP_Y, w, ROW };
 	return r;
 }
 
 static SDL_FRect icon_rect (SDL_FRect a, int i)
 {
-	SDL_FRect r = { a.x + ICON_DX * (float)i, a.y + ICON_Y, ICON_W * 2.0f, ICON_W };
+	SDL_FRect r = { a.x + ui_pad() + ICON_DX * (float)i, a.y + ICON_Y, ICON_W, ROW };
 	return r;
 }
 
 static SDL_FRect list_rect (SDL_FRect a)
 {
-	SDL_FRect r = { a.x + 4.0f, a.y + LIST_Y, a.w - 8.0f, a.h - LIST_TRIM };
+	SDL_FRect r = { a.x + ui_pad(), a.y + LIST_Y,
+	                a.w - ui_pad() * 2.0f, a.h - LIST_TRIM };
 	if (r.h < ROW) r.h = ROW;
 	return r;
 }
@@ -463,7 +476,7 @@ static void body (SDL_FRect a, void *ctx)
 		float pw = (float)box.w * gap, ph = (float)box.h * gap;
 
 		SDL_FRect dst = { a.x + SDL_floorf((a.w - pw) * 0.5f),
-		                  a.y - HEAD - ph - 4.0f, pw, ph };
+		                  a.y - ui_head() - ph - ui_pad(), pw, ph };
 		SDL_FRect src = source(anim_frame_at(clock_s, box.frames, box.speed));
 
 		win_unclip(win);
@@ -496,7 +509,7 @@ static void body (SDL_FRect a, void *ctx)
 		float tw, th;
 		text_measure(vng_text_small, n, &tw, &th);
 		text_print(vng_text_small, a.x + SDL_floorf((a.w - tw) * 0.5f),
-		           a.y + STEP_Y + SDL_floorf((16.0f - th) * 0.5f), 0xFF8000FFu, "%s", n);
+		           a.y + STEP_Y + SDL_floorf((ROW - th) * 0.5f), 0xFF8000FFu, "%s", n);
 	}
 
 	/* The icon strip. The original drew three wireframes; these are words in the small face,
@@ -532,7 +545,8 @@ static void body (SDL_FRect a, void *ctx)
 		char cut[VNG_ANIM_NAME + 4];
 		text_fit(vng_text, cut, sizeof cut, list[i].name, lr.w - ROW * 2.0f - 4.0f);
 
-		text_print(vng_text, lr.x + ROW + 2.0f, y + 2.0f,
+		text_print(vng_text, lr.x + ROW + ui_pad(),
+		           y + SDL_floorf((ROW - ui_line()) * 0.5f),
 		           hot ? 0xFFFFFFFFu : 0xFF8000FFu, "%s", cut);
 
 		small_label(up, "^", HOT(up));
@@ -540,7 +554,7 @@ static void body (SDL_FRect a, void *ctx)
 	}
 
 	if (list_lot > fit)
-		text_print(vng_text_small, lr.x + lr.w - 10.0f, lr.y + lr.h - ROW,
+		text_print(vng_text_small, lr.x + lr.w - ui_cell(), lr.y + lr.h - ROW,
 		           0x808080FFu, "v");
 
 	#undef HOT

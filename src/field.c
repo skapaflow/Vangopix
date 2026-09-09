@@ -1,4 +1,5 @@
 #include "field.h"
+#include "ui.h"
 #include "keys.h"
 #include "primitives.h"
 
@@ -9,8 +10,8 @@
 #define BOX_LIVE  0xFFC0C0C0u    /* the rim while the field holds the keyboard */
 #define BOX_TEXT  0xDCDCDCFFu    /* 0xRRGGBBAA - text_print's order, not the primitives' */
 #define BOX_LABEL 0xFF8000FFu
-#define PAD        4.0f
-#define GAP        4.0f          /* between a label and its box */
+#define PAD        ui_pad()
+#define GAP        ui_pad()      /* between a label and its box */
 
 struct _vng_field_ {
 	char           text[VNG_FIELD_MAX];
