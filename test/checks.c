@@ -1495,6 +1495,75 @@ int main (void)
 		if (target) SDL_DestroyTexture(target);
 	}
 
+	/* ---- THE TWO LOADED COLOURS ARE ON SCREEN, BOTTOM LEFT ----
+	 *
+	 * They are always there because there is no other way to know which colour each side of
+	 * the mouse is holding, and that is not a question a person should have to press a key to
+	 * ask. Which makes "are they actually drawn, and inside the window" worth pinning: it is
+	 * geometry off vng_win_h and sidebar_edge(), and either could put them off the bottom or
+	 * behind the panel without anything failing.
+	 */
+	{
+		const int N = 200;
+
+		vng_win_w = N;
+		vng_win_h = N;
+		view_reset(t);
+
+		tool_set_colour(0, 0xFFC80000u);   /* a red nothing else here uses */
+		tool_set_colour(1, 0xFF00C800u);   /* and a green */
+
+		SDL_Texture *target = SDL_CreateTexture(vng_ren, SDL_PIXELFORMAT_ARGB8888,
+		                                        SDL_TEXTUREACCESS_TARGET, N, N);
+		SDL_Surface *shot = NULL;
+
+		if (target) {
+			SDL_SetRenderTarget(vng_ren, target);
+			SDL_SetRenderDrawColor(vng_ren, 0x00, 0x00, 0xFF, 0xFF);
+			SDL_RenderClear(vng_ren);
+
+			tool_draw(t);
+
+			SDL_Surface *raw = SDL_RenderReadPixels(vng_ren, NULL);
+			if (raw) {
+				shot = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
+				SDL_DestroySurface(raw);
+			}
+			SDL_SetRenderTarget(vng_ren, NULL);
+			SDL_DestroyTexture(target);
+		}
+
+		ok("the frame can be read back", shot != NULL);
+
+		if (shot) {
+			const Uint32 *px = (const Uint32 *) shot->pixels;
+			const int pitch = shot->pitch / 4;
+
+			bool red = false, green = false;
+
+			/* The bottom band, the whole width - so this says WHERE they are without
+			 * carrying a second copy of the layout. */
+			for (int y = N / 2; y < N; y++)
+				for (int x = 0; x < N; x++) {
+					Uint32 v = px[y * pitch + x] & 0x00FFFFFFu;
+					if (v == 0x00C80000u) red   = true;
+					if (v == 0x0000C800u) green = true;
+				}
+
+			ok("COLOUR 1 IS ON SCREEN", red);
+			ok("AND SO IS COLOUR 2",    green);
+
+			if (!red || !green)
+				SDL_Log("  red=%d green=%d - the readouts are not being drawn where they should",
+				        (int)red, (int)green);
+
+			SDL_DestroySurface(shot);
+		}
+
+		tool_set_colour(0, 0xFF000000u);
+		tool_set_colour(1, 0x00000000u);
+	}
+
 	/* ---- THE TWO COLOUR READOUTS SHOW ALPHA EVEN ON A FRESH FRAME ----
 	 *
 	 * Colour 2 starts as NOTHING, and the bar that reads it out shows that by laying it over
@@ -1542,16 +1611,38 @@ int main (void)
 			const Uint32 *px = (const Uint32 *) shot->pixels;
 			const int pitch = shot->pitch / 4;
 
-			/* One pixel well inside each half of the bar, clear of the rim and the text. */
-			Uint32 left  = px[20 * pitch + 20];
-			Uint32 right = px[20 * pitch + 70];
+			/* One row well inside the bar, clear of the rim and of where the text would be. */
+			int  y = 20, changes = 0, tones = 0;
+			Uint32 seen[4], prev = 0;
 
-			ok("A TRANSPARENT SLOT SHOWS THE TONES BEHIND IT",
-			   (left & 0x00FFFFFFu) != 0x000000u);
-			ok("and the two halves are different tones", left != right);
+			for (int x = 12; x < 76; x++) {
+				Uint32 v = px[y * pitch + x] & 0x00FFFFFFu;
 
-			if ((left & 0x00FFFFFFu) == 0x000000u)
-				SDL_Log("  the bar came out %08X / %08X - alpha was not blended", left, right);
+				if (x > 12 && v != prev) changes++;
+				prev = v;
+
+				int j = 0;
+				while (j < tones && seen[j] != v) j++;
+				if (j == tones && tones < 4) seen[tones++] = v;
+			}
+
+			ok("A TRANSPARENT SLOT SHOWS WHAT IS BEHIND IT",
+			   tones >= 2 && (seen[0] != 0x000000u || seen[1] != 0x000000u));
+
+			/*
+			 * AND IT IS A CHECKERBOARD, NOT TWO HALVES - which is the difference this whole
+			 * check exists to say, because both patterns pass "more than one tone". A split
+			 * changes tone ONCE across the bar; a board of six pixel squares changes about ten
+			 * times over the same run.
+			 */
+			ok("AND IT IS A CHECKERBOARD, NOT A SPLIT", changes >= 4);
+			if (changes < 4)
+				SDL_Log("  the tone changed %d times across the bar - that is a split", changes);
+
+			/* The desk's own two greys, so a transparent pixel means the same thing here as
+			 * it does on the sheet. */
+			ok("in the desk's own tones",
+			   (seen[0] == (VNG_CHECK_A & 0x00FFFFFFu) || seen[0] == (VNG_CHECK_B & 0x00FFFFFFu)));
 
 			SDL_DestroySurface(shot);
 		}

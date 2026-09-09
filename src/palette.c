@@ -477,13 +477,9 @@ static void grid_draw (VNG_TAB *t, SDL_FRect g, int n, int m)
 	 * through the grid lands exactly where a board restarted at every cell would - and a
 	 * seam that only shows up when the numbers stop dividing is a seam worth not having.
 	 *
-	 * NOT the two tones tool_swatch uses. Those are for a swatch that is WIDE and carries its
-	 * hex inside it, where a checkerboard behind text is noise and a split reads as the
-	 * convention it is. A 20px square in a grid of 20px squares is the opposite case: a split
-	 * down the middle of one reads as TWO COLOURS, which is the one thing it must not say in a
-	 * grid whose whole job is one colour per cell.
-	 *
-	 * And not the DESK's board either - see TILE_A above.
+	 * NOT THE DESK'S BOARD, which is the one deliberate exception in the program - see TILE_A
+	 * above for why this grid needs tones of its own. Everything else that shows alpha, the
+	 * two loaded colours at the bottom of the screen included, uses the desk's.
 	 */
 	vangopix_board_rect(g, CHECK, TILE_A, TILE_B);
 

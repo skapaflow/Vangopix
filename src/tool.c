@@ -1,4 +1,5 @@
 #include "tool.h"
+#include "core.h"
 #include "ui.h"
 #include "view.h"
 #include "keys.h"
@@ -1048,27 +1049,28 @@ static void outline (VNG_TAB *t, int px, int py)
  */
 static void swatch (SDL_FRect r, Uint32 argb)
 {
-	SDL_FRect half = { r.x, r.y, r.w * 0.5f, r.h };
-
 	/*
-	 * THROUGH THE PRIMITIVES, AND THAT IS THE WHOLE FIX. These three rectangles were drawn
-	 * with SDL_SetRenderDrawColor and SDL_RenderFillRect directly, and nothing in this file
-	 * ever set the draw blend mode - so the colour on top was composited with whatever mode
-	 * the frame happened to have left behind.
+	 * THE DESK'S CHECKERBOARD, WHICH IS WHAT EVERYTHING ELSE HERE SHOWS ALPHA WITH: the sheet
+	 * itself, the hole a floating selection leaves, the 1:1 panel, the disc in the colour
+	 * wheel's hole, every cell of the palette. These two bars were the one thing using a
+	 * SPLIT DOWN THE MIDDLE instead - two flat tones, half each.
 	 *
-	 * On a fresh program that is SDL's default, BLENDMODE_NONE. select_draw and thumb_draw
-	 * both set BLEND, but both return early when there is no selection and no 1:1 panel,
-	 * BEFORE reaching the line that does. So colour 2 - which starts as nothing - was written
-	 * as a literal zero and came out solid black over the two tones it is supposed to let
-	 * through, and then repaired itself the moment anything else on screen turned blending on.
-	 * A readout that is right only when something unrelated is open is worse than one that is
-	 * always wrong, because nobody believes the bug report.
+	 * The argument for the split was that a bar is wide and carries its hex INSIDE it, where a
+	 * board behind text is noise. That was wrong twice: the board only shows at all where the
+	 * colour is transparent, and both its tones are dark, so the readout is white on dark
+	 * either way. What it cost was the thing that matters more - a person reads "transparent"
+	 * off the checkerboard everywhere else in this program, and here they had to read it off
+	 * something that looks like two colours.
 	 *
-	 * prim_fill states the blend in one place for every caller, which is why it was put there.
+	 * Its own greys and not a third pair: what must never fork is the DESK, so that a
+	 * transparent pixel means the same thing in every place it is shown. The black rim in
+	 * tool_bar_draw is what keeps the bar's edge visible against the desk behind it.
 	 */
-	prim_fill(r,    0xFF252525u);
-	prim_fill(half, 0xFF333333u);
-	prim_fill(r,    argb);
+	vangopix_desk_rect(r);
+
+	/* Then the colour over it at its REAL alpha, which is what makes nothing look like
+	 * nothing instead of looking like black. */
+	prim_fill(r, argb);
 }
 
 /*

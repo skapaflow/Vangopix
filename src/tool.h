@@ -183,13 +183,18 @@ extern void tool_cursor_apply (void);
  *   tool_bar_draw   a colour with its hex written inside it, in whichever of the two reads.
  *   tool_bar_size   what such a bar must be to hold eight hex digits in the loaded face.
  *
- * A BAR SHOWS ALPHA WITH TWO TONES AND A PALETTE CELL SHOWS IT WITH THE BOARD, and the two
- * are not an inconsistency. A bar is WIDE and carries its hex inside it, where a
- * checkerboard behind text is noise and a split down the middle reads as the swatch
- * convention it is. A 20px cell in a grid of 20px cells is the opposite case: a split down
- * one of those reads as TWO COLOURS, which is the single thing it must not say in a grid
- * whose whole job is one colour per cell. See vangopix_desk_rect_sized for that one, and
- * vangopix_desk_disc for the round case.
+ * EVERYTHING THAT SHOWS ALPHA SHOWS IT WITH A CHECKERBOARD, and these bars are no exception.
+ * The sheet, the hole a floating selection leaves, the 1:1 panel, the disc in the colour
+ * wheel and every cell of the palette all say "transparent" the same way, and a readout that
+ * said it differently was making a person learn the word twice.
+ *
+ * These drew a SPLIT DOWN THE MIDDLE for a while - two flat tones, half each - on the
+ * argument that a bar is wide and carries its hex inside it, where a board behind text is
+ * noise. That was wrong twice over: the board only shows where the colour is TRANSPARENT, and
+ * both its tones are dark, so the hex is white on dark either way.
+ *
+ * In the desk's own greys, because what must never fork is the desk. The palette's grid is
+ * the one board that is deliberately a different board, and palette.c says why.
  */
 extern bool tool_light_on (Uint32 argb);
 extern void tool_bar_draw (SDL_FRect bar, Uint32 argb);
