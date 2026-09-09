@@ -550,7 +550,7 @@ static void body (SDL_FRect a, void *ctx)
 		           hot ? 0xFFFFFFFFu : 0xFF8000FFu, "%s", cut);
 
 		small_label(up, "^", HOT(up));
-		small_label(ex, "x", HOT(ex));
+		ui_close_mark(ex, HOT(ex));
 	}
 
 	if (list_lot > fit)

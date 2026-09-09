@@ -226,9 +226,8 @@ void tabbar_draw (void)
 		bool  hot = (my >= 0 && my < BAR_H && mx >= x && mx < x + w);
 
 		if (hot) {
-			bool over = mx >= cx;
-			text_print(vng_text, cx + 3.0f, 5.0f,
-			           over ? 0xFF6060FF : 0x909090FF, "x");
+			SDL_FRect c = { cx, 0.0f, CLOSE_W, BAR_H };
+			ui_close_mark(c, mx >= cx);
 		} else if (p->dirty) {
 			text_print(vng_text, cx + 3.0f, 5.0f, 0x909090FF, "*");
 		}

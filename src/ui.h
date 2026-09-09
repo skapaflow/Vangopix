@@ -74,4 +74,24 @@ extern float ui_close (void);
    it shares a window with, or a big window gets a handle that reads as a speck. */
 extern float ui_grip (void);
 
+/*
+ * THE MARK THAT CLOSES A THING, DRAWN IN ONE PLACE BECAUSE IT IS IN FOUR.
+ *
+ * A window's head bar, a tab, a project folder in the sidebar and a clip in the animation
+ * list all offer the same promise - press this and the thing goes away - and each of them was
+ * drawing its own lowercase "x" with its own two colours and its own hand-placed offset. Four
+ * copies of one idea is four places for it to drift, and it had already drifted: the tab's
+ * dimmed to 0x909090 and the sidebar's to 0x707070 for no reason either could give.
+ *
+ * A RED DISC AND NOT A LETTER. An "x" is a character that happens to mean close; a red dot is
+ * read before it is parsed, at any size, in any language, and it does not depend on the font
+ * having loaded. It is sized off ui_close() so it stays in proportion to the head bar it most
+ * often sits in, and centred in whatever box the caller hands it - which is what lets a 20x30
+ * head box, a tab and a 30x30 list row all get the same mark.
+ *
+ * `hot` is the pointer being on it. The colour is red either way, because what it does does
+ * not change when nobody is pointing at it.
+ */
+extern void ui_close_mark (SDL_FRect box, bool hot);
+
 #endif

@@ -319,9 +319,8 @@ void sidebar_draw (void)
 		}
 
 		if (rows[i].depth == 0 && hot) {
-			bool over = rx >= BAR_W - CLOSE_W - PAD;
-			text_print(vng_text, ox + BAR_W - CLOSE_W - PAD + 2.0f, y + 1.0f,
-			           over ? 0xFF6060FF : 0x707070FF, "x");
+			SDL_FRect c = { ox + BAR_W - CLOSE_W - PAD, y, CLOSE_W, row_h() };
+			ui_close_mark(c, rx >= BAR_W - CLOSE_W - PAD);
 		}
 	}
 }

@@ -1495,6 +1495,91 @@ int main (void)
 		if (target) SDL_DestroyTexture(target);
 	}
 
+	/* ---- THE MARK THAT CLOSES A THING ----
+	 *
+	 * A window head, a tab, a project folder and a clip all offered the same promise and each
+	 * drew its own lowercase "x" with its own two colours - which had already drifted apart,
+	 * one dimming to 0x909090 and another to 0x707070. It is one red disc now.
+	 *
+	 * Checked in pixels, and NOT with a font loaded on purpose: an "x" is a character, so a
+	 * window with no face was a window with no way to say it could be closed. The disc does
+	 * not depend on the font having loaded, and this is what says so.
+	 */
+	{
+		const int N = 200;
+
+		vng_win_w = N;
+		vng_win_h = N;
+
+		if (colour_visible()) colour_toggle();
+		if (anim_visible())   anim_toggle();
+		if (thumb_visible())  thumb_toggle();
+		if (palette_visible()) palette_toggle();
+
+		thumb_toggle();                       /* the simplest window there is */
+		win_place(win_top(), (float)N * 0.5f, (float)N * 0.5f);
+
+		SDL_FRect o = win_outer(win_top());
+
+		SDL_Texture *target = SDL_CreateTexture(vng_ren, SDL_PIXELFORMAT_ARGB8888,
+		                                        SDL_TEXTUREACCESS_TARGET, N, N);
+		SDL_Surface *shot = NULL;
+
+		if (target) {
+			SDL_SetRenderTarget(vng_ren, target);
+			SDL_SetRenderDrawColor(vng_ren, 0x00, 0xFF, 0x00, 0xFF);
+			SDL_RenderClear(vng_ren);
+			win_draw();
+			SDL_Surface *raw = SDL_RenderReadPixels(vng_ren, NULL);
+			if (raw) {
+				shot = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
+				SDL_DestroySurface(raw);
+			}
+			SDL_SetRenderTarget(vng_ren, NULL);
+			SDL_DestroyTexture(target);
+		}
+
+		ok("the head bar can be read back", shot != NULL);
+		ok("there is no font loaded for this", vng_text == NULL);
+
+		if (shot) {
+			const Uint32 *px = (const Uint32 *) shot->pixels;
+			const int pitch = shot->pitch / 4;
+
+			/* The head bar's right end, where the mark lives - measured off win_outer so this
+			 * carries no second copy of the layout. */
+			int x0 = (int)(o.x + o.w - ui_close() - ui_pad() * 2.0f);
+			int x1 = (int)(o.x + o.w);
+			int y0 = (int)o.y, y1 = (int)(o.y + ui_head());
+
+			if (x0 < 0) x0 = 0;
+			if (y0 < 0) y0 = 0;
+			if (x1 > N) x1 = N;
+			if (y1 > N) y1 = N;
+
+			bool red = false;
+
+			for (int y = y0; y < y1; y++)
+				for (int x = x0; x < x1; x++) {
+					Uint32 v = px[y * pitch + x];
+					int r = (int)((v >> 16) & 0xFF);
+					int g = (int)((v >>  8) & 0xFF);
+					int b = (int)( v        & 0xFF);
+
+					/* Decidedly red: well clear of every grey in the chrome. */
+					if (r > 0x90 && g < 0x60 && b < 0x60) red = true;
+				}
+
+			ok("A WINDOW WITH NO FONT STILL SHOWS IT CAN BE CLOSED", red);
+			if (!red) SDL_Log("  nothing red in the head bar's close corner");
+
+			SDL_DestroySurface(shot);
+		}
+
+		thumb_toggle();
+		ok("and the panel goes away again", thumb_visible() == false);
+	}
+
 	/* ---- THE TWO LOADED COLOURS ARE ON SCREEN, BOTTOM LEFT ----
 	 *
 	 * They are always there because there is no other way to know which colour each side of

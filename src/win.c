@@ -400,14 +400,14 @@ void win_draw (void)
 			         h.w - ui_close() - ui_pad() * 3.0f);
 			text_print(vng_text, h.x + ui_pad(), h.y + ui_pad(), 0xB4B4B4FF, "%s", name);
 
+		}
+
+		/* OUTSIDE the `if (vng_text)` above, because it is not a letter: a window with no
+		 * font loaded still has to be closable, and the mark that says so still has to be
+		 * there. That was not true of the "x" this replaces. */
+		{
 			SDL_FRect c = close_rect(w);
-			/* Centred in the box rather than pinned to its corner, so it stays in the
-			 * middle of whatever the face makes the head. */
-			float cw, ch;
-			text_measure(vng_text, "x", &cw, &ch);
-			text_print(vng_text, c.x + SDL_floorf((c.w - cw) * 0.5f),
-			           c.y + SDL_floorf((c.h - ch) * 0.5f),
-			           in_rect(c, mx, my) ? 0xFF6060FF : 0x707070FF, "x");
+			ui_close_mark(c, in_rect(c, mx, my));
 		}
 
 		/* The stretch corner: two short strokes, which is enough to say "pull here" without

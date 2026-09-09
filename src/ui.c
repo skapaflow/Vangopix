@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "primitives.h"
 
 /*
  * WHAT THESE ARE WHEN THERE IS NO FONT.
@@ -59,3 +60,27 @@ float ui_close (void) { return ui_line(); }
 /* Three quarters of a line, which is where the hand-picked 12 already sat against a 16 line -
    so this changes nothing today and keeps up when the face moves. */
 float ui_grip (void) { return whole(ui_line() * 0.75f); }
+
+/*
+ * Half of ui_close() across, which is about the ink an "x" of the same face used to put down -
+ * so it takes the space the letter took rather than filling the box that held it.
+ *
+ * A darker rim under it, the same reason every other mark in this program has one: the head
+ * bar, a tab and a list row are three different greys, and a flat disc on the lightest of them
+ * loses its edge.
+ */
+#define CLOSE_COLD  0xFFC03A3Au
+#define CLOSE_HOT   0xFFFF5A5Au
+#define CLOSE_RIM   0xFF401414u
+
+void ui_close_mark (SDL_FRect box, bool hot)
+{
+	float r = ui_close() * 0.25f;
+	float cx = box.x + box.w * 0.5f;
+	float cy = box.y + box.h * 0.5f;
+
+	if (r < 2.0f) r = 2.0f;
+
+	prim_disc  (cx, cy, r, hot ? CLOSE_HOT : CLOSE_COLD);
+	prim_circle(cx, cy, r, CLOSE_RIM);
+}
