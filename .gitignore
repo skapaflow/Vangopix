@@ -27,4 +27,12 @@ shot.png
 # The project list is per machine: it holds absolute paths to folders on THIS disk, so
 # committing it would hand every clone a list of directories that do not exist there.
 projects.vngproj
+
+# The clip list the animation window writes with SAVE. It is a working file about whatever
+# spritesheet is in front of you, not something to ship: a clip is a rectangle on a canvas,
+# and one committed here would be four numbers pointing at pixels nobody else has.
+#
+# vangopix_palette.ini is the opposite and IS committed - it holds the palettes of other
+# machines, which are the same for everyone.
+vangopix.anime
 build/

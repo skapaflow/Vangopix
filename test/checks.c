@@ -2067,6 +2067,33 @@ int main (void)
 			}
 		}
 
+		/*
+		 * ---- NO CLIPS AT ALL, which is the state the program now starts in ----
+		 *
+		 * There is no vangopix.anime shipped: a clip is a rectangle on a canvas, so one
+		 * committed here would be four numbers pointing at pixels nobody else has. The window
+		 * therefore opens empty, with a clip of no frames and no name - and that is where a
+		 * modulo by zero or a degenerate blit would hide.
+		 */
+		{
+			char *empty = vangopix_asset("checks_empty.anime");
+			if (empty) {
+				SDL_IOStream *io = SDL_IOFromFile(empty, "w");
+				if (io) {
+					const char *junk = "not a clip\nnor this one\n";
+					SDL_WriteIO(io, junk, SDL_strlen(junk));
+					SDL_CloseIO(io);
+
+					ok("A FILE OF NOTHING USABLE IS NO CLIPS", anim_load(empty) == 0);
+					ok("and the list says so",                 anim_lot() == 0);
+					ok("and reading row zero is empty",        anim_name(0)[0] == 0);
+
+					SDL_RemovePath(empty);
+				}
+				SDL_free(empty);
+			}
+		}
+
 		/* ---- the window ---- */
 		anim_toggle();
 		ok("X puts the animation window up", anim_visible() == true);
