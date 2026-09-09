@@ -7,6 +7,8 @@
  * view_world_to_screen so the test does not carry its own idea of where a pixel is.
  */
 #include "vangopix.h"
+#include "core.h"
+#include "primitives.h"
 #include "tabs.h"
 #include "undo.h"
 #include "tool.h"
@@ -14,6 +16,8 @@
 #include "thumb.h"
 #include "win.h"
 #include "colour.h"
+#include "palette.h"
+#include "anim.h"
 #include "keys.h"
 #include "view.h"
 #include "file.h"
@@ -912,6 +916,1108 @@ int main (void)
 
 		colour_toggle();
 		ok("C puts it away", colour_visible() == false);
+	}
+
+	/* ---- THE PALETTE: one list of colours, a box, a grid beside it, and a list ----
+	 *
+	 * The model first, because everything else is a view of it, then the two things the
+	 * original got wrong that a check can actually reach: which entry a delete removes, and
+	 * what the ALT grid answers for a point that is not on it.
+	 */
+	{
+		VNG_TAB *q = vng_tab_new(4, 2);
+
+		/* Three colours, one of them twice, and two holes. A hole must not become a swatch:
+		 * a sprite is mostly hole, and a cell spent on it is a cell spent in every drawing. */
+		q->pixels[0] = 0xFFFF0000u;
+		q->pixels[1] = 0xFF00FF00u;
+		q->pixels[2] = 0x00000000u;
+		q->pixels[3] = 0xFFFF0000u;
+		q->pixels[4] = 0xFF0000FFu;
+		q->pixels[5] = 0x00123456u;
+		q->pixels[6] = 0xFF00FF00u;
+		q->pixels[7] = 0xFFFF0000u;
+
+		palette_scan(q);
+
+		ok("the scan finds each colour once", palette_lot(q) == 3);
+		ok("and in the order it met them",
+		   palette_at(q, 0) == 0xFFFF0000u &&
+		   palette_at(q, 1) == 0xFF00FF00u &&
+		   palette_at(q, 2) == 0xFF0000FFu);
+		ok("NOTHING IS NOT A COLOUR",
+		   !palette_has(q, 0x00000000u) && !palette_has(q, 0x00123456u));
+		ok("out of range reads as nothing, not off the end", palette_at(q, 99) == 0u);
+
+		ok("a new colour is added",     palette_add(q, 0xFF808080u) == true);
+		ok("a repeat is not",           palette_add(q, 0xFF808080u) == false);
+		ok("and did not grow the list", palette_lot(q) == 4);
+
+		/* THE DELETE TAKES THE FIRST MATCH AND KEEPS THE ORDER. The original searched the
+		 * whole list without stopping, so it kept the LAST index it saw, and then shifted
+		 * with a loop that read one past the end of the list it had just shortened. */
+		palette_del(q, 0xFF00FF00u);
+		ok("delete removes it", palette_has(q, 0xFF00FF00u) == false);
+		ok("and closes the gap in order",
+		   palette_lot(q) == 3 &&
+		   palette_at(q, 0) == 0xFFFF0000u &&
+		   palette_at(q, 1) == 0xFF0000FFu &&
+		   palette_at(q, 2) == 0xFF808080u);
+		palette_del(q, 0xFF00FF00u);   /* again, on a colour that is gone */
+		ok("deleting what is not there does nothing", palette_lot(q) == 3);
+
+		/* THE PALETTE IS PER TAB, like the selection and for the same reason: it is the
+		 * working set of one drawing. The original kept it per image, and its grid's current
+		 * index in a static shared by every document. */
+		ok("a palette belongs to its own tab", palette_has(t, 0xFF808080u) == false);
+
+		/* ---- the palettes of other machines ---- */
+
+		ok("the .ini is read", palette_list_lot() > 0);
+
+		{
+			/* MEGA-DRIVE is in the author's own file, and it is a set nobody arrives at by
+			 * eyedropping their own drawing - which is what the COLOR button is for. */
+			bool got = palette_load(q, "MEGA-DRIVE");
+			ok("a named palette loads", got);
+			ok("and REPLACED what was there rather than adding to it",
+			   got && palette_has(q, 0xFF808080u) == false);
+			ok("its colours are opaque",
+			   got && palette_lot(q) > 0 && (palette_at(q, 0) >> 24) == 0xFFu);
+			ok("GAMEBOY is four colours",
+			   palette_load(q, "GAMEBOY") && palette_lot(q) == 4);
+			ok("and a name that is not in the file changes nothing",
+			   palette_load(q, "NO-SUCH-MACHINE") == false && palette_lot(q) == 4);
+		}
+
+		palette_scan(q);   /* back to the drawing's own colours */
+
+		/* ---- the box, and the grid BESIDE it ---- */
+
+		ok("no box, no grid", palette_grid_area().w == 0.0f);
+
+		palette_toggle();
+		ok("P puts the box up", palette_visible() == true);
+
+		SDL_FRect g = palette_grid_area();
+		ok("and the grid is beside it", g.w > 0.0f && g.h > 0.0f);
+
+		/* IT IS OUTSIDE THE WINDOW, which is the design: the box is contained and the
+		 * swatches hang off its right edge. */
+		SDL_FRect o = win_outer(win_top());
+		ok("THE GRID IS OUTSIDE THE BOX, not in it", g.x >= o.x + o.w);
+		ok("and level with its interior",            g.y == win_area(win_top()).y);
+
+		{
+			/* A press on a cell, by button, exactly as on the sheet. */
+			SDL_Event e;
+			SDL_zero(e);
+			e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+			e.button.button = SDL_BUTTON_LEFT;
+			e.button.x = g.x + 10.0f;
+			e.button.y = g.y + 10.0f;
+			ok("a cell answers the press", palette_grid_event(&e, q) == true);
+			ok("and the left button fills colour 1", tool_colour(0) == palette_at(q, 0));
+
+			e.button.button = SDL_BUTTON_RIGHT;
+			palette_grid_event(&e, q);
+			ok("the right button fills colour 2", tool_colour(1) == palette_at(q, 0));
+
+			/* CTRL BELONGS TO THE PALETTE ONLY WHERE THE PALETTE IS. Off the grid the event
+			 * is declined, so the eyedropper on the sheet is untouched. */
+			e.button.button = SDL_BUTTON_LEFT;
+			e.button.x = g.x - 40.0f;
+			ok("a press off the grid is not the grid's",
+			   palette_grid_event(&e, q) == false);
+		}
+
+		{
+			/* CTRL+left keeps the colour in hand; CTRL+right throws one away. */
+			SDL_SetModState(SDL_KMOD_LCTRL);
+			tool_set_colour(0, 0xFF121212u);
+
+			SDL_Event e;
+			SDL_zero(e);
+			e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+			e.button.button = SDL_BUTTON_LEFT;
+			e.button.x = g.x + 10.0f;
+			e.button.y = g.y + 10.0f;
+			palette_grid_event(&e, q);
+			ok("CTRL+left keeps the colour in hand", palette_has(q, 0xFF121212u));
+
+			e.button.button = SDL_BUTTON_RIGHT;
+			palette_grid_event(&e, q);
+			ok("CTRL+right throws the one under it away",
+			   palette_has(q, 0xFFFF0000u) == false);
+
+			SDL_SetModState(SDL_KMOD_NONE);
+		}
+
+		/*
+		 * THE POINTER IS THE ONLY THING THAT SAYS THE BANDS ARE THERE - eight pixels of
+		 * nothing over the last column and the last row. Without a shape change there is no
+		 * way to find out the grid stretches except by dragging and seeing what happens.
+		 */
+		ok("the corner band asks for the diagonal arrows",
+		   palette_grid_cursor(g.x + g.w - 1.0f, g.y + g.h - 1.0f) == VNG_CUR_NWSE);
+		ok("the right edge asks for the sideways pair",
+		   palette_grid_cursor(g.x + g.w - 1.0f, g.y + 4.0f) == VNG_CUR_WE);
+		ok("the bottom edge asks for the up-down pair",
+		   palette_grid_cursor(g.x + 4.0f, g.y + g.h - 1.0f) == VNG_CUR_NS);
+		ok("and the middle of the grid asks for NOTHING, which is not the arrow",
+		   palette_grid_cursor(g.x + 10.0f, g.y + 10.0f) == VNG_CUR_ARROW);
+
+		/*
+		 * STRETCHING THE GRID IS WHAT THE ALT GRID FOLLOWS, and that is the link the first
+		 * Vangopix already had: its core.c called gui_quickly_palette_box(plt_pos, 20) with
+		 * THE SAME RECTANGLE this grid was stretched to. One grid, two summonings.
+		 */
+		{
+			SDL_Event e;
+			SDL_zero(e);
+			e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+			e.button.button = SDL_BUTTON_LEFT;
+			e.button.x = g.x + g.w - 1.0f;    /* the corner band */
+			e.button.y = g.y + g.h - 1.0f;
+			ok("the corner band takes the press", palette_grid_event(&e, q) == true);
+
+			SDL_zero(e);
+			e.type = SDL_EVENT_MOUSE_MOTION;
+			e.motion.x = g.x + 6.0f * 20.0f;
+			e.motion.y = g.y + 5.0f * 20.0f;
+			palette_grid_event(&e, q);
+
+			SDL_FRect big = palette_grid_area();
+			ok("and pulling it makes the grid 6 x 5", big.w == 120.0f && big.h == 100.0f);
+
+			SDL_zero(e);
+			e.type = SDL_EVENT_MOUSE_BUTTON_UP;
+			e.button.button = SDL_BUTTON_LEFT;
+			palette_grid_event(&e, q);
+
+			SDL_SetModState(SDL_KMOD_LALT);
+			SDL_FRect alt = palette_quick_area();
+			ok("THE ALT GRID IS THE SAME SHAPE", alt.w == big.w && alt.h == big.h);
+			SDL_SetModState(SDL_KMOD_NONE);
+		}
+
+		/* ---- the grid under ALT ---- */
+
+		ok("no ALT, no grid", palette_quick_area().w == 0.0f);
+
+		SDL_SetModState(SDL_KMOD_LALT);
+
+		tool_set_colour(0, 0xFF010203u);   /* what the gesture must be able to give back */
+		SDL_FRect a = palette_quick_area();
+		ok("ALT puts a grid up", a.w > 0.0f && a.h > 0.0f);
+
+		ok("a cell answers with its colour",
+		   palette_quick_hover(q, a.x + 10.0f, a.y + 10.0f) == palette_at(q, 0));
+
+		/*
+		 * LEAVING THE GRID GIVES THE COLOUR BACK, FROM ANY SIDE. This is the bug:
+		 * gui_quickly_palette_box tested select_rect(pos.x, pos.y, gd, gd) for it - its FIRST
+		 * CELL - so the gesture could only be abandoned by leaving through the top left, and
+		 * from every other direction it kept whatever had last been swept over.
+		 */
+		ok("leaving to the right gives it back",
+		   palette_quick_hover(q, a.x + a.w + 20.0f, a.y + 10.0f) == 0xFF010203u);
+		ok("leaving below gives it back",
+		   palette_quick_hover(q, a.x + 10.0f, a.y + a.h + 20.0f) == 0xFF010203u);
+		ok("leaving to the left gives it back",
+		   palette_quick_hover(q, a.x - 20.0f, a.y + 10.0f) == 0xFF010203u);
+
+		/* A PRESS STILL SAYS WHICH SLOT, which the original had no way to express here: it
+		 * filled color_front and nothing else, so the second colour could not be loaded from
+		 * a palette at all. */
+		{
+			SDL_Event e;
+			SDL_zero(e);
+			e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+			e.button.button = SDL_BUTTON_RIGHT;
+			e.button.x = a.x + 10.0f;
+			e.button.y = a.y + 10.0f;
+			ok("a press on a cell is the grid's", palette_quick_event(&e, q) == true);
+			ok("and the right button fills colour 2", tool_colour(1) == palette_at(q, 0));
+
+			e.button.x = a.x + a.w + 40.0f;
+			ok("a press off the grid is not", palette_quick_event(&e, q) == false);
+		}
+
+		SDL_SetModState(SDL_KMOD_NONE);
+		ok("letting ALT go takes the grid away", palette_quick_area().w == 0.0f);
+
+		/*
+		 * THE KEYBOARD'S OWNER SILENCES IT, which is the whole of what keys_held and
+		 * keys_mods are for: a modifier read straight off the hardware is one read behind the
+		 * owner's back, and ALT held while a field is open would put a palette over the top
+		 * of the thing being typed into.
+		 */
+		{
+			colour_toggle();
+
+			SDL_Event e;
+			SDL_zero(e);
+			e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+			e.button.button = SDL_BUTTON_LEFT;
+			SDL_FRect c = win_area(win_top());
+			e.button.x = c.x + 100.0f;
+			e.button.y = c.y + c.h - 28.0f;
+			win_event(&e);        /* the hex field now owns the keyboard */
+
+			SDL_SetModState(SDL_KMOD_LALT);
+			ok("ALT HELD INTO A FIELD IS NOT A PALETTE", palette_quick_area().w == 0.0f);
+			SDL_SetModState(SDL_KMOD_NONE);
+
+			enter();              /* hand the keyboard back */
+			colour_toggle();
+		}
+
+		/*
+		 * And once through the pixels. Nothing is asserted about them - the point is that
+		 * every path that touches the renderer is walked at least once here, because a bad
+		 * rectangle or a NULL in a draw would otherwise only ever show up in front of a
+		 * person.
+		 */
+		palette_grid_draw(q);     /* the swatches, and the count above them */
+		win_draw();               /* the box: two discs and the word */
+
+		SDL_SetModState(SDL_KMOD_LALT);
+		palette_quick_draw(q);    /* the grid under the hand, with its readout */
+		SDL_SetModState(SDL_KMOD_NONE);
+
+		palette_toggle();
+		ok("P puts the box away",            palette_visible() == false);
+		ok("and the grid goes with it",      palette_grid_area().w == 0.0f);
+		ok("and so does the list it opened", palette_list_visible() == false);
+
+		vng_tab_close(q);
+	}
+
+	/* ---- THE CAMERA: THE PIXEL YOU SEE IS THE PIXEL YOU HIT ----
+	 *
+	 * view_sheet_rect floors the sheet onto whole pixels, correctly. Nothing else knew: every
+	 * annotation about the sheet - the outline round the pixel under the pointer, the
+	 * selection's rectangle, the corner grips, the 1:1 marker - and the HIT TEST that decides
+	 * which pixel a press lands on all came off the unfloored transform.
+	 *
+	 * At 1:1 with an offset of -10.3 the sheet was drawn at x=10, so document pixel 0 covered
+	 * screen [10,11) while the transform reported it at 10.3, and thirty percent of the clicks
+	 * inside a drawn pixel resolved to its neighbour. These three are what the repair has to
+	 * keep true.
+	 */
+	{
+		VNG_TAB *c = vng_tab_new(64, 48);
+
+		vng_win_w = 320;
+		vng_win_h = 240;
+		view_reset(c);
+
+		/* ---- 1. every point of a drawn pixel hits that pixel ---- */
+		{
+			/* A pan of an odd number of screen pixels, which is what leaves an offset with a
+			 * fraction in it - and after a pan is the only state this program is ever in. */
+			SDL_Event e;
+			SDL_zero(e);
+			e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+			e.button.button = SDL_BUTTON_MIDDLE;
+			e.button.x = 100.0f; e.button.y = 100.0f;
+			view_event(&e, c);
+
+			SDL_zero(e);
+			e.type = SDL_EVENT_MOUSE_MOTION;
+			e.motion.x = 137.0f; e.motion.y = 111.0f;
+			view_event(&e, c);
+
+			SDL_zero(e);
+			e.type = SDL_EVENT_MOUSE_BUTTON_UP;
+			e.button.button = SDL_BUTTON_MIDDLE;
+			view_event(&e, c);
+		}
+
+		SDL_FRect sheet = view_sheet_rect(c);
+
+		ok("the sheet lands on whole pixels",
+		   sheet.x == SDL_floorf(sheet.x) && sheet.y == SDL_floorf(sheet.y));
+
+		/* The transform must put document 0,0 exactly where the sheet was drawn. When it did
+		 * not, everything measured from it was off by the fraction the floor threw away. */
+		SDL_FPoint o = view_world_to_screen(c, 0.0f, 0.0f);
+		ok("and the transform agrees with where it landed",
+		   o.x == sheet.x && o.y == sheet.y);
+
+		{
+			/* Walk across four document pixels at 1:1, a hundred samples each, the way
+			 * tool.c's pixel_of does it. Every sample inside a drawn cell must resolve to
+			 * that cell. */
+			int wrong = 0, total = 0;
+
+			for (int px = 0; px < 4; px++) {
+				for (int i = 0; i < 100; i++) {
+					float sx = sheet.x + (float)px * c->zoom
+					         + (float)i / 100.0f * c->zoom;
+					SDL_FPoint w = view_screen_to_world(c, sx, sheet.y + 0.5f);
+					total++;
+					if ((int)SDL_floorf(w.x) != px) wrong++;
+				}
+			}
+			ok("THE PIXEL YOU SEE IS THE PIXEL YOU HIT", wrong == 0);
+			if (wrong) SDL_Log("  %d of %d samples landed on another pixel", wrong, total);
+		}
+
+		/* ---- 2. the zoom happens at the cursor, and does not drift ---- */
+		{
+			/*
+			 * The claim recorded in CLAUDE.md, re-checked because the transform pair the
+			 * outside world sees is now snapped onto whole pixels. What must stay true is the
+			 * promise itself: whatever is under the cursor when a notch arrives is under the
+			 * cursor after it.
+			 *
+			 * Checked PER NOTCH and not against one point held from the start, because that
+			 * is what the algorithm actually promises - and because the other thing is what a
+			 * discarded first attempt got wrong. Snapping off_x itself put the origin on
+			 * whole pixels and rounded the camera's own state; half a screen pixel at 4x is
+			 * an eighth of a document pixel, and zooming on to 64x magnified it into eight.
+			 * The offset stays exact now, and the floor lives only where the world becomes
+			 * screen coordinates.
+			 */
+			const float AT_X = 210.0f, AT_Y = 90.0f;
+
+			/* Low on the ladder, so twelve notches up and twelve back down both fit on it:
+			 * there are sixteen steps, and from 4x the way up runs out at the twelfth. */
+			c->zoom = 0.125f;
+
+			float ox0 = c->off_x, oy0 = c->off_y;
+			float worst = 0.0f, worst2 = 0.0f;
+
+			for (int i = 0; i < 24; i++) {
+				SDL_FPoint was = view_screen_to_world(c, AT_X, AT_Y);
+
+				SDL_Event e;
+				SDL_zero(e);
+				e.type = SDL_EVENT_MOUSE_WHEEL;
+				e.wheel.integer_y = (i < 12) ? 1 : -1;
+				e.wheel.mouse_x = AT_X;
+				e.wheel.mouse_y = AT_Y;
+				view_event(&e, c);
+
+				SDL_FPoint now = view_world_to_screen(c, was.x, was.y);
+				float dx = SDL_fabsf(now.x - AT_X), dy = SDL_fabsf(now.y - AT_Y);
+				if (dx > worst) worst = dx;
+				if (dy > worst) worst = dy;
+			}
+
+			/* Under a pixel is the whole of it: the snap onto whole pixels can move what is
+			 * under the cursor by the fraction it throws away, and no more. A drift would
+			 * GROW across twenty-four notches instead of staying inside one pixel. */
+			/* ONE SCREEN PIXEL is the whole of it, and it is exactly the floor's fraction:
+			 * snapping the origin onto a whole pixel can move what is under the cursor by the
+			 * part it throws away, and by no more. */
+			ok("THE ZOOM STAYS AT THE CURSOR, TWELVE STEPS EACH WAY", worst <= 1.0f);
+			if (worst > 1.0f) SDL_Log("  drifted %.3f px", worst);
+
+			ok("and twelve up then twelve down is the zoom it started on", c->zoom == 0.125f);
+
+			/*
+			 * AND THE BOUND DOES NOT GROW, which is the difference between a fraction and a
+			 * DRIFT. Another twenty-four notches over the same ground: if the floor were
+			 * feeding back into the camera's state - which is what quantising off_x did, and
+			 * why that attempt was thrown away - this second pass would be worse than the
+			 * first, and the offset would not come home.
+			 */
+			for (int i = 0; i < 24; i++) {
+				SDL_FPoint was = view_screen_to_world(c, AT_X, AT_Y);
+
+				SDL_Event e;
+				SDL_zero(e);
+				e.type = SDL_EVENT_MOUSE_WHEEL;
+				e.wheel.integer_y = (i < 12) ? 1 : -1;
+				e.wheel.mouse_x = AT_X;
+				e.wheel.mouse_y = AT_Y;
+				view_event(&e, c);
+
+				SDL_FPoint now = view_world_to_screen(c, was.x, was.y);
+				float dx = SDL_fabsf(now.x - AT_X), dy = SDL_fabsf(now.y - AT_Y);
+				if (dx > worst2) worst2 = dx;
+				if (dy > worst2) worst2 = dy;
+			}
+
+			ok("AND IT IS A FRACTION, NOT A DRIFT - it does not grow", worst2 <= worst);
+			if (worst2 > worst) SDL_Log("  first pass %.3f, second %.3f", worst, worst2);
+
+			/* The offset itself comes home, which it cannot do if anything rounded it. */
+			ok("and the offset comes back to where it started",
+			   SDL_fabsf(c->off_x - ox0) * c->zoom <= 1.0f &&
+			   SDL_fabsf(c->off_y - oy0) * c->zoom <= 1.0f);
+		}
+
+		/* ---- 3. a pan gives back the point it took hold of ---- */
+		{
+			const float GRAB_X = 150.0f, GRAB_Y = 120.0f;
+			SDL_Event e;
+
+			SDL_zero(e);
+			e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+			e.button.button = SDL_BUTTON_MIDDLE;
+			e.button.x = GRAB_X; e.button.y = GRAB_Y;
+			ok("the middle button starts a pan", view_event(&e, c) == true);
+
+			SDL_FPoint held = view_screen_to_world(c, GRAB_X, GRAB_Y);
+			float worst = 0.0f;
+
+			/* Dragged in ones, because a pan that only works over long throws is a pan that
+			 * jitters: snap() moves the sheet in whole pixels, and the point held has to stay
+			 * within one of them the whole way. */
+			for (int i = 1; i <= 40; i++) {
+				SDL_zero(e);
+				e.type = SDL_EVENT_MOUSE_MOTION;
+				e.motion.x = GRAB_X + (float)i;
+				e.motion.y = GRAB_Y + (float)i * 0.5f;
+				view_event(&e, c);
+
+				SDL_FPoint here = view_world_to_screen(c, held.x, held.y);
+				float dx = SDL_fabsf(here.x - e.motion.x);
+				float dy = SDL_fabsf(here.y - e.motion.y);
+				if (dx > worst) worst = dx;
+				if (dy > worst) worst = dy;
+			}
+
+			SDL_zero(e);
+			e.type = SDL_EVENT_MOUSE_BUTTON_UP;
+			e.button.button = SDL_BUTTON_MIDDLE;
+			view_event(&e, c);
+
+			ok("THE PAN KEEPS THE POINT IT TOOK HOLD OF", worst <= 1.0f);
+			if (worst > 1.0f) SDL_Log("  slipped %.3f px", worst);
+
+			/* And it is still whole after all of that. */
+			SDL_FRect r = view_sheet_rect(c);
+			SDL_FPoint p = view_world_to_screen(c, 0.0f, 0.0f);
+			ok("the sheet is still on whole pixels afterwards",
+			   p.x == r.x && p.y == r.y && r.x == SDL_floorf(r.x));
+		}
+
+		vng_tab_close(c);
+	}
+
+	/* ---- THE DISC, READ BACK PIXEL BY PIXEL ----
+	 *
+	 * The two loaded colours in the palette box are discs, and so is the hole in the colour
+	 * wheel. SDL draws no circles, so this program rasterises its own - and the first version
+	 * drew THREE different ones per disc: a fill from sqrt() with float ends that SDL rounded
+	 * by its own rule, a rim from sixty-four straight chords off cos/sin, and a checkerboard
+	 * stepped between them. At radius 20 that rim is a ~126 pixel circumference cut into 2
+	 * pixel chords whose vertices land between pixels, so it read as a polygon that did not
+	 * sit on its own fill.
+	 *
+	 * None of that can be judged by looking at a build log, which is why it is measured here:
+	 * rendered to a texture and read straight back.
+	 */
+	{
+		const int   N = 64, CX = 32, CY = 32, RAD = 20;
+		/* All three 0xAARRGGBB, which is what vangopix_desk_disc takes for BOTH the fill and
+		 * the rim. It took 0xRRGGBBAA for the rim when this check was written, and a rim asked
+		 * for as blue came out red - so the signature was made one order and this stayed. */
+		const Uint32 BG = 0xFF00FF00u, FILL = 0xFFFF0000u, RIM = 0xFF0000FFu;
+
+		SDL_Texture *target = SDL_CreateTexture(vng_ren, SDL_PIXELFORMAT_ARGB8888,
+		                                        SDL_TEXTUREACCESS_TARGET, N, N);
+		SDL_Surface *shot = NULL;
+
+		if (target) {
+			SDL_SetRenderTarget(vng_ren, target);
+			SDL_SetRenderDrawBlendMode(vng_ren, SDL_BLENDMODE_NONE);
+			SDL_SetRenderDrawColor(vng_ren, 0x00, 0xFF, 0x00, 0xFF);
+			SDL_RenderClear(vng_ren);
+
+			vangopix_desk_disc((float)CX, (float)CY, (float)RAD, FILL, RIM);
+
+			SDL_Surface *raw = SDL_RenderReadPixels(vng_ren, NULL);
+			if (raw) {
+				shot = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
+				SDL_DestroySurface(raw);
+			}
+			SDL_SetRenderTarget(vng_ren, NULL);
+			SDL_SetRenderDrawBlendMode(vng_ren, SDL_BLENDMODE_BLEND);
+		}
+
+		ok("the disc can be read back", shot != NULL);
+
+		if (shot) {
+			const Uint32 *px = (const Uint32 *) shot->pixels;
+			const int pitch = shot->pitch / 4;
+
+			#define AT(x, y) (px[(y) * pitch + (x)])
+
+			int lo[64], hi[64];
+			for (int y = 0; y < N; y++) {
+				lo[y] = -1; hi[y] = -1;
+				for (int x = 0; x < N; x++)
+					if (AT(x, y) != BG) { if (lo[y] < 0) lo[y] = x; hi[y] = x; }
+			}
+
+			/* A CIRCLE CENTRED ON A PIXEL IS SYMMETRIC ABOUT IT. The float centre this used to
+			 * take was never rounded, so one side came out a pixel fatter than the other. */
+			bool sym_x = true, sym_y = true, solid = true, bounded = true;
+
+			for (int y = 0; y < N; y++) {
+				if (lo[y] < 0) continue;
+				if ((CX - lo[y]) != (hi[y] - CX)) sym_x = false;
+
+				/* Nothing of the background survives inside the span: no gap in the rim, and
+				 * no seam between the rim and the fill it is supposed to bound. */
+				for (int x = lo[y]; x <= hi[y]; x++)
+					if (AT(x, y) == BG) solid = false;
+
+				/* The first and last pixel of every row are RIM. An outline computed from
+				 * different maths than its fill misses this by up to a pixel all the way
+				 * round, which is exactly what it looked like. */
+				if (AT(lo[y], y) != RIM || AT(hi[y], y) != RIM) bounded = false;
+			}
+
+			for (int k = 1; k <= RAD; k++)
+				if (lo[CY - k] != lo[CY + k] || hi[CY - k] != hi[CY + k]) sym_y = false;
+
+			ok("the disc is symmetric left to right", sym_x);
+			ok("and top to bottom",                   sym_y);
+			ok("the rim leaves no gap in it",         solid);
+			ok("THE RIM SITS EXACTLY ON THE FILL",    bounded);
+
+			ok("it is as wide as it was asked to be",
+			   lo[CY] == CX - RAD && hi[CY] == CX + RAD);
+			ok("and the fill is inside the rim",      AT(CX, CY) == FILL);
+
+			/* Radius zero and a negative one are asked for by a window stretched small. */
+			#undef AT
+			SDL_DestroySurface(shot);
+		}
+		if (target) SDL_DestroyTexture(target);
+	}
+
+	/* ---- THE HEX READOUT IS THERE BEFORE ANYBODY CLICKS IT ----
+	 *
+	 * It was not. The field behind the box was built lazily in the press handler, so the box
+	 * that exists to answer "what colour is this" drew NOTHING until somebody clicked it -
+	 * which is asking it a different question entirely. Nothing in a build log says that, and
+	 * the window looks finished without it, so it is measured: the window is rendered to a
+	 * texture, freshly opened and never clicked, and the hex box is read back.
+	 */
+	{
+		const int N = 320;
+
+		/* THE SUITE RUNS WITHOUT A FONT - it never calls vangopix_init - and every owner in
+		 * this program begins `if (!vng_text) return;`. So nothing with a letter in it draws
+		 * here by default, and a check about a readout has to bring one. */
+		char       *fp    = vangopix_asset("font/DejaVuSansMono.ttf");
+		TextSystem *big   = fp ? text_init(vng_ren, fp, 16.0f) : NULL;
+		TextSystem *small = fp ? text_init(vng_ren, fp, 11.0f) : NULL;
+		SDL_free(fp);
+
+		vng_text       = big;
+		vng_text_small = small ? small : big;
+
+		if (colour_visible()) colour_toggle();
+		colour_toggle();                       /* up, and NOT clicked */
+		ok("the wheel is up for the readback", colour_visible() == true);
+
+		SDL_FRect c = win_area(win_top());
+
+		/* Put it somewhere known, so the readback does not depend on where the pointer was
+		 * when it was summoned - the same reason win_place and win_area exist for tests. The
+		 * window is larger than a small target, so the target is the window's own size. */
+		vng_win_w = N;
+		vng_win_h = N;
+		win_place(win_top(), (float)N * 0.5f, (float)N * 0.5f);
+		c = win_area(win_top());
+
+		SDL_Texture *target = SDL_CreateTexture(vng_ren, SDL_PIXELFORMAT_ARGB8888,
+		                                        SDL_TEXTUREACCESS_TARGET, N, N);
+		SDL_Surface *shot = NULL;
+
+		if (target) {
+			SDL_SetRenderTarget(vng_ren, target);
+			SDL_SetRenderDrawColor(vng_ren, 0x00, 0xFF, 0x00, 0xFF);
+			SDL_RenderClear(vng_ren);
+
+			win_draw();
+
+			SDL_Surface *raw = SDL_RenderReadPixels(vng_ren, NULL);
+			if (raw) {
+				shot = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
+				SDL_DestroySurface(raw);
+			}
+			SDL_SetRenderTarget(vng_ren, NULL);
+			SDL_DestroyTexture(target);
+		}
+
+		ok("the window can be read back", shot != NULL);
+
+		if (shot) {
+			const Uint32 *px = (const Uint32 *) shot->pixels;
+			const int pitch = shot->pitch / 4;
+
+			/* The strip the hex box sits in - the same point the typing checks click on. */
+			int x0 = (int)(c.x + 20.0f), x1 = (int)(c.x + 120.0f);
+			int y0 = (int)(c.y + c.h - 34.0f), y1 = (int)(c.y + c.h - 20.0f);
+
+			if (x0 < 0) x0 = 0;
+			if (y0 < 0) y0 = 0;
+			if (x1 > N) x1 = N;
+			if (y1 > N) y1 = N;
+
+			/* Distinct colours in that strip. A box that was never drawn leaves the window's
+			 * own flat background and nothing else; a box that WAS drawn has its fill, its
+			 * rim and eight digits of text in it. */
+			Uint32 seen[8];
+			int    kinds = 0;
+
+			for (int y = y0; y < y1 && kinds < 8; y++)
+				for (int x = x0; x < x1 && kinds < 8; x++) {
+					Uint32 v = px[y * pitch + x];
+					int    j = 0;
+					while (j < kinds && seen[j] != v) j++;
+					if (j == kinds) seen[kinds++] = v;
+				}
+
+			ok("THE HEX BOX IS DRAWN WITHOUT BEING CLICKED FIRST", kinds >= 3);
+			if (kinds < 3) SDL_Log("  only %d distinct colours where the box should be", kinds);
+
+			SDL_DestroySurface(shot);
+		}
+
+		colour_toggle();
+		ok("and it goes away again", colour_visible() == false);
+
+		vng_text       = NULL;
+		vng_text_small = NULL;
+		if (small && small != big) text_free(small);
+		text_free(big);
+	}
+
+	/* ---- CTRL + DOUBLE CLICK OPENS THE WHEEL ON WHAT WAS JUST PICKED ----
+	 *
+	 * The first Vangopix's gesture, inside the same CTRL block as the pick itself
+	 * (tool_misc.c:44). The shortest path from "that shade, but lighter" to the wheel:
+	 * absorb it and open the thing that changes it, without the hand leaving the pixel.
+	 */
+	{
+		/* A colour on the sheet that nothing else in this file uses. */
+		t->pixels[0] = 0xFF3C7A1Eu;
+		t->tex_dirty = true;
+
+		if (colour_visible()) colour_toggle();
+		ok("the wheel starts down", colour_visible() == false);
+
+		SDL_SetModState(SDL_KMOD_LCTRL);
+		tool_set(T_PENCIL);
+
+		/* The tab has to be framed before anything can be aimed at it: a tab is born with
+		 * zoom 0, meaning "never framed", and view_sheet_rect settles that on the first draw
+		 * - which never happens headless. */
+		vng_win_w = 320;
+		vng_win_h = 240;
+		view_reset(t);
+
+		SDL_FPoint sp = view_world_to_screen(t, 0.5f, 0.5f);
+
+		SDL_Event e;
+		SDL_zero(e);
+		e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+		e.button.button = SDL_BUTTON_LEFT;
+		e.button.x = sp.x;
+		e.button.y = sp.y;
+
+		/* One click picks and does NOT open - or every eyedrop would raise a window. */
+		e.button.clicks = 1;
+		tool_event(&e, t);
+		ok("one click picks the colour", tool_colour(0) == 0xFF3C7A1Eu);
+		ok("and leaves the wheel alone", colour_visible() == false);
+
+		/* The second click of the pair. */
+		e.button.clicks = 2;
+		tool_event(&e, t);
+		ok("A DOUBLE CLICK OPENS THE WHEEL", colour_visible() == true);
+		ok("on the colour that was just picked", tool_colour(0) == 0xFF3C7A1Eu);
+
+		/* AND DOING IT AGAIN DOES NOT PUT IT AWAY. colour_toggle would have; a gesture that
+		 * means "edit this" must not close the editor because it was already open. */
+		tool_event(&e, t);
+		ok("AND AGAIN DOES NOT CLOSE IT", colour_visible() == true);
+
+		SDL_zero(e);
+		e.type = SDL_EVENT_MOUSE_BUTTON_UP;
+		e.button.button = SDL_BUTTON_LEFT;
+		e.button.x = sp.x;
+		e.button.y = sp.y;
+		tool_event(&e, t);
+
+		/* The right button picks slot 2 and opens nothing - the original's choice, and the
+		 * window would otherwise show slot 1 while being about to write slot 0. */
+		colour_toggle();
+		ok("the wheel is down again", colour_visible() == false);
+
+		SDL_zero(e);
+		e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+		e.button.button = SDL_BUTTON_RIGHT;
+		e.button.clicks = 2;
+		e.button.x = sp.x;
+		e.button.y = sp.y;
+		tool_event(&e, t);
+
+		ok("the right button picks colour 2", tool_colour(1) == 0xFF3C7A1Eu);
+		ok("and opens nothing",              colour_visible() == false);
+
+		SDL_zero(e);
+		e.type = SDL_EVENT_MOUSE_BUTTON_UP;
+		e.button.button = SDL_BUTTON_RIGHT;
+		e.button.x = sp.x;
+		e.button.y = sp.y;
+		tool_event(&e, t);
+
+		SDL_SetModState(SDL_KMOD_NONE);
+	}
+
+	/* ---- SPRITE ANIMATION: the playhead and the parser ----
+	 *
+	 * A clip is a rectangle on the sheet plus a count, not a buffer - so nothing here touches a
+	 * document. What is checked is the two things gui_animation.c got wrong, because neither is
+	 * visible in a build log and both are wrong on every single loop.
+	 */
+	{
+		/* ---- the playhead ----
+		 *
+		 * The original: `fps += anime_box.speed` once per RENDERED FRAME, then
+		 * `fps = fps > (frames - (int)speed) ? 0 : fps`. Two mistakes in three lines - the
+		 * unit, and a bound that lets the index reach the frame count itself.
+		 */
+		{
+			bool seen[4] = { false, false, false, false };
+			bool past    = false;
+			bool ordered = true;
+
+			/* A whole loop of a four-frame clip at a tenth of a second, sampled finely. */
+			for (int i = 0; i <= 400; i++) {
+				float t = (float)i * 0.001f;
+				int   f = anim_frame_at(t, 4, 0.1f);
+
+				if (f < 0 || f > 3) past = true;
+				else                seen[f] = true;
+
+				/* and it walks 0,1,2,3 in order rather than jumping */
+				if (t < 0.4f && f != (int)(t / 0.1f)) ordered = false;
+			}
+
+			ok("THE PLAYHEAD NEVER LEAVES THE CLIP", past == false);
+			ok("and it shows every frame of it",
+			   seen[0] && seen[1] && seen[2] && seen[3]);
+			ok("in order", ordered);
+
+			/* The original's exact failure: at the end of a four-frame loop it indexed 4. */
+			ok("the last instant of the loop is frame 3",
+			   anim_frame_at(0.399f, 4, 0.1f) == 3);
+			ok("and the next one wraps to 0",
+			   anim_frame_at(0.400f, 4, 0.1f) == 0);
+
+			/* SECONDS, NOT RENDERED FRAMES. The same elapsed time is the same frame however
+			 * finely it was fed in - which is the whole difference from `fps += speed`. */
+			ok("HALF A SECOND IS THE SAME FRAME WHATEVER THE STEP",
+			   anim_frame_at(0.55f, 4, 0.1f) == anim_frame_at(0.55f, 4, 0.1f) &&
+			   anim_frame_at(0.55f, 4, 0.1f) == 1);
+
+			/* A .anime is a text file a person can edit, so it can say nonsense. */
+			ok("a speed of zero is not a division", anim_frame_at(1.0f, 4, 0.0f) == 0);
+			ok("and no frames is not a modulo by zero", anim_frame_at(1.0f, 0, 0.1f) == 0);
+		}
+
+		/* ---- the parser ----
+		 *
+		 * The original had no bound anywhere: sscanf("\"%[^\"]\"") with no width into a
+		 * 32-byte name, no limit on the line count against a 256-entry array, and sscanf's
+		 * return ignored so a malformed line left garbage and still counted.
+		 */
+		{
+			char *path = vangopix_asset("checks_tmp.anime");
+			ok("a temp path can be built", path != NULL);
+
+			if (path) {
+				SDL_IOStream *io = SDL_IOFromFile(path, "w");
+				if (io) {
+					const char *good  = "\"Run\"[0.040000,4,0,0,32,40]\n";
+					const char *good2 = "\"Walk\"[0.100000,6,0,40,32,40]\n";
+
+					SDL_WriteIO(io, good,  SDL_strlen(good));
+					SDL_WriteIO(io, good2, SDL_strlen(good2));
+
+					/* A NAME LONGER THAN THE FIELD. Unbounded, this ran off the end of the
+					 * name and into speed, frames, x, y, w, h and the next entries. */
+					const char *fat =
+					    "\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\""
+					    "[0.1,2,0,0,8,8]\n";
+					SDL_WriteIO(io, fat, SDL_strlen(fat));
+
+					/* Lines that are not clips. The original counted every one of them. */
+					const char *junk[] = {
+						"this is not a clip at all\n",
+						"\"Half\"[0.1,2]\n",
+						"\"Zero\"[0.1,0,0,0,32,32]\n",     /* no frames */
+						"\"Flat\"[0.1,4,0,0,0,32]\n",      /* no width  */
+						"\"Still\"[0,4,0,0,32,32]\n",      /* no speed  */
+						"\n",
+					};
+					for (int i = 0; i < 6; i++)
+						SDL_WriteIO(io, junk[i], SDL_strlen(junk[i]));
+
+					SDL_CloseIO(io);
+
+					int n = anim_load(path);
+
+					ok("the good lines come in", n >= 2);
+					ok("and the two names are right",
+					   SDL_strcmp(anim_name(0), "Run")  == 0 &&
+					   SDL_strcmp(anim_name(1), "Walk") == 0);
+
+					/*
+					 * A NAME LONGER THAN THE FIELD IS REFUSED, not truncated and above all
+					 * not spilled. The width in the scanf stops it at 31 characters, and the
+					 * closing quote then does not match, so the line is not a clip. Unbounded
+					 * - which is what the original was - it ran through the name into speed,
+					 * frames, x, y, w, h and on into the next entries.
+					 */
+					ok("A LONG NAME IS REFUSED RATHER THAN SPILLED", n == 2);
+					if (n != 2) SDL_Log("  got %d clips", n);
+
+					ok("and every name that did come in is inside its field",
+					   SDL_strlen(anim_name(0)) < VNG_ANIM_NAME &&
+					   SDL_strlen(anim_name(1)) < VNG_ANIM_NAME);
+
+					ok("reading out of range is empty, not off the end",
+					   anim_name(-1)[0] == 0 && anim_name(9999)[0] == 0);
+
+					/* A FILE LONGER THAN THE ARRAY. The original's parse loop had no bound
+					 * against it at all. */
+					io = SDL_IOFromFile(path, "w");
+					if (io) {
+						for (int i = 0; i < VNG_ANIM_MAX * 4; i++) {
+							char line[64];
+							int  k = SDL_snprintf(line, sizeof line,
+							                      "\"c%d\"[0.1,2,0,0,8,8]\n", i);
+							SDL_WriteIO(io, line, (size_t)k);
+						}
+						SDL_CloseIO(io);
+
+						int m = anim_load(path);
+						ok("A FILE LONGER THAN THE LIST STOPS AT THE CAP",
+						   m == VNG_ANIM_MAX);
+						if (m != VNG_ANIM_MAX) SDL_Log("  got %d", m);
+					}
+
+					SDL_RemovePath(path);
+				}
+
+				/*
+				 * A path that is not there was two fclose(NULL) crashes in the original.
+				 * Here it costs nothing at all: the list in hand is left alone, because
+				 * losing the clips because a path was mistyped is the worse answer.
+				 */
+				int held = anim_lot();
+				ok("a missing file is no clips and no crash",
+				   anim_load("no_such_directory/no_such.anime") == 0);
+				ok("AND IT DOES NOT COST THE CLIPS ALREADY IN HAND", anim_lot() == held);
+
+				SDL_free(path);
+			}
+		}
+
+		/* ---- the window ---- */
+		anim_toggle();
+		ok("X puts the animation window up", anim_visible() == true);
+		win_draw();          /* walks the preview, the list and the icon strip */
+		anim_draw(t);        /* and the clip grid on the sheet */
+		anim_tick();
+		anim_toggle();
+		ok("and X puts it away", anim_visible() == false);
+	}
+
+	/* ---- THE ZOOM AS IT IS READ ----
+	 *
+	 * Shown in two places - the corner readout and the F1 overlay - so it lives in one named
+	 * place, for the same reason tool_hex does. Pinned here because a format is exactly the
+	 * kind of thing that goes quietly wrong: the trailing zeros are trimmed by hand.
+	 */
+	{
+		char z[16];
+		#define ZT(v) (vangopix_zoom_text((v), z, sizeof z), z)
+
+		/* Every step at or above 1:1 is an integer BY DESIGN - that is what the ladder is for
+		 * - so every one of them has to come out clean. */
+		ok("1:1 reads as 1x",   SDL_strcmp(ZT(1.0f),  "1x")  == 0);
+		ok("and 8 as 8x",       SDL_strcmp(ZT(8.0f),  "8x")  == 0);
+		ok("and 64 as 64x",     SDL_strcmp(ZT(64.0f), "64x") == 0);
+
+		/* Below it the ladder is halves, and it says so rather than rounding them away. */
+		ok("a half is 0.5x",         SDL_strcmp(ZT(0.5f),    "0.5x")    == 0);
+		ok("an eighth is 0.125x",    SDL_strcmp(ZT(0.125f),  "0.125x")  == 0);
+		ok("the bottom step is 0.0625x", SDL_strcmp(ZT(0.0625f), "0.0625x") == 0);
+
+		/* And view_reset lands BETWEEN steps, because the fit of an odd-sized image is
+		 * whatever it is - so an off-ladder value has to be sayable too. */
+		ok("an off-ladder fit is sayable", SDL_strcmp(ZT(4.25f), "4.25x") == 0);
+		ok("and does not keep its trailing zeros",
+		   SDL_strcmp(ZT(2.5f), "2.5x") == 0);
+
+		#undef ZT
+	}
+
+	/* ---- THE SMALL FACE FITS THE BUTTON IT EXISTS FOR ----
+	 *
+	 * The palette's COLOR button is the first Vangopix's rectangle, 36 x 13, and that number
+	 * comes from a 6x6 BITMAP font where five characters came to thirty pixels. The main face
+	 * here is sixteen point with a nineteen pixel line, which does not go in a thirteen pixel
+	 * box - so there is a second atlas packed smaller, and the only thing that makes the size
+	 * chosen for it right is that the label fits.
+	 *
+	 * Checked because it is silent when it breaks: a label a pixel too tall is clipped by
+	 * win.c and simply looks wrong, and nothing in a build log would say so.
+	 */
+	{
+		char *path = vangopix_asset("font/DejaVuSansMono.ttf");
+		TextSystem *small = path ? text_init(vng_ren, path, 11.0f) : NULL;
+		SDL_free(path);
+
+		if (!small) {
+			SDL_Log("SKIP the small face - no font beside the executable");
+		} else {
+			float tw, th;
+			text_measure(small, "COLOR", &tw, &th);
+
+			ok("COLOR FITS THE 36x13 BUTTON", tw <= 36.0f && th <= 13.0f);
+			if (tw > 36.0f || th > 13.0f)
+				SDL_Log("  measured %.1f x %.1f", tw, th);
+
+			/* And it is meaningfully smaller than the face beside it, or the second atlas is
+			 * a texture bought for nothing. */
+			TextSystem *big = text_init(vng_ren, (path = vangopix_asset("font/DejaVuSansMono.ttf")),
+			                            16.0f);
+			SDL_free(path);
+			if (big) {
+				float bw, bh;
+				text_measure(big, "COLOR", &bw, &bh);
+				ok("and it really is the smaller of the two", tw < bw && th < bh);
+				ok("which the main face is not - it would be clipped", bh > 13.0f);
+				text_free(big);
+			}
+			text_free(small);
+		}
+	}
+
+	/* ---- THE SHAPES ARE THE SAME SHAPES ON ANY BACKEND ----
+	 *
+	 * SDL3 picks a renderer per platform - direct3d11 first on Windows, opengl on Linux, metal
+	 * on macOS - and on every one of those it draws through a vertex and a fragment shader.
+	 * Nothing here is "just blitted": a filled rectangle is two textured triangles.
+	 *
+	 * That is fine, and it is worth PROVING rather than assuming, because it is also the
+	 * cross-platform promise: this program is meant to build on three systems and look the
+	 * same on all of them. An interface made of hairlines is exactly where a backend's
+	 * rasterisation rules would show through if they were going to.
+	 *
+	 * The same drawing is rendered twice - once on whatever SDL chose, once on the software
+	 * rasteriser - and compared pixel for pixel. It is also the answer to a question worth
+	 * recording: the badly resolved circles were NOT the GPU. They were three different
+	 * circles computed by three different roundings, which is what primitives.c is for.
+	 */
+	{
+		const int N = 64;
+		Uint32 *a = (Uint32 *) SDL_malloc((size_t)N * N * 4);
+		Uint32 *b = (Uint32 *) SDL_malloc((size_t)N * N * 4);
+
+		SDL_Renderer *keep = vng_ren;
+		SDL_Window   *alt  = NULL;
+		SDL_Renderer *soft = NULL;
+
+		if (a && b) {
+			/* Everything primitives.c offers, including the one case it hands to SDL - a
+			 * diagonal, which has no exact answer and is where a backend could differ. */
+			#define DRAW_ALL()                                                        \
+				do {                                                                  \
+					SDL_SetRenderDrawColor(vng_ren, 0, 0, 0, 0xFF);                   \
+					SDL_RenderClear(vng_ren);                                         \
+					prim_disc  (32.0f, 32.0f, 20.0f, 0xFF404040u);                    \
+					prim_circle(32.0f, 32.0f, 20.0f, 0xFFFFFFFFu);                    \
+					prim_line  (6.0f, 6.0f, 58.0f, 26.0f, 0xFF00FF00u);               \
+					prim_line  (4.0f, 60.0f, 60.0f, 60.0f, 0xFF00FFFFu);              \
+					prim_box   (r_box, 0xFFFFFFFFu, 0xFF000000u);                     \
+					prim_fill  (r_frac, 0xFFFF0000u);                                 \
+				} while (0)
+
+			SDL_FRect r_box  = { 40.0f, 40.0f, 12.0f, 9.0f };
+			SDL_FRect r_frac = { 10.3f, 52.3f, 20.0f, 4.0f };
+
+			/* 1. on whatever SDL chose for this machine */
+			SDL_Texture *t = SDL_CreateTexture(vng_ren, SDL_PIXELFORMAT_ARGB8888,
+			                                   SDL_TEXTUREACCESS_TARGET, N, N);
+			if (t) {
+				SDL_SetRenderTarget(vng_ren, t);
+				DRAW_ALL();
+				SDL_Surface *raw = SDL_RenderReadPixels(vng_ren, NULL);
+				SDL_Surface *cv  = raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888)
+				                       : NULL;
+				if (cv)
+					for (int y = 0; y < N; y++)
+						SDL_memcpy(&a[y * N], (Uint8 *)cv->pixels + (size_t)y * cv->pitch,
+						           (size_t)N * 4);
+				if (cv)  SDL_DestroySurface(cv);
+				if (raw) SDL_DestroySurface(raw);
+				SDL_SetRenderTarget(vng_ren, NULL);
+				SDL_DestroyTexture(t);
+			}
+
+			/* 2. on the software rasteriser, which shares no code with any of them */
+			alt = SDL_CreateWindow("soft", N, N, SDL_WINDOW_HIDDEN);
+			if (alt) soft = SDL_CreateRenderer(alt, "software");
+
+			if (soft) {
+				vng_ren = soft;
+				SDL_Texture *t2 = SDL_CreateTexture(soft, SDL_PIXELFORMAT_ARGB8888,
+				                                    SDL_TEXTUREACCESS_TARGET, N, N);
+				if (t2) {
+					SDL_SetRenderTarget(soft, t2);
+					DRAW_ALL();
+					SDL_Surface *raw = SDL_RenderReadPixels(soft, NULL);
+					SDL_Surface *cv  = raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888)
+					                       : NULL;
+					if (cv)
+						for (int y = 0; y < N; y++)
+							SDL_memcpy(&b[y * N], (Uint8 *)cv->pixels + (size_t)y * cv->pitch,
+							           (size_t)N * 4);
+					if (cv)  SDL_DestroySurface(cv);
+					if (raw) SDL_DestroySurface(raw);
+					SDL_SetRenderTarget(soft, NULL);
+					SDL_DestroyTexture(t2);
+				}
+				vng_ren = keep;
+			}
+			#undef DRAW_ALL
+		}
+
+		if (a && b && soft) {
+			int diff = 0, first = -1;
+			for (int i = 0; i < N * N; i++)
+				if (a[i] != b[i]) { if (first < 0) first = i; diff++; }
+
+			SDL_Log("     (%s vs software)", SDL_GetRendererName(keep));
+			ok("THE SHAPES ARE THE SAME ON ANY BACKEND", diff == 0);
+			if (diff)
+				SDL_Log("  %d pixels differ, first at (%d,%d): %08X vs %08X",
+				        diff, first % N, first / N, a[first], b[first]);
+		} else {
+			SDL_Log("SKIP the backend comparison - no software renderer here");
+		}
+
+		if (soft) SDL_DestroyRenderer(soft);
+		if (alt)  SDL_DestroyWindow(alt);
+		SDL_free(a);
+		SDL_free(b);
 	}
 
 	/* ---- what a save dialog's answer means ----

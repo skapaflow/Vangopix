@@ -2,9 +2,11 @@
 #include "view.h"
 #include "keys.h"
 #include "glyph.h"
+#include "primitives.h"
 #include "tabbar.h"
 #include "sidebar.h"
 #include "select.h"
+#include "colour.h"
 
 /*
  * The two colours a fresh program starts with. 0xAARRGGBB, matching the ARGB8888 the
@@ -50,9 +52,11 @@
  * anything on screen. */
 #define TIP_MAX  256
 
-static SDL_Cursor *cur_cross = NULL;
-static SDL_Cursor *cur_arrow = NULL;
-static SDL_Cursor *cur_now   = NULL;   /* what is on screen, so the OS is not asked twice */
+/* One per shape, built once. See tool_cursor in tool.h for why they live here and why the
+   first Vangopix's gui_cursor_set leaked one of these per frame. */
+static SDL_Cursor *cur[VNG_CUR_LOT] = { 0 };
+static SDL_Cursor *cur_now = NULL;     /* what is on screen, so the OS is not asked twice */
+static VNG_CURSOR  cur_want = VNG_CUR_ARROW;
 
 /* The two loaded colours SURVIVE a stroke - they are the tool's, not the drag's. `laying` is
  * what the current drag puts down, copied at the press so that picking mid-stroke could
@@ -146,10 +150,13 @@ void tool_hex (Uint32 argb, char *dst, size_t cap)
 
 bool tool_init (void)
 {
-	cur_cross = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_CROSSHAIR);
-	cur_arrow = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
+	cur[VNG_CUR_ARROW] = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
+	cur[VNG_CUR_CROSS] = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_CROSSHAIR);
+	cur[VNG_CUR_WE]    = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_EW_RESIZE);
+	cur[VNG_CUR_NS]    = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NS_RESIZE);
+	cur[VNG_CUR_NWSE]  = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NWSE_RESIZE);
 
-	if (!cur_cross || !cur_arrow) {
+	if (!cur[VNG_CUR_ARROW] || !cur[VNG_CUR_CROSS]) {
 		SDL_Log("cursors: %s", SDL_GetError());
 		return false;
 	}
@@ -158,12 +165,15 @@ bool tool_init (void)
 
 void tool_free (void)
 {
-	/* The system is put back on its own cursor before either of ours is destroyed. */
-	if (cur_arrow) SDL_SetCursor(cur_arrow);
+	/* The system is put back on its own cursor before any of ours is destroyed. */
+	SDL_SetCursor(SDL_GetDefaultCursor());
 
-	if (cur_cross) SDL_DestroyCursor(cur_cross);
-	if (cur_arrow) SDL_DestroyCursor(cur_arrow);
-	cur_cross = cur_arrow = cur_now = NULL;
+	for (int i = 0; i < VNG_CUR_LOT; i++) {
+		if (cur[i]) SDL_DestroyCursor(cur[i]);
+		cur[i] = NULL;
+	}
+	cur_now  = NULL;
+	cur_want = VNG_CUR_ARROW;
 }
 
 /*
@@ -709,6 +719,27 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 			picking   = true;
 			button    = e->button.button;
 			tool_pick(t, x, y, pick_slot);
+
+			/*
+			 * AND A DOUBLE CLICK OPENS THE COLOUR WINDOW ON WHAT WAS JUST PICKED - the first
+			 * Vangopix's own gesture, in its tool_misc.c, right here inside the same CTRL
+			 * block. It is the shortest path there is from "that shade, but lighter" to the
+			 * wheel: absorb it and open the thing that changes it, in one gesture, without
+			 * the hand leaving the pixel.
+			 *
+			 * The pick has already run, so the window opens showing the colour - it follows
+			 * the slot rather than being told, which is what makes this need no argument.
+			 *
+			 * LEFT ONLY, which is the original's choice and the right one: the window edits
+			 * whichever slot its own next press names, and opening it off a right-button pick
+			 * would show slot 1's colour in a window about to write slot 0.
+			 *
+			 * colour_open and not colour_toggle - a gesture that means "edit this" must not
+			 * put the editor away because it happened to be open already.
+			 */
+			if (e->button.button == SDL_BUTTON_LEFT && e->button.clicks == 2)
+				colour_open();
+
 			return true;
 		}
 
@@ -891,11 +922,23 @@ void tool_frame (VNG_TAB *t)
 
 /* ------------------------------------------------------------------------ the pixels */
 
-static void set_cursor (SDL_Cursor *want)
+void tool_cursor (VNG_CURSOR c)
 {
-	if (!want || want == cur_now) return;
-	SDL_SetCursor(want);
-	cur_now = want;
+	if (c >= 0 && c < VNG_CUR_LOT) cur_want = c;
+}
+
+void tool_cursor_apply (void)
+{
+	SDL_Cursor *c = cur[cur_want];
+
+	if (c && c != cur_now) {
+		SDL_SetCursor(c);
+		cur_now = c;
+	}
+
+	/* Forgotten on the way out, so a panel that stops asking stops being answered - which is
+	 * what makes "nobody asked means the arrow" true without a list of who might have. */
+	cur_want = VNG_CUR_ARROW;
 }
 
 /* White just inside, black one further out. Two rects because one is not enough: the sheet
@@ -905,34 +948,21 @@ static void set_cursor (SDL_Cursor *want)
  * colour it is asking about. */
 static void box (SDL_FRect in)
 {
-	SDL_FRect out = { in.x - 1.0f, in.y - 1.0f, in.w + 2.0f, in.h + 2.0f };
-
-	SDL_SetRenderDrawColor(vng_ren, 0x00, 0x00, 0x00, 0xC0);
-	SDL_RenderRect(vng_ren, &out);
-	SDL_SetRenderDrawColor(vng_ren, 0xFF, 0xFF, 0xFF, 0xE0);
-	SDL_RenderRect(vng_ren, &in);
+	prim_box(in, 0xE0FFFFFFu, 0xC0000000u);
 }
 
-/* A circle in SCREEN space, for the change-colours limiter. Screen space and not document
- * space on purpose: it is an annotation about the tool, not something being drawn, so it
- * stays a smooth ring at any zoom instead of turning into a staircase. */
+/* A circle in SCREEN space, for the spray's scatter and the change-colours limiter. Screen
+ * space and not document space on purpose: it is an annotation ABOUT the tool, not something
+ * being drawn, so it stays the same ring at any zoom.
+ *
+ * Two of them, offset by a pixel, for the reason prim_box exists: one tone always disappears
+ * against something. It used to be FORTY-EIGHT straight chords off cos/sin, which at the
+ * spray's size is a circumference of several hundred pixels cut into eight pixel chords - a
+ * visible polygon. prim_circle is the shape itself. */
 static void ring (float cx, float cy, float r)
 {
-	enum { SEG = 48 };
-	SDL_FPoint p[SEG + 1];
-
-	for (int i = 0; i <= SEG; i++) {
-		float a = (float)i * (2.0f * SDL_PI_F / SEG);
-		p[i].x = cx + SDL_cosf(a) * r + 1.0f;
-		p[i].y = cy + SDL_sinf(a) * r + 1.0f;
-	}
-
-	SDL_SetRenderDrawColor(vng_ren, 0x00, 0x00, 0x00, 0xC0);
-	SDL_RenderLines(vng_ren, p, SEG + 1);
-
-	for (int i = 0; i <= SEG; i++) { p[i].x -= 1.0f; p[i].y -= 1.0f; }
-	SDL_SetRenderDrawColor(vng_ren, 0xFF, 0xFF, 0xFF, 0xE0);
-	SDL_RenderLines(vng_ren, p, SEG + 1);
+	prim_circle(cx + 1.0f, cy + 1.0f, r, 0xC0000000u);
+	prim_circle(cx,        cy,        r, 0xE0FFFFFFu);
 }
 
 /*
@@ -997,59 +1027,87 @@ static void outline (VNG_TAB *t, int px, int py)
 }
 
 /*
- * One bar: a colour with its value written inside it. Used for the readout that follows the
- * pointer and for the two loaded colours at the bottom, because they are the same question
- * asked about different colours.
+ * HOW THIS PROGRAM DRAWS A COLOUR SO IT CAN BE SEEN, and the four calls below are the whole
+ * of it. They are exported because the question they answer - "what colour is this, and is it
+ * transparent" - is asked by the two loaded slots at the bottom of the screen, by the readout
+ * that follows the pointer under CTRL, and now by every cell of the palette. Three answers
+ * that had to agree, and a fourth copy of the same eight lines is how they stop agreeing.
  */
-static void bar_draw (SDL_FRect bar, Uint32 argb)
-{
-	Uint8 a = (Uint8)((argb >> 24) & 0xFF);
-	Uint8 r = (Uint8)((argb >> 16) & 0xFF);
-	Uint8 g = (Uint8)((argb >>  8) & 0xFF);
-	Uint8 b = (Uint8)( argb        & 0xFF);
 
-	/* Two tones behind it, then the colour over them at its REAL alpha - the desk's own
-	 * trick. It is what makes "nothing" look like nothing instead of looking like black, and
-	 * a bar filled at alpha zero would simply not be there. */
-	SDL_FRect half = { bar.x, bar.y, bar.w * 0.5f, bar.h };
+/*
+ * The swatch itself: two tones behind it, then the colour over them at its REAL alpha - the
+ * desk's own trick. It is what makes "nothing" look like nothing instead of looking like
+ * black, and a rect filled at alpha zero would simply not be there.
+ *
+ * TWO HALVES AND NOT A CHECKERBOARD, because a swatch here is a RECTANGLE and a split down
+ * the middle of one reads as the convention it is. The round version is
+ * vangopix_desk_disc, and it uses the checkerboard for the reason recorded there.
+ */
+static void swatch (SDL_FRect r, Uint32 argb)
+{
+	SDL_FRect half = { r.x, r.y, r.w * 0.5f, r.h };
+
 	SDL_SetRenderDrawColor(vng_ren, 0x25, 0x25, 0x25, 0xFF);
-	SDL_RenderFillRect(vng_ren, &bar);
+	SDL_RenderFillRect(vng_ren, &r);
 	SDL_SetRenderDrawColor(vng_ren, 0x33, 0x33, 0x33, 0xFF);
 	SDL_RenderFillRect(vng_ren, &half);
 
-	SDL_SetRenderDrawColor(vng_ren, r, g, b, a);
-	SDL_RenderFillRect(vng_ren, &bar);
+	SDL_SetRenderDrawColor(vng_ren, (Uint8)((argb >> 16) & 0xFF), (Uint8)((argb >> 8) & 0xFF),
+	                                (Uint8)(argb & 0xFF), (Uint8)((argb >> 24) & 0xFF));
+	SDL_RenderFillRect(vng_ren, &r);
+}
+
+/*
+ * Whether WHITE is what reads on top of this colour - for the hex inside a bar, and for the
+ * ring around a chosen palette cell.
+ *
+ * BY LUMINANCE, NOT BY INVERTING. Inverting is the obvious trick and it fails exactly in the
+ * middle, where a great deal of pixel art lives: the inverse of 0x808080 is 0x7F7F7F, one
+ * step from the thing it is meant to stand out from. The first Vangopix inverted, and its
+ * I_RGBA_FF is why a mid-grey swatch had an invisible marker on it.
+ *
+ * Measured on the colour AS COMPOSITED over the tones behind it, so a transparent slot is
+ * judged against the grey actually there. Rec. 601 and not the average of the three channels,
+ * because an average calls saturated blue bright and saturated green dim.
+ */
+bool tool_light_on (Uint32 argb)
+{
+	int a = (int)((argb >> 24) & 0xFF);
+	int r = (int)((argb >> 16) & 0xFF);
+	int g = (int)((argb >>  8) & 0xFF);
+	int b = (int)( argb        & 0xFF);
+
+	int er = (r * a + 0x2C * (255 - a)) / 255;
+	int eg = (g * a + 0x2C * (255 - a)) / 255;
+	int eb = (b * a + 0x2C * (255 - a)) / 255;
+
+	return ((77 * er + 150 * eg + 29 * eb) >> 8) <= 140;
+}
+
+/*
+ * One bar: a colour with its value written inside it. Used for the readout that follows the
+ * pointer, for the two loaded colours at the bottom, and for the one under the palette
+ * summoned by ALT - because they are the same question asked about different colours.
+ */
+void tool_bar_draw (SDL_FRect bar, Uint32 argb)
+{
+	swatch(bar, argb);
 
 	SDL_SetRenderDrawColor(vng_ren, 0x00, 0x00, 0x00, 0xB0);
 	SDL_RenderRect(vng_ren, &bar);
 
 	if (!vng_text) return;
 
-	/*
-	 * Black or white BY LUMINANCE, not by inverting the colour. Inverting is the obvious
-	 * trick and it fails exactly in the middle, where a great deal of pixel art lives: the
-	 * inverse of 0x808080 is 0x7F7F7F, one step from the background it is meant to stand out
-	 * from.
-	 *
-	 * Measured on the colour AS COMPOSITED over the tones behind it, so a transparent slot is
-	 * judged against the grey actually there. Rec. 601 and not the average of the three
-	 * channels, because an average calls saturated blue bright and saturated green dim.
-	 */
-	int er = (r * a + 0x2C * (255 - a)) / 255;
-	int eg = (g * a + 0x2C * (255 - a)) / 255;
-	int eb = (b * a + 0x2C * (255 - a)) / 255;
-	int luma = (77 * er + 150 * eg + 29 * eb) >> 8;
-
 	char hex[16];
 	tool_hex(argb, hex, sizeof hex);
 
 	text_print(vng_text, bar.x + READ_PAD, bar.y + 1.0f,
-	           luma > 140 ? 0x000000FF : 0xFFFFFFFF, "%s", hex);
+	           tool_light_on(argb) ? 0xFFFFFFFF : 0x000000FF, "%s", hex);
 }
 
 /* What a bar has to be to hold eight hex digits. Measured rather than assumed, so it still
  * fits if the face is ever swapped again. */
-static void bar_size (float *w, float *h)
+void tool_bar_size (float *w, float *h)
 {
 	float tw = 64.0f, th = 15.0f;
 	if (vng_text) text_measure(vng_text, "88888888", &tw, &th);
@@ -1063,7 +1121,7 @@ static void bar_size (float *w, float *h)
 static void preview (Uint32 argb, float mx, float my)
 {
 	float bw, bh;
-	bar_size(&bw, &bh);
+	tool_bar_size(&bw, &bh);
 
 	SDL_FRect bar = { mx + READ_OFF_X, my + READ_OFF_Y, bw, bh };
 
@@ -1072,7 +1130,7 @@ static void preview (Uint32 argb, float mx, float my)
 	if (bar.x + bar.w > vng_win_w) bar.x = mx - READ_OFF_X - bar.w;
 	if (bar.y + bar.h > vng_win_h) bar.y = my - READ_OFF_Y - bar.h;
 
-	bar_draw(bar, argb);
+	tool_bar_draw(bar, argb);
 }
 
 /*
@@ -1089,14 +1147,14 @@ static void preview (Uint32 argb, float mx, float my)
 static void slots_draw (void)
 {
 	float bw, bh;
-	bar_size(&bw, &bh);
+	tool_bar_size(&bw, &bh);
 
 	float x = sidebar_edge() + SLOT_MARGIN;
 	float y = vng_win_h - bh - SLOT_MARGIN;
 
 	for (int i = 0; i < 2; i++) {
 		SDL_FRect bar = { x + i * (bw + SLOT_GAP), y, bw, bh };
-		bar_draw(bar, colour[i]);
+		tool_bar_draw(bar, colour[i]);
 	}
 }
 
@@ -1120,7 +1178,10 @@ void tool_draw (VNG_TAB *t)
 	bool eyedropper = !drawing && on && inside(t, x, y) &&
 	                  (keys_mods() & SDL_KMOD_CTRL);
 
-	set_cursor(on ? cur_cross : cur_arrow);
+	/* The shape that is always in play. Anything drawn after this - the palette's stretch
+	 * bands, so far - asks for its own on top of it, and the last ask before
+	 * tool_cursor_apply is the one that lands. */
+	tool_cursor(on ? VNG_CUR_CROSS : VNG_CUR_ARROW);
 
 	/* A tip bigger than one pixel is outlined at any zoom, because its SIZE is what has to be
 	 * visible before it is used. A single pixel needs the zoom to be worth outlining. */

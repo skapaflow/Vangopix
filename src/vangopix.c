@@ -2,6 +2,7 @@
 #include "tabs.h"
 #include "core.h"
 #include "project.h"
+#include "anim.h"
 #include "file.h"
 #include "tool.h"
 #include "select.h"
@@ -11,6 +12,7 @@
 SDL_Window   *vng_win   = NULL;
 SDL_Renderer *vng_ren   = NULL;
 TextSystem   *vng_text  = NULL;
+TextSystem   *vng_text_small = NULL;
 int           vng_win_w = VNG_WIN_W;
 int           vng_win_h = VNG_WIN_H;
 bool          vng_loop  = true;
@@ -42,6 +44,14 @@ static const char *const vng_fonts[] = {
 };
 #define VNG_FONT_SIZE 16.0f
 
+/*
+ * The small face. Eleven, because that is what makes "COLOR" fit the palette button, and that
+ * button is the first Vangopix's own rectangle: 36 x 13, sized around a 6x6 bitmap font where
+ * five characters came to thirty pixels. DejaVu Sans Mono advances about 0.6 of its size, so
+ * eleven gives roughly 6.6 a character - thirty-three across, and a line just inside thirteen.
+ */
+#define VNG_FONT_SMALL 11.0f
+
 char *vangopix_asset (const char *relative)
 {
 	const char *base = SDL_GetBasePath();   /* owned by SDL; must not be freed */
@@ -53,6 +63,21 @@ char *vangopix_asset (const char *relative)
 
 	SDL_snprintf(p, n, "%s%s", base, relative);
 	return p;
+}
+
+bool vangopix_read_line (SDL_IOStream *io, char *dst, size_t cap)
+{
+	size_t n = 0;
+	char   ch;
+
+	if (!io || !dst || cap == 0) return false;
+
+	while (SDL_ReadIO(io, &ch, 1) == 1) {
+		if (ch == '\n') { dst[n] = 0; return true; }
+		if (ch != '\r' && n + 1 < cap) dst[n++] = ch;
+	}
+	dst[n] = 0;
+	return n > 0;   /* a last line with no newline is still a line */
 }
 
 bool vangopix_init (int argc, char **argv)
@@ -88,6 +113,18 @@ bool vangopix_init (int argc, char **argv)
 	if (!vng_text)
 		SDL_Log("running without text: no font found beside the executable");
 
+	/* The same face again, packed smaller - see vng_text_small in vangopix.h for why this is
+	 * a second atlas rather than a scale factor. It is not reported when it fails either:
+	 * falling back to the main face costs a label that is bigger than it wanted to be, and
+	 * nothing else. */
+	for (size_t i = 0; i < SDL_arraysize(vng_fonts) && vng_text && !vng_text_small; i++) {
+		char *font = vangopix_asset(vng_fonts[i]);
+		if (!font) continue;
+		vng_text_small = text_init(vng_ren, font, VNG_FONT_SMALL);
+		SDL_free(font);
+	}
+	if (!vng_text_small) vng_text_small = vng_text;
+
 	tool_init();   /* not fatal either: without the cursors the pointer keeps whatever
 	                * shape the system gave it, and drawing works the same */
 
@@ -117,6 +154,12 @@ void vangopix_quit (void)
 	vng_tabs_free();
 	project_free();
 	vangopix_core_free();
+	/* Only once when the small face never loaded and is pointing at the main one. */
+	if (vng_text_small != vng_text) text_free(vng_text_small);
+	vng_text_small = NULL;
+
+	anim_free();
+
 	text_free(vng_text);
 	if (vng_ren) SDL_DestroyRenderer(vng_ren);
 	if (vng_win) SDL_DestroyWindow(vng_win);

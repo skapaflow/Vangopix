@@ -28,6 +28,22 @@
 extern SDL_Window   *vng_win;
 extern SDL_Renderer *vng_ren;
 extern TextSystem   *vng_text;
+
+/*
+ * A SECOND FACE, SMALLER, FOR A LABEL THAT HAS TO FIT SOMETHING.
+ *
+ * The first Vangopix had this and it cost it nothing: its font was a 6x6 BITMAP and the size
+ * was an integer multiplier, so vango_text_set(0, ...) drew the palette's COLOR button at 6
+ * pixels while vango_text_set(2, ...) drew the swatch count at 18. Here the face is TrueType
+ * packed into an atlas at one size, and scaling that atlas down is not the same thing: an 11
+ * pixel letter resampled from a 16 pixel one is mush, because the hinting that made it
+ * readable was baked in at the size it was rasterised.
+ *
+ * So it is a second atlas, packed at the smaller size, which is what the technique costs and
+ * what it is worth. It NEVER falls back to NULL: if the small face will not load it is the
+ * main one, so a call site needs no check the main face did not already need.
+ */
+extern TextSystem   *vng_text_small;
 extern int           vng_win_w, vng_win_h;
 extern bool          vng_loop;
 
@@ -48,5 +64,15 @@ extern void vangopix_quit (void);
 /* Builds a path to a file shipped beside the executable, whatever the platform and
    whatever directory the program was launched from. Free the result with SDL_free. */
 extern char *vangopix_asset (const char *relative);
+
+/*
+ * One line out of an SDL_IOStream, without the newline. False at the end of the file.
+ *
+ * SDL3 has no fgets, and this program reads two text files - the palette list and the
+ * animation clips - so it is here rather than twice. It is a dozen lines against a
+ * dependency, and the first Vangopix's version of it is a lesson: `while (*++b != 32);`
+ * scanning for a space with nothing to stop it at the end of the line.
+ */
+extern bool vangopix_read_line (SDL_IOStream *io, char *dst, size_t cap);
 
 #endif

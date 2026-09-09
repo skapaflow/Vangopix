@@ -17,6 +17,7 @@ struct _vng_win_ {
 	WIN_EVENT ev;
 	void     *ctx;
 	bool      shown;
+	bool      fixed;        /* no stretch corner - see win_fixed */
 
 	struct _vng_win_ *next; /* front of the list is the BACK of the z-order */
 };
@@ -67,8 +68,13 @@ static SDL_FRect close_rect (VNG_WIN *w)
 	return r;
 }
 
+/* An empty rectangle for a fixed window, which makes every hit test on it miss and the
+   drawing below skip it - one answer instead of a flag tested in four places. */
 static SDL_FRect grip_rect (VNG_WIN *w)
 {
+	SDL_FRect none = { 0.0f, 0.0f, 0.0f, 0.0f };
+	if (w->fixed) return none;
+
 	SDL_FRect o = outer(w);
 	SDL_FRect r = { o.x + o.w - GRIP, o.y + o.h - GRIP, GRIP, GRIP };
 	return r;
@@ -91,6 +97,21 @@ SDL_FRect win_area (VNG_WIN *w)
 {
 	SDL_FRect none = { 0.0f, 0.0f, 0.0f, 0.0f };
 	return w ? w->a : none;
+}
+
+SDL_FRect win_outer (VNG_WIN *w)
+{
+	SDL_FRect none = { 0.0f, 0.0f, 0.0f, 0.0f };
+	return w ? outer(w) : none;
+}
+
+void win_fixed (VNG_WIN *w, bool on)
+{
+	if (!w) return;
+	w->fixed = on;
+
+	/* Whatever is being stretched right now is no longer stretchable. */
+	if (on && held == w && stretching) { held = NULL; stretching = false; }
 }
 
 bool win_visible (VNG_WIN *w) { return w && w->shown; }
@@ -332,10 +353,15 @@ bool win_event (const SDL_Event *e)
 		return true;
 	}
 
-	case SDL_EVENT_MOUSE_WHEEL:
+	case SDL_EVENT_MOUSE_WHEEL: {
 		/* Claimed over a window so the camera behind it does not zoom while somebody is
-		 * pointing at something else. Windows that want the wheel will be given it here. */
-		return at(e->wheel.mouse_x, e->wheel.mouse_y) != NULL;
+		 * pointing at something else - and handed to the owner, which is what a list long
+		 * enough to scroll needs. The return does not depend on what the owner did with it:
+		 * it landed on a window either way, and the sheet underneath must not see it. */
+		VNG_WIN *w = at(e->wheel.mouse_x, e->wheel.mouse_y);
+		if (w && w->ev) w->ev(w->a, e, w->ctx);
+		return w != NULL;
+	}
 
 	default:
 		return false;
@@ -380,10 +406,12 @@ void win_draw (void)
 		/* The stretch corner: two short strokes, which is enough to say "pull here" without
 		 * being a thing on screen. */
 		SDL_FRect g = grip_rect(w);
-		SDL_SetRenderDrawColor(vng_ren, 0x60, 0x60, 0x60, 0xFF);
-		for (float i = 3.0f; i < GRIP; i += 4.0f)
-			SDL_RenderLine(vng_ren, g.x + g.w - i, g.y + g.h - 2.0f,
-			                        g.x + g.w - 2.0f, g.y + g.h - i);
+		if (g.w > 0.0f) {
+			SDL_SetRenderDrawColor(vng_ren, 0x60, 0x60, 0x60, 0xFF);
+			for (float i = 3.0f; i < GRIP; i += 4.0f)
+				SDL_RenderLine(vng_ren, g.x + g.w - i, g.y + g.h - 2.0f,
+				                        g.x + g.w - 2.0f, g.y + g.h - i);
+		}
 
 		if (!w->draw) continue;
 

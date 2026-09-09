@@ -1,4 +1,5 @@
 #include "core.h"
+#include "primitives.h"
 #include "vangopix.h"
 #include "tabs.h"
 #include "tabbar.h"
@@ -15,6 +16,8 @@
 #include "thumb.h"
 #include "win.h"
 #include "colour.h"
+#include "palette.h"
+#include "anim.h"
 
 /*
  * The desk: a grey checkerboard, the size and the two greys taken from what the first
@@ -34,42 +37,139 @@
 #define CHECK_A     VNG_CHECK_A
 #define CHECK_B     VNG_CHECK_B
 
-static SDL_Texture *checker = NULL;
+/*
+ * ONE TILE PER DISTINCT BOARD, BUILT ONCE.
+ *
+ * There are two: the desk at six pixels in its greys, and the palette's swatch grid at five in
+ * its own blues. There will never be many - the cap is small on purpose, so this stays a
+ * lookup rather than becoming a cache with a policy.
+ *
+ * What must not fork is THE DESK, not every board. See vangopix_board_rect in core.h.
+ */
+#define TILES 4
 
-/* One tile of 2x2 squares, uploaded once and repeated by the GPU.
+static struct { int square; Uint32 a, b; SDL_Texture *tex; } tile[TILES];
+
+/* A tile of 2x2 squares, uploaded once and repeated by the GPU.
  *
  * The obvious way - a filled rect per square - is about thirteen thousand draw calls a
  * frame at 800x600, every frame, for a backdrop that never changes. One tiled texture is
  * a single call, and it stays a single call at any window size. */
-static bool checker_make (void)
+static SDL_Texture *tile_of (int square, Uint32 ca, Uint32 cb)
 {
-	const int n = CHECK * 2;
-	Uint32 px[CHECK * 2 * CHECK * 2];
+	if (square < 1) square = CHECK;
+
+	for (int i = 0; i < TILES; i++)
+		if (tile[i].tex && tile[i].square == square &&
+		    tile[i].a == ca && tile[i].b == cb) return tile[i].tex;
+
+	int slot = -1;
+	for (int i = 0; i < TILES; i++)
+		if (!tile[i].tex) { slot = i; break; }
+	if (slot < 0) return NULL;
+
+	const int n  = square * 2;
+	Uint32   *px = (Uint32 *) SDL_malloc((size_t)n * n * sizeof(Uint32));
+	if (!px) return NULL;
 
 	for (int y = 0; y < n; y++)
 		for (int x = 0; x < n; x++)
-			px[y * n + x] = ((x < CHECK) == (y < CHECK)) ? CHECK_A : CHECK_B;
+			px[y * n + x] = ((x < square) == (y < square)) ? ca : cb;
 
-	checker = SDL_CreateTexture(vng_ren, SDL_PIXELFORMAT_ARGB8888,
-	                            SDL_TEXTUREACCESS_STATIC, n, n);
-	if (!checker) {
+	SDL_Texture *t = SDL_CreateTexture(vng_ren, SDL_PIXELFORMAT_ARGB8888,
+	                                   SDL_TEXTUREACCESS_STATIC, n, n);
+	if (!t) {
 		SDL_Log("checker: %s", SDL_GetError());
-		return false;
+		SDL_free(px);
+		return NULL;
 	}
 	/* Nearest, or the seam between two tiles blurs into a grey line at the joins. */
-	SDL_SetTextureScaleMode(checker, SDL_SCALEMODE_NEAREST);
-	SDL_UpdateTexture(checker, NULL, px, n * (int)sizeof(Uint32));
-	return true;
+	SDL_SetTextureScaleMode(t, SDL_SCALEMODE_NEAREST);
+	SDL_UpdateTexture(t, NULL, px, n * (int)sizeof(Uint32));
+	SDL_free(px);
+
+	tile[slot].square = square;
+	tile[slot].a      = ca;
+	tile[slot].b      = cb;
+	tile[slot].tex    = t;
+	return t;
+}
+
+void vangopix_board_rect (SDL_FRect r, int square, Uint32 ca, Uint32 cb)
+{
+	SDL_Texture *t = tile_of(square, ca, cb);
+
+	if (!t) {
+		/* No texture is still a backdrop: the darker of the two flat, rather than a hole. */
+		SDL_SetRenderDrawColor(vng_ren, (Uint8)((ca >> 16) & 0xFF), (Uint8)((ca >> 8) & 0xFF),
+		                                (Uint8)(ca & 0xFF), 0xFF);
+		SDL_RenderFillRect(vng_ren, &r);
+		return;
+	}
+	SDL_RenderTextureTiled(vng_ren, t, NULL, 1.0f, &r);
 }
 
 void vangopix_desk_rect (SDL_FRect r)
 {
-	if (!checker && !checker_make()) {
-		SDL_SetRenderDrawColor(vng_ren, 0x25, 0x25, 0x25, 0xFF);
-		SDL_RenderFillRect(vng_ren, &r);
-		return;
+	vangopix_board_rect(r, CHECK, CHECK_A, CHECK_B);
+}
+
+/*
+ * A filled disc of one colour, over a backing that says what is transparent about it.
+ *
+ * THE BACKING IS THE DESK'S CHECKERBOARD, NOT THE BARS' TWO HALVES. Every swatch in this
+ * program shows alpha by laying the colour over two tones, and everywhere else the swatch is
+ * a RECTANGLE - where a split down the middle reads as the swatch convention it is. On a
+ * CIRCLE it reads as the disc being broken in two: a straight line across the middle of a
+ * round shape is a crack, because nothing about the shape explains it. The checkerboard has
+ * no middle to split on, and it is what the sheet, the selection's hole, the 1:1 panel and
+ * the desk itself all use - so a transparent colour means here what it means everywhere.
+ *
+ * The circle itself is primitives.c's now - see there for what went wrong when it was three
+ * different circles at once. What stays here is the one part that cannot be a primitive: the
+ * DESK laid inside the shape, which SDL cannot clip a tiled texture to.
+ */
+void vangopix_desk_disc (float fcx, float fcy, float fr, Uint32 argb, Uint32 rim)
+{
+	int ri = prim_round(fr);
+	if (ri < 1) return;
+
+	int cx = prim_round(fcx), cy = prim_round(fcy);
+	int x0 = cx - ri, y0 = cy - ri;
+
+	/*
+	 * THE BOARD IS STEPPED OUT BY HAND, and this is the one thing here that primitives.c
+	 * cannot do for us: SDL can clip a tiled texture to a rectangle and to nothing else, and
+	 * a circle is not one. So the rows are walked - but they are prim_span's rows, the same
+	 * ones prim_disc and prim_circle use, which is what stops this becoming a second circle
+	 * that drifts from the first. The phase comes off the bounding box, which is the origin a
+	 * tiled call would have anchored to.
+	 */
+	for (int dy = -ri; dy <= ri; dy++) {
+		int h  = prim_span(ri, dy);
+		int y  = cy + dy;
+		int iy = (y - y0) / VNG_CHECK;
+		int lo = cx - h, hi = cx + h + 1;   /* half open, so a width is hi - lo */
+
+		for (int x = lo; x < hi; ) {
+			int    ix   = (x - x0) / VNG_CHECK;
+			int    next = x0 + (ix + 1) * VNG_CHECK;
+			Uint32 t    = ((ix + iy) & 1) ? VNG_CHECK_B : VNG_CHECK_A;
+
+			if (next > hi) next = hi;
+
+			SDL_FRect r = { (float)x, (float)y, (float)(next - x), 1.0f };
+			prim_fill(r, t);
+			x = next;
+		}
 	}
-	SDL_RenderTextureTiled(vng_ren, checker, NULL, 1.0f, &r);
+
+	/* The colour over it at its REAL alpha - what makes nothing look like nothing - and then
+	 * the rim, so a pale colour still has an edge against whatever it sits on. The caller
+	 * chooses that colour: the wheel wants a dark hairline, a swatch wants one that reads
+	 * against what it just drew. Both shapes come off prim_span, so the rim cannot miss. */
+	prim_disc  (fcx, fcy, fr, argb);
+	prim_circle(fcx, fcy, fr, rim);
 }
 
 static void draw_desk (void)
@@ -80,8 +180,12 @@ static void draw_desk (void)
 
 void vangopix_core_free (void)
 {
-	if (checker) SDL_DestroyTexture(checker);
-	checker = NULL;
+	for (int i = 0; i < TILES; i++) {
+		if (tile[i].tex) SDL_DestroyTexture(tile[i].tex);
+		tile[i].tex    = NULL;
+		tile[i].square = 0;
+		tile[i].a = tile[i].b = 0u;
+	}
 }
 
 /* The overlay is OFF by default and it is not chrome: it occupies no space when it is
@@ -185,10 +289,25 @@ void vangopix_input (void)
 		if (sidebar_event(&e))
 			continue;
 
+		/*
+		 * THE PALETTE UNDER THE HAND, which is up only while ALT is held - so while it is
+		 * up it is the topmost thing on the screen, and it is drawn that way too. It takes
+		 * only what lands on its own cells; a press anywhere else with ALT down is not a
+		 * gesture it owns, and swallowing one would be swallowing a stroke.
+		 */
+		if (palette_quick_event(&e, vng_tab))
+			continue;
+
 		/* The floating windows. Under the bar and the panel above, because those two are
 		 * summoned to be used and put away again, while a window is parked and stays - and a
 		 * parked window must not hide the thing you raised the bar to reach. */
 		if (win_event(&e))
+			continue;
+
+		/* THE PALETTE'S GRID OF SWATCHES, one rung under the windows because it is not one:
+		 * it hangs off the palette box rather than living inside it, so win.c neither routes
+		 * nor clips it and a window parked on top has to keep covering it. */
+		if (palette_grid_event(&e, vng_tab))
 			continue;
 
 		/* Then the canvas grips, BEFORE the camera: they answer the left button, and
@@ -257,6 +376,8 @@ void vangopix_input (void)
 				if (e.key.key == SDLK_F1)     { overlay = !overlay; break; }
 				if (e.key.key == SDLK_V)      { thumb_toggle();     break; }
 				if (e.key.key == SDLK_C)      { colour_toggle();    break; }
+				if (e.key.key == SDLK_P)      { palette_toggle();   break; }
+				if (e.key.key == SDLK_X)      { anim_toggle();      break; }
 				if (e.key.key == SDLK_ESCAPE) { tabbar_toggle();    break; }
 				if (e.key.key == SDLK_TAB)    { sidebar_toggle();   break; }
 			}
@@ -352,13 +473,93 @@ static void draw_sheet (VNG_TAB *t)
 
 }
 
+/*
+ * THE ZOOM, BOTTOM RIGHT, AND IT IS A READOUT RATHER THAN CHROME.
+ *
+ * The distinction is the one already made for the two loaded colours at the other end of the
+ * same line: a toolbar is COMMANDS parked on screen in case they are wanted, and a readout
+ * answers a question about the state of the thing in your hand. "Which colour lands if I press
+ * the left button" is one of those; "what scale am I looking at" is the other, and it is the
+ * question a person asks every time they come back to a drawing after doing something else.
+ * There is no other way to know it - the sheet fills the window, so nothing on screen says
+ * whether that is 200% or 800%.
+ *
+ * BOTTOM RIGHT BECAUSE THE COLOURS ARE BOTTOM LEFT. Same margin, same bar height, so the two
+ * read as the ends of one line across the foot of the window rather than as two decisions.
+ *
+ * IT SAYS THE SAME THING F1 SAYS, in the same units, on purpose - which is why both go through
+ * vangopix_zoom_text below. Two readouts of one number in different units is a small trap that costs
+ * somebody an afternoon exactly once.
+ */
+#define ZOOM_MARGIN  8.0f    /* SLOT_MARGIN in tool.c, which is the other end of this line */
+#define ZOOM_PAD     4.0f
+
+/*
+ * THE ZOOM AS A MULTIPLIER, WHICH IS THE UNIT THIS PROGRAM ALREADY THINKS IN. Every note about
+ * the camera is written that way - "at 3x one art pixel is a 3x3 square", "1:1 where one art
+ * pixel is one screen pixel" - and it is the question actually being asked: how many screen
+ * pixels is one of mine.
+ *
+ * Every step at or above 1:1 is an integer by design, so those come out clean - 1x, 8x, 64x.
+ * Below it the ladder is halves and it says so, 0.5x and 0.125x; and view_reset can land
+ * BETWEEN steps entirely, since the fit of an odd-sized image is whatever it is, so 4.25x has
+ * to be sayable too.
+ *
+ * The trailing zeros are trimmed by hand rather than with %g, which SDL_snprintf is under no
+ * obligation to implement: only %d and %f are asked of it here.
+ */
+void vangopix_zoom_text (float z, char *dst, size_t cap)
+{
+	if (z == SDL_floorf(z)) {
+		SDL_snprintf(dst, cap, "%dx", (int)z);
+		return;
+	}
+
+	SDL_snprintf(dst, cap, "%.4f", z);
+
+	size_t n = SDL_strlen(dst);
+	while (n > 1 && dst[n - 1] == '0') dst[--n] = 0;
+	if    (n > 1 && dst[n - 1] == '.') dst[--n] = 0;
+
+	SDL_snprintf(dst + n, cap - n, "x");
+}
+
+static void draw_zoom (VNG_TAB *t)
+{
+	char  text[16];
+	float tw, th, bw, bh;
+
+	if (!vng_text) return;
+
+	vangopix_zoom_text(t->zoom, text, sizeof text);
+	text_measure(vng_text, text, &tw, &th);
+
+	/* The height comes from the colour bars rather than from this text, so the two ends of
+	 * the line are the same height whatever either of them happens to be showing. */
+	tool_bar_size(&bw, &bh);
+
+	SDL_FRect r = { (float)vng_win_w - ZOOM_MARGIN - (tw + ZOOM_PAD * 2.0f),
+	                (float)vng_win_h - ZOOM_MARGIN - bh,
+	                tw + ZOOM_PAD * 2.0f, bh };
+
+	prim_fill(r, 0xF0141414u);
+	prim_rect(r, 0xFF303030u);
+
+	text_print(vng_text, r.x + ZOOM_PAD, r.y + SDL_floorf((bh - th) * 0.5f),
+	           0xDCDCDCFF, "%s", text);
+}
+
 static void draw_overlay (VNG_TAB *t, float zoom)
 {
 	if (!vng_text) return;
 
+	/* The same units as the corner readout, and from the same call - see vangopix_zoom_text. */
+	char z[16];
+	vangopix_zoom_text(zoom, z, sizeof z);
+
 	text_print(vng_text, 8.0f, 6.0f, 0xFFFFFFC0,
-	           "%s\n%d x %d   %.0f%%   tab %d/%d",
-	           t->name, t->w, t->h, zoom * 100.0f,
+	           "%s\n%d x %d   %s   tab %d/%d",
+	           t->name, t->w, t->h, z,
 	           vng_tab_index(t), vng_tab_count());
 }
 
@@ -395,23 +596,36 @@ void vangopix_core (void)
 	if (t) {
 		/* Before the sheet is drawn, because what the spray lays down this frame has to
 		 * reach the texture in the same frame. */
+		anim_tick();       /* the playhead, on the program clock */
 		tool_frame(t);
 
 		draw_sheet(t);
 		select_draw(t);    /* the float and its marching rectangle, over the sheet */
 		thumb_draw(t);     /* the marker on the sheet; win_draw draws the panel itself */
+		anim_draw(t);      /* the clip grid on the sheet, the same split thumb makes */
 		tool_draw(t);      /* the tip outline and the glyph, under the panels */
+		draw_zoom(t);      /* the other end of the line the colour slots start */
 		resize_draw(t);
 		if (overlay) draw_overlay(t, t->zoom);
 		sidebar_draw();
+		palette_grid_draw(t);   /* the swatches beside the palette box, under the windows */
 		win_draw();      /* the floating windows, over the sheet and under the panels */
 		tabbar_draw();   /* last of the layers, so it floats over the sheet */
+
+		/* AND OVER EVEN THAT, because it exists only while a key is held: nothing summoned
+		 * for as long as a hand keeps a key down should come up behind something parked. It
+		 * matches where it sits in the chain above. */
+		palette_quick_draw(t);
 	}
 
 	/* OUTSIDE the block: the field holds the keyboard, and a keyboard captured with no
 	 * caret on screen is a program that has stopped answering. It does not depend on
 	 * there being a document, and it draws over everything that does. */
 	prompt_draw();
+
+	/* LAST, after everything that could have asked for a shape. One place owns the cursor
+	 * because the machine has one - see tool_cursor in tool.h. */
+	tool_cursor_apply();
 
 	SDL_RenderPresent(vng_ren);
 }

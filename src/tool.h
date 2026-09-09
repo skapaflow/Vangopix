@@ -135,4 +135,64 @@ extern void tool_snap_iso (int ax, int ay, int *x, int *y);
  */
 extern void tool_hex (Uint32 argb, char *dst, size_t cap);
 
+/*
+ * THE POINTER'S SHAPE, AND ONE PLACE OWNS IT.
+ *
+ * The machine has exactly one cursor, so two modules setting it independently is two
+ * SDL_SetCursor calls a frame disagreeing about the answer. This file already decides the
+ * one shape that is always in play - a crosshair over the sheet, an arrow everywhere else -
+ * so anything else that wants a shape while the pointer is over it ASKS here.
+ *
+ * The ask lasts ONE FRAME and the LAST asker wins, which is the draw order, which is the
+ * stacking order, which is who the person is actually pointing at. Nobody asking means the
+ * arrow. The first Vangopix had the same arrangement upside down: gui_cursor_set could be
+ * called from anywhere and tool_cursor_mgr put the arrow back at the end of the frame if
+ * none of SIX focus booleans was set - a list every new panel had to be added to. Here a
+ * panel that stops asking simply stops being answered.
+ *
+ * It is also where its leak is fixed: gui_cursor_set called SDL_CreateSystemCursor on every
+ * call and never freed the result, so a hand resting on a stretch band leaked a cursor per
+ * frame. These are built once by tool_init and destroyed by tool_free.
+ */
+typedef enum {
+	VNG_CUR_ARROW = 0,
+	VNG_CUR_CROSS,
+	VNG_CUR_WE,      /* west-east, for an edge that stretches sideways      */
+	VNG_CUR_NS,      /* north-south, for one that stretches up and down     */
+	VNG_CUR_NWSE,    /* the corner that does both                           */
+	VNG_CUR_LOT
+} VNG_CURSOR;
+
+extern void tool_cursor (VNG_CURSOR c);
+
+/* Puts the frame's answer on screen and forgets it, so the next frame starts from the arrow
+   again. Called once, last, by core.c - after everything that could have asked. */
+extern void tool_cursor_apply (void);
+
+/*
+ * HOW A COLOUR IS DRAWN SO IT CAN BE SEEN, and these three are the whole of it.
+ *
+ * They are here rather than copied into every panel because the question is the same one in
+ * three places - the two loaded slots at the bottom of the screen, the readout that follows
+ * the pointer under CTRL, and the one under the palette summoned by ALT. A fourth copy of
+ * these lines is how three answers stop agreeing, which is the same reason
+ * vangopix_desk_rect is exposed from core.c.
+ *
+ *   tool_light_on   is WHITE what reads on top of this colour - by luminance over what is
+ *                   behind it, never by inverting, which fails exactly at mid grey.
+ *   tool_bar_draw   a colour with its hex written inside it, in whichever of the two reads.
+ *   tool_bar_size   what such a bar must be to hold eight hex digits in the loaded face.
+ *
+ * A BAR SHOWS ALPHA WITH TWO TONES AND A PALETTE CELL SHOWS IT WITH THE BOARD, and the two
+ * are not an inconsistency. A bar is WIDE and carries its hex inside it, where a
+ * checkerboard behind text is noise and a split down the middle reads as the swatch
+ * convention it is. A 20px cell in a grid of 20px cells is the opposite case: a split down
+ * one of those reads as TWO COLOURS, which is the single thing it must not say in a grid
+ * whose whole job is one colour per cell. See vangopix_desk_rect_sized for that one, and
+ * vangopix_desk_disc for the round case.
+ */
+extern bool tool_light_on (Uint32 argb);
+extern void tool_bar_draw (SDL_FRect bar, Uint32 argb);
+extern void tool_bar_size (float *w, float *h);
+
 #endif

@@ -96,6 +96,26 @@ extern VNG_WIN *win_top (void);
 extern SDL_FRect win_area  (VNG_WIN *w);
 extern bool      win_hover (VNG_WIN *w);
 
+/*
+ * The WHOLE window, head bar and border included.
+ *
+ * What an ATTACHED PANEL needs, and so far that is one thing: the palette's grid of swatches,
+ * which the first Vangopix drew four pixels to the right of its window's outer edge and which
+ * has to keep doing so. The interior is what everything inside a window is measured from; the
+ * outside is what something sitting BESIDE one has to measure from instead.
+ */
+extern SDL_FRect win_outer (VNG_WIN *w);
+
+/*
+ * A window whose size is not up for discussion: no stretch corner drawn, none to grab.
+ *
+ * The palette box is 64 x 64 and there is nothing in it that could use another pixel - two
+ * colour discs and a word. The first Vangopix said this by calling winmgr_limit and then
+ * assigning p->s.w and p->s.h back every single frame, which is a window fighting its own
+ * manager; saying it once is the same statement without the fight.
+ */
+extern void win_fixed (VNG_WIN *w, bool on);
+
 /* Offered every event. True when a window took it. Motion is consumed ONLY while a window is
    being dragged or stretched: a drag begun on the sheet that crosses a window - a stroke, a
    pan, a grip pulled across - must not be cut in half by it, which is the same rule the

@@ -24,13 +24,58 @@ static bool  panning   = false;
 static float pan_wx    = 0.0f;   /* the world point the hand took hold of */
 static float pan_wy    = 0.0f;
 
+/*
+ * THE SHEET'S ORIGIN IS ON A WHOLE SCREEN PIXEL, AND THE CAMERA'S OWN STATE IS NOT TOUCHED
+ * TO GET IT THERE. Those are two separate sentences and keeping them separate is the whole
+ * of this.
+ *
+ * THE BUG. view_sheet_rect floored the sheet onto whole pixels - correctly, and for the
+ * reason written there - and NOTHING ELSE KNEW. Every annotation about the sheet came off the
+ * unfloored transform: the outline round the pixel under the pointer, the selection's
+ * rectangle, the corner grips, the 1:1 panel's marker. So did the hit test that decides which
+ * pixel a press lands on. Measured at 1:1 with an offset of -10.3: the sheet is drawn at x=10,
+ * so document pixel 0 covers screen [10,11), while the transform reported it at 10.3 - and
+ * THIRTY PERCENT of the clicks inside a drawn pixel resolved to its neighbour. You point at a
+ * pixel and the one beside it changes, after any pan, which is to say always. It is the same
+ * shape of mistake as the colour disc whose rim was computed by different maths than its fill.
+ *
+ * WHAT DOES NOT WORK, and it was tried first: quantising off_x itself. It puts the origin on
+ * a whole pixel and it wrecks the zoom, because the camera then stores a value that has been
+ * rounded. A rounding of at most half a screen pixel at 4x is an eighth of a document pixel,
+ * and zooming to 64x MAGNIFIES that into eight screen pixels; twelve notches measured fifteen
+ * pixels of drift. The offset has to stay exact.
+ *
+ * SO THE SNAP LIVES AT THE BOUNDARY AND IS NEVER WRITTEN BACK. off_x and off_y remain the
+ * continuous, exact values the zoom and the pan compute; the floor is applied when the world
+ * is turned into screen coordinates, and the inverse undoes exactly that same floor. The pair
+ * below are therefore exact inverses of each other AND of where the sheet is drawn - which is
+ * the property that was missing - while the camera's arithmetic is untouched.
+ */
+static float origin_x (VNG_TAB *t) { return SDL_floorf(-t->off_x * t->zoom); }
+static float origin_y (VNG_TAB *t) { return SDL_floorf(-t->off_y * t->zoom); }
+
 SDL_FPoint view_world_to_screen (VNG_TAB *t, float wx, float wy)
 {
-	SDL_FPoint p = { (wx - t->off_x) * t->zoom, (wy - t->off_y) * t->zoom };
+	SDL_FPoint p = { origin_x(t) + wx * t->zoom, origin_y(t) + wy * t->zoom };
 	return p;
 }
 
 SDL_FPoint view_screen_to_world (VNG_TAB *t, float sx, float sy)
+{
+	SDL_FPoint p = { (sx - origin_x(t)) / t->zoom, (sy - origin_y(t)) / t->zoom };
+	return p;
+}
+
+/*
+ * The camera's own view of the same question, WITHOUT the snap - and it is private on
+ * purpose. The zoom and the pan feed their answers straight back into off_x and off_y, so
+ * they are the two callers that must not see a rounded number: a floor read here would be a
+ * floor stored there, which is the failure described above.
+ *
+ * Everything that draws or hit-tests uses the pair above. Everything that MOVES THE CAMERA
+ * uses this.
+ */
+static SDL_FPoint raw_to_world (VNG_TAB *t, float sx, float sy)
 {
 	SDL_FPoint p = { sx / t->zoom + t->off_x, sy / t->zoom + t->off_y };
 	return p;
@@ -76,7 +121,7 @@ void view_actual_size (VNG_TAB *t)
 	/* Keeps whatever is in the middle of the window in the middle of the window. Going
 	 * to 1:1 by resetting the offset instead would throw the eye back to the centre of
 	 * the document, which is rarely where the work is. */
-	SDL_FPoint c = view_screen_to_world(t, vng_win_w * 0.5f, vng_win_h * 0.5f);
+	SDL_FPoint c = raw_to_world(t, vng_win_w * 0.5f, vng_win_h * 0.5f);
 	t->zoom = 1.0f;
 	view_center_on(t, c.x, c.y);
 }
@@ -113,7 +158,7 @@ static void view_zoom_by (VNG_TAB *t, int notches, float at_x, float at_y)
 	if (!notches) return;
 
 	/* 1. The world point under the cursor, BEFORE the scale moves. */
-	SDL_FPoint before = view_screen_to_world(t, at_x, at_y);
+	SDL_FPoint before = raw_to_world(t, at_x, at_y);
 
 	/* 2. The step. No interpolation on the way: during a lerp the scale passes through
 	 *    fractional values, and avoiding exactly those is why the steps exist. */
@@ -124,7 +169,7 @@ static void view_zoom_by (VNG_TAB *t, int notches, float at_x, float at_y)
 
 	/* 3. Put that world point back under the same pixel. This is what makes the zoom
 	 *    happen at the cursor instead of at the corner of the window. */
-	SDL_FPoint after = view_screen_to_world(t, at_x, at_y);
+	SDL_FPoint after = raw_to_world(t, at_x, at_y);
 	t->off_x += before.x - after.x;
 	t->off_y += before.y - after.y;
 }
@@ -174,7 +219,7 @@ bool view_event (const SDL_Event *e, VNG_TAB *t)
 	case SDL_EVENT_MOUSE_BUTTON_DOWN: {
 		if (!pan_button(e)) return false;
 
-		SDL_FPoint w = view_screen_to_world(t, e->button.x, e->button.y);
+		SDL_FPoint w = raw_to_world(t, e->button.x, e->button.y);
 		pan_wx  = w.x;
 		pan_wy  = w.y;
 		panning = true;
@@ -214,9 +259,20 @@ SDL_FRect view_sheet_rect (VNG_TAB *t)
 
 	SDL_FPoint o = view_world_to_screen(t, 0.0f, 0.0f);
 
-	/* Landed on whole pixels. A sheet at 3x starting on a half pixel makes the filter
-	 * round differently along the edge, and the outermost column comes out a different
-	 * width from the rest - the flaw that gives away a badly made editor. */
+	/* Landed on whole pixels. A sheet at 3x starting on a half pixel makes the filter round
+	 * differently along the edge, and the outermost column comes out a different width from
+	 * the rest - the flaw that gives away a badly made editor.
+	 *
+	 * The origin arrives whole already - view_world_to_screen floors it - so these two floors
+	 * are the statement of the requirement rather than the thing that meets it. That
+	 * distinction IS the bug this used to have: when the flooring lived only here, every
+	 * annotation and the hit test came off the unfloored transform and missed the sheet by
+	 * exactly the fraction thrown away.
+	 *
+	 * The two on the SIZE still do work. Below 1:1 the sheet's width is w * zoom and
+	 * fractional by definition; only the origin can be whole there, which is fine, because at
+	 * that scale the renderer is filtering anyway and the image is being looked at rather
+	 * than drawn on. */
 	SDL_FRect r = { SDL_floorf(o.x), SDL_floorf(o.y),
 	                SDL_floorf(t->w * t->zoom), SDL_floorf(t->h * t->zoom) };
 	return r;

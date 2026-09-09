@@ -5,6 +5,7 @@
 
 typedef struct _vng_undo_ VNG_UNDO;   /* undo.h owns it; opaque from here */
 typedef struct _vng_sel_  VNG_SEL;    /* select.h, likewise */
+typedef struct _vng_pal_  VNG_PAL;   /* palette.h, likewise */
 
 /*
  * A TAB IS A DOCUMENT. There is no second structure.
@@ -61,6 +62,12 @@ typedef struct _vng_tab_ {
 	 * simple: the clipboard is one buffer for the program and a float belongs to the sheet
 	 * it is over, so it can neither leak into another tab nor outlive this one. */
 	VNG_SEL  *sel;
+
+	/* The palette is PER TAB for the same reason, and it is the first Vangopix's own
+	 * arrangement: a palette is the working set of ONE drawing, not of the program. Built
+	 * lazily on first sight - a photograph opened only to be looked at pays nothing for a
+	 * panel nobody summoned - and freed with the tab it belongs to. */
+	VNG_PAL  *pal;
 
 	/* The view is PER TAB, not global: switching tabs must put the drawing back
 	 * where the eye left it, same zoom and same corner. A global view makes every

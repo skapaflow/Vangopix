@@ -3,6 +3,7 @@
 #include "tool.h"
 #include "core.h"
 #include "keys.h"
+#include "field.h"
 #include "glyph.h"
 
 /*
@@ -150,33 +151,21 @@ static int slot = 0;
 static Uint32 last = 0xFF000000u; /* what this window last wrote, to notice outside changes */
 
 /*
- * THE HEX READOUT IS THE HEX FIELD. Leaving somewhere to TYPE a colour out was a mistake and
- * not a decision: a published palette arrives as a string - #2E3440, and fifteen more like it
- * - and with nowhere to put one the only way in is to paste the image and eyedrop it. The
- * first Vangopix had a text box for this and was right to.
+ * THE HEX READOUT IS THE HEX FIELD.
  *
- * It is not a second control beside the readout, though. The readout already says what the
- * colour is; clicking it and typing over it is the same thing answering in both directions,
- * and one box is better than a label with a box under it.
+ * A published palette arrives as a string - #2E3440, and fifteen more like it - and with
+ * nowhere to put one the only way in is to paste the image and eyedrop it. The first Vangopix
+ * had a text box for exactly this and was right to.
  *
- * IT IS THE SECOND THING IN THE PROGRAM TO OWN THE KEYBOARD, after the CTRL+N prompt - which
- * is what keys.c was built for. While it is being typed into, TAB does not raise the sidebar
- * and Q does not take the pencil, for free.
+ * It is not a second control beside the readout, though: the readout already says what the
+ * colour is, and typing over it says what it should be. ONE BOX THAT ANSWERS IN BOTH
+ * DIRECTIONS beats a label with an input under it - which is what field_draw's `show` is for.
+ *
+ * The box itself is field.c now. It was written here first, and it is lifted out because the
+ * animation clip editor wants seven of them; that this one still behaves is the proof it
+ * generalised.
  */
-static bool editing = false;
-static char field[12];
-
-/*
- * THE FIRST KEY TYPED REPLACES WHAT IS THERE, and the rest add to it.
- *
- * The field opens holding the colour it is showing - it has to, or clicking it to check a
- * value would blank it. But the reason a person clicks it is almost always to put a
- * DIFFERENT colour in, and having to press backspace eight times first is the kind of thing
- * that makes a field not worth using. Every small value field in every program behaves this
- * way; backspace cancels it, because backspace means "I am editing this one" rather than
- * "I am replacing it".
- */
-static bool fresh = false;
+static VNG_FIELD *hex_box = NULL;
 
 /* The ring is hue at full saturation and value, so it never depends on the colour in hand and
  * is built exactly once. The first Vangopix rebuilt it into a cache; there is nothing to
@@ -334,6 +323,9 @@ static void build (void)
 
 void colour_free (void)
 {
+	field_free(hex_box);
+	hex_box = NULL;
+
 	if (tex_wheel) SDL_DestroyTexture(tex_wheel);
 	tex_wheel = NULL;
 
@@ -442,58 +434,29 @@ static bool hex_parse (const char *t, Uint32 *out)
 	return true;
 }
 
-static void field_stop (bool keep)
-{
-	if (!editing) return;
-	editing = false;
-	keys_release(&editing);
-
-	Uint32 c;
-	if (keep && hex_parse(field, &c)) {
-		argb_hsv(c, &h, &s, &v);
-		alpha = (Uint8)((c >> 24) & 0xFF);
-		last  = c;
-		tool_set_colour(slot, c);
-	}
-}
-
-static void field_key (const SDL_Event *e, void *ctx)
+/* What ENTER means. ESC and a press elsewhere close the box without arriving here, so
+   escaping costs nothing and a mis-click cannot commit half a colour. */
+static void hex_done (const char *text, void *ctx)
 {
 	(void)ctx;
 
-	if (e->type == SDL_EVENT_TEXT_INPUT) {
-		if (fresh) { field[0] = 0; fresh = false; }
+	Uint32 c;
+	if (!hex_parse(text, &c)) return;
 
-		for (const char *t = e->text.text; *t; t++)
-			if (SDL_isxdigit((unsigned char)*t) && SDL_strlen(field) < 8) {
-				size_t n = SDL_strlen(field);
-				field[n]     = *t;
-				field[n + 1] = 0;
-			}
-		return;
-	}
-	if (e->type != SDL_EVENT_KEY_DOWN) return;
-
-	switch (e->key.key) {
-	case SDLK_BACKSPACE: {
-		size_t n = SDL_strlen(field);
-		if (n) field[n - 1] = 0;
-		fresh = false;
-		break;
-	}
-	case SDLK_RETURN:
-	case SDLK_KP_ENTER: field_stop(true);  break;
-	case SDLK_ESCAPE:   field_stop(false); break;
-	default: break;
-	}
+	argb_hsv(c, &h, &s, &v);
+	alpha = (Uint8)((c >> 24) & 0xFF);
+	last  = c;
+	tool_set_colour(slot, c);
 }
 
-static void field_start (void)
+static void hex_start (void)
 {
-	tool_hex(tool_colour(slot), field, sizeof field);
-	editing = true;
-	fresh   = true;
-	keys_capture(field_key, &editing);
+	char now[16];
+
+	if (!hex_box) return;
+
+	tool_hex(tool_colour(slot), now, sizeof now);
+	field_open(hex_box, now);
 }
 
 /* ------------------------------------------------------------------------ the events */
@@ -523,13 +486,13 @@ static bool on_event (SDL_FRect area, const SDL_Event *e, void *ctx)
 	if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
 		/* Pressing anywhere else finishes what was being typed, which is what a person means
 		 * by it - losing it because the mouse moved would be the surprising reading. */
-		if (editing && !in_rect(l.hex, x, y)) field_stop(true);
+		if (!in_rect(l.hex, x, y)) field_close(hex_box, false);
 
 		/* The button decides which colour this press is filling, before anything is read. */
 		slot = (e->button.button == SDL_BUTTON_RIGHT) ? 1 : 0;
 
 		/* Taken, so the window does not read it as somewhere to be dragged from. */
-		if (in_rect(l.hex, x, y)) { if (!editing) field_start(); return true; }
+		if (in_rect(l.hex, x, y)) { hex_start(); return true; }
 
 		/* ANYWHERE INSIDE THE WHEEL'S REACH TAKES THE HUE, not only the ring itself. Aiming
 		 * at a twenty pixel band is a worse gesture than pointing at a direction, and a
@@ -588,63 +551,6 @@ static bool on_event (SDL_FRect area, const SDL_Event *e, void *ctx)
 
 /* ------------------------------------------------------------------------- the pixels */
 
-/*
- * A filled disc of one colour, over a backing that says what is transparent about it.
- *
- * THE BACKING IS THE DESK'S CHECKERBOARD, NOT THE BARS' TWO HALVES. Every swatch in this
- * program shows alpha by laying the colour over two tones, and everywhere else the swatch is
- * a RECTANGLE - where a split down the middle reads as the swatch convention it is. On a
- * CIRCLE it reads as the disc being broken in two: a straight line across the middle of a
- * round shape is a crack, because nothing about the shape explains it. The checkerboard has
- * no middle to split on, and it is what the sheet, the selection's hole, the 1:1 panel and
- * the desk itself all use - so a transparent colour means here what it means everywhere.
- *
- * Row by row, because SDL draws no circles, and the pattern is stepped out by hand because
- * SDL_RenderTextureTiled cannot be clipped to anything but a rectangle. The phase is taken
- * from the disc's bounding box, which is the origin the tiled call would have anchored to.
- */
-static void disc (float cx, float cy, float r, Uint32 c)
-{
-	if (r < 1.0f) return;
-
-	int   ri = (int)r;
-	float x0 = cx - r, y0 = cy - r;
-
-	for (int dy = -ri; dy <= ri; dy++) {
-		float half = SDL_sqrtf((float)(ri * ri - dy * dy));
-		float y    = cy + (float)dy;
-		float lo   = cx - half, hi = cx + half;
-		int   iy   = (int)SDL_floorf((y - y0) / (float)VNG_CHECK);
-
-		for (float x = lo; x < hi; ) {
-			int    ix   = (int)SDL_floorf((x - x0) / (float)VNG_CHECK);
-			float  next = x0 + (float)(ix + 1) * (float)VNG_CHECK;
-			Uint32 t    = ((ix + iy) & 1) ? VNG_CHECK_B : VNG_CHECK_A;
-
-			if (next <= x)  next = x + 1.0f;   /* never stall on a boundary landed on exactly */
-			if (next >  hi) next = hi;
-
-			SDL_SetRenderDrawColor(vng_ren, (Uint8)((t >> 16) & 0xFF), (Uint8)((t >> 8) & 0xFF),
-			                                (Uint8)(t & 0xFF), 0xFF);
-			SDL_RenderLine(vng_ren, x, y, next, y);
-			x = next;
-		}
-
-		SDL_SetRenderDrawColor(vng_ren, (Uint8)((c >> 16) & 0xFF), (Uint8)((c >> 8) & 0xFF),
-		                                (Uint8)(c & 0xFF), (Uint8)((c >> 24) & 0xFF));
-		SDL_RenderLine(vng_ren, lo, y, hi, y);
-	}
-
-	/* A rim, so a pale colour still has an edge against the ring's hole. */
-	SDL_SetRenderDrawColor(vng_ren, 0x00, 0x00, 0x00, 0xB0);
-	for (int i = 0; i < 64; i++) {
-		float a0 = (float)i * (2.0f * SDL_PI_F / 64);
-		float a1 = (float)(i + 1) * (2.0f * SDL_PI_F / 64);
-		SDL_RenderLine(vng_ren, cx + SDL_cosf(a0) * r, cy + SDL_sinf(a0) * r,
-		                        cx + SDL_cosf(a1) * r, cy + SDL_sinf(a1) * r);
-	}
-}
-
 static void body (SDL_FRect area, void *ctx)
 {
 	(void)ctx;
@@ -672,7 +578,8 @@ static void body (SDL_FRect area, void *ctx)
 	 * the colour being chosen sits in the middle of the thing choosing it, so the eye never
 	 * has to travel to find out what the wheel just did.
 	 */
-	disc(l.centre.x, l.centre.y, l.radius * DISC, hsv_argb(h, s, v, alpha));
+	vangopix_desk_disc(l.centre.x, l.centre.y, l.radius * DISC,
+	                   hsv_argb(h, s, v, alpha), 0xB0000000u);
 
 	/*
 	 * TWO POINTERS, and the pair is the point. The inner one sits at the hue in hand, so the
@@ -740,59 +647,57 @@ static void body (SDL_FRect area, void *ctx)
 
 	if (vng_text) {
 		char hex[16];
+		tool_hex(tool_colour(slot), hex, sizeof hex);
 
-		/* ONE BOX THAT ANSWERS IN BOTH DIRECTIONS: it says what the colour is, and typing
-		 * over it says what the colour should be. A label with an input under it would be the
-		 * same question asked twice. */
-		SDL_SetRenderDrawColor(vng_ren, 0x0C, 0x0C, 0x0C, 0xFF);
-		SDL_RenderFillRect(vng_ren, &l.hex);
-		SDL_SetRenderDrawColor(vng_ren, editing ? 0xC0 : 0x38, editing ? 0xC0 : 0x38,
-		                                editing ? 0xC0 : 0x38, 0xFF);
-		SDL_RenderRect(vng_ren, &l.hex);
-
-		if (editing) SDL_strlcpy(hex, field, sizeof hex);
-		else         tool_hex(tool_colour(slot), hex, sizeof hex);
-
-		text_print(vng_text, l.hex.x + 4.0f, l.hex.y, 0xDCDCDCFF, "#%s", hex);
-
-		if (editing) {
-			char  lead[16];
-			float tw;
-			SDL_snprintf(lead, sizeof lead, "#%s", hex);
-			text_measure(vng_text, lead, &tw, NULL);
-
-			SDL_FRect caret = { l.hex.x + 4.0f + tw + 1.0f, l.hex.y + 2.0f,
-			                    1.0f, l.hex.h - 4.0f };
-			SDL_SetRenderDrawColor(vng_ren, 0xFF, 0xFF, 0xFF, 0xE0);
-			SDL_RenderFillRect(vng_ren, &caret);
-		}
+		/* The box shows the SLOT while it is closed and what is being typed while it is open,
+		 * which is the same box answering the question and taking the answer. */
+		field_draw(hex_box, l.hex, NULL, hex);
 	}
-
 }
 
 /*
  * IT COMES UP UNDER THE POINTER, centred on it - the first Vangopix's behaviour, and the same
  * reason as the 1:1 panel: a window summoned to the hand needs no dragging to be where it is
  * wanted.
+ *
+ * BUT ONLY WHEN IT IS BEING SUMMONED. A window already on screen has been PARKED somewhere on
+ * purpose, and moving it under the hand every time something raises it would undo that. So
+ * this places it when it comes up and only raises it when it is already there.
  */
-void colour_toggle (void)
+void colour_open (void)
 {
-	float mx, my;
-	SDL_GetMouseState(&mx, &my);
-
-	if (win) {
-		bool on = !win_visible(win);
-		if (!on) field_stop(true);   /* a window put away must not still hold the keyboard */
-		else     win_place(win, mx, my);
-		win_show(win, on);
+	if (win && win_visible(win)) {
+		win_show(win, true);   /* showing raises, which is all an open can mean here */
 		return;
 	}
 
-	SDL_FRect  a = { 0.0f, 0.0f, OPEN_W, OPEN_H };
-	SDL_FPoint m = { MIN_W, MIN_H };
+	float mx, my;
+	SDL_GetMouseState(&mx, &my);
 
-	win = win_open("colour", a, m, body, on_event, NULL);
+	if (!win) {
+		SDL_FRect  a = { 0.0f, 0.0f, OPEN_W, OPEN_H };
+		SDL_FPoint m = { MIN_W, MIN_H };
+
+		/* WITH THE WINDOW AND NOT WITH THE FIRST CLICK. Built lazily in the press handler,
+		 * the hex readout did not exist until somebody clicked it - so the one thing it is
+		 * there to say was invisible until you asked it to say something else. */
+		if (!hex_box) hex_box = field_make(VNG_FIELD_HEX, hex_done, NULL);
+
+		win = win_open("colour", a, m, body, on_event, NULL);
+	}
+
 	win_place(win, mx, my);
+	win_show(win, true);
+}
+
+void colour_toggle (void)
+{
+	if (win && win_visible(win)) {
+		field_close(hex_box, false);   /* a window put away must not hold the keyboard */
+		win_show(win, false);
+		return;
+	}
+	colour_open();
 }
 
 bool colour_visible (void) { return win_visible(win); }

@@ -1,6 +1,7 @@
 #include "tabs.h"
 #include "undo.h"
 #include "select.h"
+#include "palette.h"
 
 VNG_TAB *vng_tabs = NULL;
 VNG_TAB *vng_tab  = NULL;
@@ -363,6 +364,7 @@ void vng_tab_close (VNG_TAB *t)
 	draw_buffers_free(t);
 	undo_free(t->undo);
 	select_free(t->sel);
+	palette_free(t->pal);
 	SDL_free(t->pixels);
 	SDL_free(t->path);
 	SDL_free(t);
@@ -591,6 +593,7 @@ void vng_tabs_free (void)
 		draw_buffers_free(p);
 		undo_free(p->undo);
 		select_free(p->sel);
+		palette_free(p->pal);
 		SDL_free(p->pixels);
 		SDL_free(p->path);
 		SDL_free(p);

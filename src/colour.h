@@ -51,6 +51,13 @@
  * the sheet appears here without anything having to be told.
  */
 
+/*
+ * Puts it up, or raises it if it already is. What the eyedropper's double click calls - see
+ * tool.c - as against colour_toggle, which is what the C key calls: a gesture that means
+ * "edit this colour" must not close the editor because it happened to be open.
+ */
+extern void colour_open (void);
+
 extern void colour_toggle  (void);
 extern bool colour_visible (void);
 extern void colour_free    (void);
