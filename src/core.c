@@ -525,29 +525,68 @@ void vangopix_zoom_text (float z, char *dst, size_t cap)
 	SDL_snprintf(dst + n, cap - n, "x");
 }
 
-static void draw_zoom (VNG_TAB *t)
+/*
+ * ONE READOUT BAR, AND THERE ARE NOW THREE THINGS ON THAT LINE.
+ *
+ * The two loaded colours at the left, the document's size beside them, and the zoom at the
+ * right - all the same panel with a different value in it, so they are one function. Written
+ * twice they would drift the first time either the face or the padding moved, which is the
+ * mistake the four close boxes had already made.
+ *
+ * The HEIGHT comes from the colour bars rather than from the text, so everything on that line
+ * is the same height whatever any of them happens to be showing.
+ */
+static float readout_w (const char *text)
 {
-	char  text[16];
-	float tw, th, bw, bh;
+	float tw = 0.0f;
+
+	if (vng_text) text_measure(vng_text, text, &tw, NULL);
+	return tw + ZOOM_PAD * 2.0f;
+}
+
+static void readout (float x, const char *text)
+{
+	float bw, bh, th = 0.0f;
 
 	if (!vng_text) return;
 
-	vangopix_zoom_text(t->zoom, text, sizeof text);
-	text_measure(vng_text, text, &tw, &th);
-
-	/* The height comes from the colour bars rather than from this text, so the two ends of
-	 * the line are the same height whatever either of them happens to be showing. */
 	tool_bar_size(&bw, &bh);
+	text_measure(vng_text, text, NULL, &th);
 
-	SDL_FRect r = { (float)vng_win_w - ZOOM_MARGIN - (tw + ZOOM_PAD * 2.0f),
-	                (float)vng_win_h - ZOOM_MARGIN - bh,
-	                tw + ZOOM_PAD * 2.0f, bh };
+	SDL_FRect r = { x, (float)vng_win_h - ZOOM_MARGIN - bh, readout_w(text), bh };
 
 	prim_fill(r, 0xF0141414u);
 	prim_rect(r, 0xFF303030u);
 
 	text_print(vng_text, r.x + ZOOM_PAD, r.y + SDL_floorf((bh - th) * 0.5f),
 	           0xDCDCDCFF, "%s", text);
+}
+
+/*
+ * THE DOCUMENT'S SIZE, BESIDE THE TWO COLOURS.
+ *
+ * The same kind of thing they are: state of the thing in your hand, not a command parked on
+ * screen. "How big is this sheet" is asked constantly while drawing - it decides whether a
+ * sprite will fit, what a resize did, and which of two open documents you are looking at -
+ * and until now the only way to ask was F1.
+ *
+ * It sits at tool_slots_edge() rather than at a number of its own, so it stays put when the
+ * colour bars step aside for the project panel.
+ */
+static void draw_size (VNG_TAB *t)
+{
+	char text[24];
+
+	SDL_snprintf(text, sizeof text, "%dx%d", t->w, t->h);
+	readout(tool_slots_edge() + ZOOM_PAD, text);
+}
+
+static void draw_zoom (VNG_TAB *t)
+{
+	char text[16];
+
+	vangopix_zoom_text(t->zoom, text, sizeof text);
+	readout((float)vng_win_w - ZOOM_MARGIN - readout_w(text), text);
 }
 
 static void draw_overlay (VNG_TAB *t, float zoom)
@@ -605,7 +644,8 @@ void vangopix_core (void)
 		thumb_draw(t);     /* the marker on the sheet; win_draw draws the panel itself */
 		anim_draw(t);      /* the clip grid on the sheet, the same split thumb makes */
 		tool_draw(t);      /* the tip outline and the glyph, under the panels */
-		draw_zoom(t);      /* the other end of the line the colour slots start */
+		draw_size(t);      /* beside the two colours: how big the sheet is */
+		draw_zoom(t);      /* and the other end of the same line */
 		resize_draw(t);
 		if (overlay) draw_overlay(t, t->zoom);
 		sidebar_draw();

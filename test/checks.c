@@ -18,6 +18,7 @@
 #include "win.h"
 #include "colour.h"
 #include "palette.h"
+#include "sidebar.h"
 #include "anim.h"
 #include "keys.h"
 #include "view.h"
@@ -1637,6 +1638,30 @@ int main (void)
 
 			ok("COLOUR 1 IS ON SCREEN", red);
 			ok("AND SO IS COLOUR 2",    green);
+
+			/*
+			 * AND THE SIZE READOUT SITS BESIDE THEM, NOT ON THEM. It is placed at
+			 * tool_slots_edge() so it stays put when the bars step aside for the project
+			 * panel; a number of its own would have overlapped them the first time the face
+			 * or the padding moved.
+			 */
+			{
+				float bw, bh;
+				tool_bar_size(&bw, &bh);
+
+				float x0 = sidebar_edge() + ui_pad() * 2.0f;
+				float x1 = tool_slots_edge();
+
+				ok("THE SIZE READOUT STARTS AFTER BOTH BARS", x1 >= x0 + bw * 2.0f);
+
+				/* Nothing of the second bar's green is at or past that edge. */
+				bool bleed = false;
+				for (int y = N / 2; y < N; y++)
+					for (int x = (int)x1; x < N; x++)
+						if ((px[y * pitch + x] & 0x00FFFFFFu) == 0x0000C800u) bleed = true;
+
+				ok("and the bars do not reach into it", bleed == false);
+			}
 
 			if (!red || !green)
 				SDL_Log("  red=%d green=%d - the readouts are not being drawn where they should",

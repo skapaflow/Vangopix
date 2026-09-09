@@ -1161,12 +1161,22 @@ static void preview (Uint32 argb, float mx, float my)
  * the sheet, the alternative was two bars hidden behind it at exactly the moment somebody is
  * choosing which file to work on.
  */
+static float slots_x (void) { return sidebar_edge() + SLOT_MARGIN; }
+
+float tool_slots_edge (void)
+{
+	float bw, bh;
+	tool_bar_size(&bw, &bh);
+
+	return slots_x() + bw * 2.0f + SLOT_GAP;
+}
+
 static void slots_draw (void)
 {
 	float bw, bh;
 	tool_bar_size(&bw, &bh);
 
-	float x = sidebar_edge() + SLOT_MARGIN;
+	float x = slots_x();
 	float y = vng_win_h - bh - SLOT_MARGIN;
 
 	for (int i = 0; i < 2; i++) {

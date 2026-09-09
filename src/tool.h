@@ -200,4 +200,14 @@ extern bool tool_light_on (Uint32 argb);
 extern void tool_bar_draw (SDL_FRect bar, Uint32 argb);
 extern void tool_bar_size (float *w, float *h);
 
+/*
+ * Where the two loaded colours END on screen, so anything sitting beside them measures from
+ * one place - the same reason sidebar_edge() exists.
+ *
+ * They already move: they step aside for the project panel, which is animated. Anything that
+ * hardcoded its own copy of "two bars and a gap" would drift out of step with them the first
+ * time either the face or that panel changed.
+ */
+extern float tool_slots_edge (void);
+
 #endif
