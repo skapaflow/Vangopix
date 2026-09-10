@@ -159,7 +159,8 @@ typedef enum {
 	VNG_CUR_CROSS,
 	VNG_CUR_WE,      /* west-east, for an edge that stretches sideways      */
 	VNG_CUR_NS,      /* north-south, for one that stretches up and down     */
-	VNG_CUR_NWSE,    /* the corner that does both                           */
+	VNG_CUR_NWSE,    /* the corner that does both, top-left to bottom-right  */
+	VNG_CUR_NESW,    /* and the other diagonal, top-right to bottom-left     */
 	VNG_CUR_LOT
 } VNG_CURSOR;
 

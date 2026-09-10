@@ -37,8 +37,20 @@
    automatically the first time a tab is drawn. */
 extern void view_reset (VNG_TAB *t);
 
-/* Puts the sheet at exactly 1:1, keeping the centre of the window on the same point. */
-extern void view_actual_size (VNG_TAB *t);
+/*
+ * PUTS THE SHEET BACK: one pixel to one, and the middle of the DOCUMENT in the middle of the
+ * window. What the 0 key means, and the only framing gesture that needs no aim.
+ *
+ * It used to keep whatever was in the middle of the window in the middle of the window, on
+ * the grounds that the centre of the document is rarely where the work is. That is true of a
+ * 1:1 TOGGLE, which is what it was then - a thing you reach for mid-stroke to check a detail
+ * at its real size, and which must not throw the eye across the drawing to do it.
+ *
+ * This is a different gesture wearing the same call. "Put it back" is what a hand reaches for
+ * when it has zoomed off somewhere and lost the sheet, and answering that by keeping the
+ * point it is lost at would be answering the wrong question. A reset goes home.
+ */
+extern void view_home (VNG_TAB *t);
 
 /* Returns true when the view consumed the event. */
 extern bool view_event (const SDL_Event *e, VNG_TAB *t);

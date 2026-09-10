@@ -60,6 +60,29 @@ static const SDL_FPoint vpick[] = {
 	{  9, -6},{  8, -7},{  7, -8},{  5, -8},{  4, -7},{  2, -5},{  1, -5},{  0, -4}
 };
 
+/*
+ * THE TWO FOLDER MARKS, from poly/vector.ini beside the first Vangopix - `dir_close` is the
+ * box and `dir_open` is the same box with its front panel swung out to the right.
+ *
+ * They replace a "v" and a ">" typed in the text face, and the difference is not decoration:
+ * two arrows say "this row can be unfolded", which is a fact about the WIDGET. A folder says
+ * what the row IS, and whether it is open is then the same drawing in two positions instead
+ * of two unrelated characters.
+ *
+ * BOTH ARE DRAWN FROM THE SAME ORIGIN, deliberately. Centring each on its own extent would
+ * shift the box sideways the moment a folder was opened, and a mark that jumps when it
+ * changes state reads as two icons rather than one thing moving. The open panel sticks out to
+ * the right because that is what it is doing.
+ */
+static const SDL_FPoint vdir_open[] = {
+	{ -7, -6},{ -7,  6},{  7,  6},{ -7,  6},{ -4, -3},{ 10, -3},{  7,  6},{  7, -6},{  0, -6},
+	{ -1, -8},{ -7, -8}
+};
+
+static const SDL_FPoint vdir_shut[] = {
+	{ -7, -6},{ -7,  6},{  7,  6},{  7, -6},{  0, -6},{ -1, -8},{ -7, -8}
+};
+
 typedef struct { const SDL_FPoint *pt; int lot; } SHAPE;
 
 /* The order is the TOOL order, so a tool indexes its own glyph with no table between. */
@@ -74,7 +97,9 @@ static const SHAPE shapes[GLYPH_LOT] = {
 	{ vchange,  (int)SDL_arraysize(vchange)  },
 	{ vselect,  (int)SDL_arraysize(vselect)  },
 	{ vpick,    (int)SDL_arraysize(vpick)    },
-	{ vpointer, (int)SDL_arraysize(vpointer) },
+	{ vpointer,  (int)SDL_arraysize(vpointer)  },
+	{ vdir_open, (int)SDL_arraysize(vdir_open) },
+	{ vdir_shut, (int)SDL_arraysize(vdir_shut) },
 };
 
 /* One more than the longest glyph, because the path is closed by repeating its first point.

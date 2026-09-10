@@ -26,9 +26,24 @@ static float    grab_dx  = 0.0f;   /* where inside the tab the hand took hold */
  * has, and what lets a mis-press be taken back by sliding off before releasing. */
 static VNG_TAB *close_armed = NULL;
 
+/*
+ * A ROW OF SHEETS WITH NO SHEETS IS NOT A ROW, and answering that here is what fixes a real
+ * fault rather than hiding one.
+ *
+ * `visible` is only what ESC last said. The bar is drawn from inside the frame's document
+ * branch, so on an empty desk it is not on screen at all - and everything that measures
+ * against it was believing the flag instead of the screen: the project strip stepped down
+ * twenty pixels to clear a bar that was not there, and the tool's "is the pointer over
+ * chrome" test claimed a band of empty desk.
+ *
+ * One question, asked in one place, and the flag survives untouched underneath: ESC pressed
+ * on an empty desk still arms the bar, and it comes up with the first sheet.
+ */
+static bool up (void) { return visible && vng_tabs != NULL; }
+
 void tabbar_toggle  (void) { visible = !visible; }
-bool tabbar_visible (void) { return visible; }
-float tabbar_height (void) { return visible ? BAR_H : 0.0f; }
+bool tabbar_visible (void) { return up(); }
+float tabbar_height (void) { return up() ? BAR_H : 0.0f; }
 
 static float tab_w (void)
 {
@@ -72,7 +87,7 @@ static bool on_plus (float x, float y)
 
 bool tabbar_event (const SDL_Event *e)
 {
-	if (!visible) return false;
+	if (!up()) return false;
 
 	switch (e->type) {
 
@@ -170,7 +185,7 @@ bool tabbar_event (const SDL_Event *e)
 
 void tabbar_draw (void)
 {
-	if (!visible) return;
+	if (!up()) return;
 
 	float w  = tab_w();
 	float mx = 0.0f, my = 0.0f;

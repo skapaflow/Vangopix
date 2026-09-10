@@ -36,3 +36,8 @@ projects.vngproj
 # machines, which are the same for everyone.
 vangopix.anime
 build/
+
+# The key list the empty desk shows. Vangopix WRITES this one from its own defaults whenever
+# it is not there, so committing it would be committing a copy that goes stale the moment the
+# defaults change - and deleting it is the documented way to get those defaults back.
+keyboard.txt

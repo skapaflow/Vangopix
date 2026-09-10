@@ -134,12 +134,76 @@ static void node_scan (VNG_NODE *dir)
 	node_sort_children(dir);
 }
 
+/*
+ * HOW DEEP A RE-READ MAY GO.
+ *
+ * The recursion below follows what a person has EXPANDED, so in practice it is a handful of
+ * levels - but the tree comes from a folder somebody dropped in, and a symlink loop or a
+ * pathological hierarchy must run out of counter rather than out of C stack. The sidebar's
+ * own walk caps itself the same way, for the same reason.
+ */
+#define RESCAN_DEEP 32
+
+static void node_rescan (VNG_NODE *dir, int deep);
+
+/*
+ * Was a directory of that name open here before, and is it worth following down?
+ *
+ * Matched by NAME and not by pointer, because the old nodes are about to be freed and the new
+ * ones are different memory describing the same folder. The name is what the two share.
+ */
+static bool was_open (VNG_NODE *old, const char *name)
+{
+	for (VNG_NODE *p = old; p; p = p->next)
+		if (p->is_dir && p->open && SDL_strcmp(p->name, name) == 0) return true;
+	return false;
+}
+
+static void node_rescan (VNG_NODE *dir, int deep)
+{
+	if (!dir || !dir->is_dir || deep >= RESCAN_DEEP) return;
+
+	/*
+	 * THE OLD CHILDREN ARE HELD, NOT FREED, UNTIL THE NEW ONES ARE IN.
+	 *
+	 * They are the only record of which subfolders were open, and that state is the whole
+	 * point of a refresh being different from a collapse: a person who has drilled four
+	 * folders down to a spritesheet must not have to do it again because they hid the panel.
+	 */
+	VNG_NODE *old = dir->child;
+	dir->child   = NULL;
+	dir->scanned = false;
+
+	node_scan(dir);
+
+	for (VNG_NODE *c = dir->child; c; c = c->next) {
+		if (!c->is_dir || !was_open(old, c->name)) continue;
+
+		c->open = true;
+		node_rescan(c, deep + 1);
+	}
+
+	node_free(old);
+}
+
 void project_toggle (VNG_NODE *dir)
 {
 	if (!dir || !dir->is_dir) return;
 
-	if (!dir->open) node_scan(dir);
+	/* OPENING IS ASKING WHAT IS IN IT, so opening goes and looks - see project.h. Closing
+	 * reads nothing: it is a walk of the disk to draw a row that says nothing is showing. */
+	if (!dir->open) {
+		if (dir->scanned) node_rescan(dir, 0);
+		else              node_scan(dir);
+	}
+
 	dir->open = !dir->open;
+}
+
+void project_refresh (void)
+{
+	for (VNG_NODE *p = vng_projects; p; p = p->next)
+		if (p->is_dir && p->open && p->scanned) node_rescan(p, 0);
 }
 
 bool project_add (const char *dir)
@@ -179,6 +243,43 @@ void project_remove (VNG_NODE *root)
 	node_free(root);
 
 	project_save();
+}
+
+void project_move (VNG_NODE *root, int index)
+{
+	if (!root) return;
+
+	/*
+	 * A SINGLY LINKED LIST HAS NO prev, so the handle on a node is the POINTER THAT REACHES
+	 * IT - `&vng_projects` for the first, `&previous->next` for the rest. Walking with a
+	 * double pointer finds that handle and counts the roots in the same pass, and it is what
+	 * lets the unlink below be one write with no special case for the head.
+	 *
+	 * The tab row keeps a prev and can splice from the node itself; this list never needed
+	 * one for anything else, and a back pointer added for one gesture is a second thing to
+	 * keep true on every add and every remove.
+	 */
+	int         n  = 0;
+	VNG_NODE  **at = NULL;
+
+	for (VNG_NODE **pp = &vng_projects; *pp; pp = &(*pp)->next, n++)
+		if (*pp == root) at = pp;
+
+	if (!at) return;   /* not a root - a subfolder has no place of its own to move to */
+
+	if (index < 0)   index = 0;
+	if (index >= n)  index = n - 1;
+
+	*at = root->next;
+	root->next = NULL;
+
+	/* Counted over the list WITH root already out of it, which is what makes dragging
+	 * downwards land past the root it was dropped on rather than in front of it. */
+	VNG_NODE **pp = &vng_projects;
+	for (int i = 0; i < index && *pp; i++) pp = &(*pp)->next;
+
+	root->next = *pp;
+	*pp = root;
 }
 
 /* The file lives beside the executable rather than in a user config directory, because

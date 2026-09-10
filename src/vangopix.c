@@ -3,6 +3,9 @@
 #include "core.h"
 #include "project.h"
 #include "anim.h"
+#include "sidebar.h"
+#include "keymap.h"
+#include "splash.h"
 #include "file.h"
 #include "tool.h"
 #include "select.h"
@@ -150,16 +153,41 @@ bool vangopix_init (int argc, char **argv)
 
 	project_load();
 
+	/* The list on the empty desk, and the keyboard.txt it is read from - written from the
+	 * built-in defaults when that file is not there. Not fatal: without it the desk shows the
+	 * same list from memory. */
+	keymap_load();
+
 	/* Every path on the command line becomes a tab. This is what lets Vangopix be
 	 * associated with an image extension and handed a whole selection at once. */
 	for (int i = 1; i < argc; i++)
 		vng_tab_open(argv[i]);
 
-	/* Nothing opened, or nothing was asked for: the program always has paper. */
-	if (!vng_tab)
-		vng_tab_new(VNG_NEW_W, VNG_NEW_H);
+	/*
+	 * AND IF NOTHING WAS ASKED FOR, NOTHING IS OPENED.
+	 *
+	 * It used to make a blank sheet here so the program always had paper. An untitled sheet
+	 * nobody asked for is a decision taken on somebody's behalf, and it is in the way of the
+	 * two things a person actually arrives to do: drop a file in, or say what size they want.
+	 * The desk is left bare and core.c writes the keys across it, which is the only teaching
+	 * this program has room for - it has no menus to read.
+	 */
+	/* The picture the program opens with. After the font, because its words are drawn INTO
+	 * it - see splash.h. */
+	splash_open();
 
-	return vng_tab != NULL;
+	/*
+	 * THE PROJECT PANEL IS NOT RAISED HERE, and that is deliberate rather than left out.
+	 *
+	 * It offers itself instead: with no document, sidebar.c shows a narrow strip at the left
+	 * edge that slides the panel out when it is pressed - see sidebar.h. Opening it the whole
+	 * way on somebody's behalf would put a quarter of the window in front of the page that
+	 * explains the program, to answer a question they may not have.
+	 *
+	 * The strip is enough. It is the only part of this interface that can be used by pointing,
+	 * which is all somebody arriving needs to have.
+	 */
+	return true;
 }
 
 void vangopix_quit (void)
@@ -176,6 +204,8 @@ void vangopix_quit (void)
 	vng_text_small = NULL;
 
 	anim_free();
+	sidebar_free();
+	splash_free();
 
 	text_free(vng_text);
 	if (vng_ren) SDL_DestroyRenderer(vng_ren);

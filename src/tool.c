@@ -4,6 +4,8 @@
 #include "view.h"
 #include "keys.h"
 #include "glyph.h"
+#include "resize.h"
+#include "keymap.h"
 #include "primitives.h"
 #include "tabbar.h"
 #include "sidebar.h"
@@ -157,6 +159,7 @@ bool tool_init (void)
 	cur[VNG_CUR_WE]    = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_EW_RESIZE);
 	cur[VNG_CUR_NS]    = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NS_RESIZE);
 	cur[VNG_CUR_NWSE]  = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NWSE_RESIZE);
+	cur[VNG_CUR_NESW]  = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NESW_RESIZE);
 
 	if (!cur[VNG_CUR_ARROW] || !cur[VNG_CUR_CROSS]) {
 		SDL_Log("cursors: %s", SDL_GetError());
@@ -586,30 +589,48 @@ static void apply (VNG_TAB *t, int x, int y)
 
 /* ------------------------------------------------------------------------ the events */
 
-/* The panels float OVER the sheet, so the pointer can be on the paper and on a panel at the
- * same time. Their own events already settle a click - they consume it before this file sees
- * it - but the cursor SHAPE is decided every frame, from where the pointer is, and it has to
- * agree with who would actually get the click. */
-static bool over_panel (float mx, float my)
+/*
+ * IS SOMETHING ELSE GOING TO GET THIS CLICK.
+ *
+ * The panels float OVER the sheet, so the pointer can be on the paper and on a panel at the
+ * same time. Their own events already settle a press - they consume it before this file sees
+ * it - but the cursor SHAPE and the tool's own drawing are decided every frame, from where
+ * the pointer is, and both have to agree with who would actually get the click.
+ *
+ * THE CORNER GRIPS ARE IN THIS LIST NOW, and they are the case that showed why it matters.
+ * They already took the press - resize.c is a rung above this file in core.c's chain - so a
+ * click on one never drew a pixel. What it drew was the CROSSHAIR, the tip outline and the
+ * tool glyph, all promising a stroke that could not happen, on a target five pixels across
+ * where the promise decides whether a hand commits. A pointer must not offer what the next
+ * press will not do.
+ *
+ * The grips sit diagonally OUTSIDE the sheet's corners, so they never overlap the artwork -
+ * nothing that can be drawn on is being refused here.
+ */
+static bool over_panel (VNG_TAB *t, float mx, float my)
 {
-	return my < tabbar_height() || mx < sidebar_edge();
+	return my < tabbar_height() || mx < sidebar_edge() || resize_hot(t);
 }
 
-/* Q W E R / A S D F, the first Vangopix's own block under the left hand. */
-static bool tool_key (SDL_Keycode k, TOOL *out)
+/*
+ * WHICH TOOL THIS EVENT PICKS, IF ANY.
+ *
+ * Q W E R / A S D F was the first Vangopix's own block under the left hand, and it is still
+ * where these start - but the keys live in keymap.c now, and keyboard.txt can move them.
+ *
+ * NO TABLE IN BETWEEN: keymap.h keeps the nine tool actions contiguous and in TOOL order, so
+ * a tool indexes its own action by arithmetic. It is the same arrangement glyph.h uses to let
+ * a tool index its own glyph, and for the same reason - a second list mapping one enum onto
+ * another is a second list that can fall out of step.
+ */
+static bool tool_key (const SDL_Event *e, TOOL *out)
 {
-	switch (k) {
-	case SDLK_Q: *out = T_PENCIL;  return true;
-	case SDLK_W: *out = T_LINE;    return true;
-	case SDLK_E: *out = T_RECT;    return true;
-	case SDLK_R: *out = T_ELLIPSE; return true;
-	case SDLK_A: *out = T_ERASER;  return true;
-	case SDLK_S: *out = T_BUCKET;  return true;
-	case SDLK_D: *out = T_SPRAY;   return true;
-	case SDLK_F: *out = T_CHANGE;  return true;
-	case SDLK_Z: *out = T_SELECT;  return true;
-	default: return false;
-	}
+	for (int i = 0; i < T_LOT; i++)
+		if (keymap_hit((VNG_ACT)(VNG_ACT_TOOL_FIRST + i), e)) {
+			*out = (TOOL)i;
+			return true;
+		}
+	return false;
 }
 
 bool tool_event (const SDL_Event *e, VNG_TAB *t)
@@ -621,14 +642,15 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 	case SDL_EVENT_KEY_DOWN: {
 		if (e->key.repeat) return false;
 
+		/* Still needed by the two SHIFT shortcuts below - keymap_hit answers the bare
+		 * question for everything that IS a bare key. */
 		SDL_Keymod m = e->key.mod;
-		bool bare = (m & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT | SDL_KMOD_ALT | SDL_KMOD_GUI)) == 0;
 
-		/* A TOOL KEY ONLY COUNTS BARE. CTRL+S saves and S is the bucket; the two are told
-		 * apart by asking whether ANY modifier is down, not by asking about the one that
+		/* A TOOL KEY ONLY COUNTS BARE - CTRL+S saves and S is the bucket. keymap_hit asks
+		 * that for us now, the wide way: no modifier at all, rather than not the one that
 		 * happens to collide today. */
 		TOOL want;
-		if (bare && tool_key(e->key.key, &want)) {
+		if (tool_key(e, &want)) {
 			/* A float is put down before the hand moves to another tool. Leaving one in the
 			 * air while a pencil draws under it is a document with two futures. */
 			if (want != current) select_commit(t);
@@ -654,7 +676,7 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 			return true;
 		}
 
-		if (bare && e->key.key == SDLK_M) {
+		if (keymap_hit(VNG_ACT_COLOUR_MIX, e)) {
 			Uint32 a = colour[0], b = colour[1];
 			colour[0] = ((((a >> 24) & 0xFF) + ((b >> 24) & 0xFF)) / 2) << 24
 			          | ((((a >> 16) & 0xFF) + ((b >> 16) & 0xFF)) / 2) << 16
@@ -906,7 +928,7 @@ void tool_frame (VNG_TAB *t)
 	pixel_of(t, mx, my, &x, &y);
 
 	bool want = (current == T_PENCIL) && (keys_mods() & SDL_KMOD_SHIFT) &&
-	            inside(t, x, y) && !over_panel(mx, my);
+	            inside(t, x, y) && !over_panel(t, mx, my);
 
 	if (!want) { hint_drop(t); return; }
 
@@ -1198,7 +1220,7 @@ void tool_draw (VNG_TAB *t)
 	/* While a stroke is running the pointer owns the sheet wherever it has wandered to,
 	 * including over a panel: letting the cursor flicker back to an arrow mid-stroke would
 	 * report that the drawing had stopped, which it has not. */
-	bool on = drawing || (inside(t, x, y) && !over_panel(mx, my));
+	bool on = drawing || (inside(t, x, y) && !over_panel(t, mx, my));
 
 	/* keys_mods reports nothing while a text field owns the keyboard, so typing a CTRL
 	 * shortcut into one cannot turn the pointer into an eyedropper over the drawing. */

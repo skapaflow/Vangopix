@@ -23,8 +23,16 @@
  * whatever is underneath. The first Vangopix does exactly this in draw_wireframe_entity.
  */
 
-/* IN TOOL ORDER, so a tool is its own glyph index and there is no table in between. Every
- * shape is the first Vangopix's, vertex for vertex, from its src/gui/gui_main_tool.c. */
+/*
+ * THE TOOLS COME FIRST AND IN TOOL ORDER, so a tool is its own glyph index and there is no
+ * table in between. Every shape is the first Vangopix's, vertex for vertex, from its
+ * src/gui/gui_main_tool.c and from poly/vector.ini beside it.
+ *
+ * WHAT IS NOT A TOOL GOES AFTER THEM, and the boundary is the whole reason the order is
+ * stated: an entry added in the middle would quietly renumber every tool. GLYPH_POINTER was
+ * already the first of these - an arrow that means whatever it is turned towards - and the
+ * two folder marks join it.
+ */
 typedef enum {
 	GLYPH_PENCIL = 0,
 	GLYPH_LINE,
@@ -36,7 +44,11 @@ typedef enum {
 	GLYPH_CHANGE,
 	GLYPH_SELECT,
 	GLYPH_PICK,
+
+	/* ---- past here is not a tool ---- */
 	GLYPH_POINTER,
+	GLYPH_DIR_OPEN,
+	GLYPH_DIR_SHUT,
 	GLYPH_LOT
 } GLYPH;
 

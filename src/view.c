@@ -114,16 +114,15 @@ void view_reset (VNG_TAB *t)
 	view_center_on(t, t->w * 0.5f, t->h * 0.5f);
 }
 
-void view_actual_size (VNG_TAB *t)
+void view_home (VNG_TAB *t)
 {
 	if (!t) return;
 
-	/* Keeps whatever is in the middle of the window in the middle of the window. Going
-	 * to 1:1 by resetting the offset instead would throw the eye back to the centre of
-	 * the document, which is rarely where the work is. */
-	SDL_FPoint c = raw_to_world(t, vng_win_w * 0.5f, vng_win_h * 0.5f);
+	/* The document's own middle, not the window's - see view.h on why this gesture wants the
+	 * opposite of what a 1:1 toggle wants. The zoom goes first, because centring is done in
+	 * screen pixels and has to be told the scale it is centring at. */
 	t->zoom = 1.0f;
-	view_center_on(t, c.x, c.y);
+	view_center_on(t, t->w * 0.5f, t->h * 0.5f);
 }
 
 /* The step nearest to the current zoom.

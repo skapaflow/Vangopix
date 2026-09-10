@@ -23,6 +23,7 @@
 #include "keys.h"
 #include "view.h"
 #include "file.h"
+#include "expr.h"
 
 /* Text and ENTER, the way core.c hands them to whoever owns the keyboard. */
 static void typed (const char *t)
@@ -43,8 +44,19 @@ static void enter (void)
 	keys_event(&e);
 }
 
-/* Opens the field, types, commits - the gesture in one line, since the checks below are
- * about what comes out and not about the clicking. */
+/* DELETE, which empties the box. A field opens holding its value and typing ADDS to it, so
+ * every check below that means to REPLACE a value has to say so - the same key a hand uses. */
+static void wipe (void)
+{
+	SDL_Event e;
+	SDL_zero(e);
+	e.type    = SDL_EVENT_KEY_DOWN;
+	e.key.key = SDLK_DELETE;
+	keys_event(&e);
+}
+
+/* Opens the field, clears it, types, commits - the gesture in one line, since the checks
+ * below are about what comes out and not about the clicking. */
 static void hex_type (const char *t)
 {
 	SDL_Event e;
@@ -56,8 +68,24 @@ static void hex_type (const char *t)
 	e.button.y = c.y + c.h - 28.0f;
 	win_event(&e);
 
+	wipe();
 	typed(t);
 	enter();
+}
+
+/* A press and its release, through the window chain - what a hand does to a widget. */
+static void press_at (float x, float y)
+{
+	SDL_Event e;
+	SDL_zero(e);
+	e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+	e.button.button = SDL_BUTTON_LEFT;
+	e.button.x = x;
+	e.button.y = y;
+	win_event(&e);
+
+	e.type = SDL_EVENT_MOUSE_BUTTON_UP;
+	win_event(&e);
 }
 
 /* A bare key press, the way core.c hands one to the tool. */
@@ -102,6 +130,13 @@ static void ok (const char *what, bool cond)
 {
 	SDL_Log("%s %s", cond ? "PASS" : "FAIL", what);
 	if (!cond) fails++;
+}
+
+/* Does that line come out as that number - the shape every arithmetic claim below wants. */
+static bool sum_is (const char *line, double want)
+{
+	double v = 0.0;
+	return expr_eval(line, &v) && SDL_fabs(v - want) < 1e-9;
 }
 
 static bool same (const Uint32 *a, const Uint32 *b, int n)
@@ -872,6 +907,7 @@ int main (void)
 		e.key.key = SDLK_TAB;
 		ok("WHILE TYPING, TAB IS THE FIELD'S AND NOT THE SIDEBAR'S", keys_event(&e));
 
+		wipe();                          /* the box opens holding the colour it reads out */
 		typed("2E3440");
 		ok("nothing lands until ENTER does", tool_colour(0) != 0xFF2E3440u);
 
@@ -2125,8 +2161,72 @@ int main (void)
 		win_draw();          /* walks the preview, the list and the icon strip */
 		anim_draw(t);        /* and the clip grid on the sheet */
 		anim_tick();
+
+		/*
+		 * ---- THE EDITOR IS A FORM, AND A FORM TAKES WHAT IS IN IT ----
+		 *
+		 * The reported bug, driven the way a hand drives it: click a box, type, click the NEXT
+		 * box, and at the end press Create. NO ENTER ANYWHERE - because nobody presses ENTER
+		 * seven times, and the button that says Create is the one that means "take this".
+		 *
+		 * Every box committed on ENTER only, so this produced the clip the editor opened with:
+		 * "UNKNOWN", 32 x 32, AND NO FRAMES. That is both halves of the complaint at once - a
+		 * clip with no frames draws neither the preview nor the grid on the sheet, so the
+		 * window that would not keep the values was also the window showing nothing.
+		 *
+		 * Driven through win_event, not by calling into anim.c, so what is checked is the
+		 * chain a press actually takes.
+		 */
+		{
+			SDL_FRect a = win_area(win_top());
+			win_place(win_top(), 320.0f, 320.0f);
+			a = win_area(win_top());
+
+			/* NEW: the first of the three words in the icon strip. Its band is measured the
+			 * same way anim.c stacks it - pad, the row of step buttons, pad. */
+			float icon_y = a.y + ui_pad() + ui_row() + ui_pad();
+			press_at(a.x + ui_pad() + 2.0f, icon_y + 2.0f);
+
+			VNG_WIN *ed = win_top();
+			ok("NEW opens the editor over the player", ed != NULL && win_area(ed).h > a.h);
+
+			/* Counted rather than assumed: putting the window up reads whatever .anime sits
+			 * beside the exe, and on a machine that has one this list is not empty. What is
+			 * checked is the clip THIS gesture made, wherever it lands. */
+			int held = anim_lot();
+
+			SDL_FRect b = win_area(ed);
+			static const char *const VAL[7] = { "Leap", "0.25", "3", "0", "0", "8", "8" };
+
+			for (int i = 0; i < 7; i++) {
+				SDL_FRect r = { b.x + ui_pad(), b.y + ui_pad() + ui_row() * (float)i,
+				                b.w - ui_pad() * 2.0f, ui_row() };
+				press_at(r.x + r.w - 4.0f, r.y + r.h * 0.5f);
+				wipe();                 /* the box keeps what it holds - see field.h */
+				typed(VAL[i]);          /* and NOT enter() */
+			}
+
+			float bw = ui_cell() * 7.0f, bh = ui_row();
+			press_at(b.x + SDL_floorf((b.w - bw) * 0.5f) + bw * 0.5f,
+			         b.y + b.h - bh - ui_pad() + bh * 0.5f);
+
+			ok("CREATE TAKES WHAT WAS TYPED, WITHOUT AN ENTER ANYWHERE",
+			   anim_lot() == held + 1 && SDL_strcmp(anim_name(held), "Leap") == 0);
+			ok("and the editor closes behind it", win_visible(ed) == false);
+			ok("AND THE KEYBOARD IS HANDED BACK", keys_owned() == false);
+
+			win_draw();      /* the preview, now that there is a clip with frames in it */
+			anim_draw(t);
+		}
+
 		anim_toggle();
 		ok("and X puts it away", anim_visible() == false);
+
+		/* The editor belongs to the player, so it goes away with it - and a field left open
+		 * would hold the keyboard with no caret anywhere on screen, which is the whole
+		 * program's shortcuts dead. */
+		anim_tick();
+		ok("nothing holds the keyboard once the window is down", keys_owned() == false);
 	}
 
 	/* ---- THE ZOOM AS IT IS READ ----
@@ -2343,6 +2443,46 @@ int main (void)
 		if (alt)  SDL_DestroyWindow(alt);
 		SDL_free(a);
 		SDL_free(b);
+	}
+
+	/* ---- A LINE OF ARITHMETIC IN A NUMBER BOX ----
+	 *
+	 * A sprite offset is almost never a number somebody knows, it is one somebody works out -
+	 * so the boxes take `32*4`. Pinned here because an evaluator is the most checkable thing
+	 * in this program and because the way it goes wrong is SILENT: a left-to-right walk is
+	 * four lines and reads 2+3*4 as 20, and every number it ever produced would look like a
+	 * number somebody typed.
+	 */
+	{
+		double v;
+		#define NOPE(s) (expr_eval((s), &v) == false)
+
+		ok("* BINDS TIGHTER THAN +",       sum_is("2+3*4", 14) && sum_is("2*3+4", 10));
+		ok("and - runs left to right",     sum_is("10-2-3", 5));     /* not 10-(2-3) */
+		ok("and so does /",                sum_is("100/10/2", 5));
+		ok("brackets outrank both",        sum_is("(2+3)*4", 20) && sum_is("2*(3+(4-1))", 12));
+
+		ok("A SIGN IS NOT A SUBTRACTION",  sum_is("3*-2", -6) && sum_is("3- -2", 5));
+		ok("and it stacks",                sum_is("--8", 8) && sum_is("-(3+4)", -7));
+
+		ok("the gesture this is for",      sum_is("32*4", 128) && sum_is("160-8", 152));
+		ok("space is not an operator",     sum_is(" 64 + 16 ", 80));
+		ok("and a plain number is a sum",  sum_is("32", 32) && sum_is("1.5", 1.5));
+
+		/*
+		 * THE REFUSALS ARE THE POINT, and every one of these is a box mid-keystroke. Reading
+		 * 32 out of "32*" is exactly the quiet wrong answer SDL_atoi gives; refusing is what
+		 * lets the field run this on EVERY key without the number under the hand flickering
+		 * through the halves of what is being typed.
+		 */
+		ok("HALF A SUM IS NOT A VALUE",    NOPE("32*") && NOPE("*4") && NOPE("--"));
+		ok("nor is a line with a stray",   NOPE("32 4") && NOPE("1.2.3") && NOPE("32x4"));
+		ok("nor an unclosed bracket",      NOPE("(2+3") && NOPE("2+3)") && NOPE("(") && NOPE("()"));
+		ok("nor an empty box",             NOPE("") && NOPE("   "));
+		ok("DIVIDING BY ZERO IS REFUSED, NOT INFINITE", NOPE("4/0"));
+		ok("and so is anything that overflows to it",   NOPE("1e400"));
+
+		#undef NOPE
 	}
 
 	/* ---- what a save dialog's answer means ----

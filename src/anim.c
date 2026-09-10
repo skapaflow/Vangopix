@@ -82,7 +82,20 @@ static int  list_top = 0;    /* the first row showing */
 /* The clip being played and edited. A COPY and not an index, which is the original's own
    arrangement and the right one: deleting a clip must not leave the player pointing into a
    hole, and a copy simply goes on playing. */
-static CLIP box = { "UNKNOWN", 0.1f, 0, 0, 0, 32, 32 };
+/*
+ * WHAT A CLIP IS BEFORE ANYBODY HAS SAID, named because it is wanted in two places: the value
+ * the program starts on, and what the window goes back to when it is shown a drawing that has
+ * no clips of its own.
+ *
+ * ONE FRAME AND NOT ZERO, which is what it was. Everything that draws a clip guards on
+ * `frames >= 1` - correctly, since the sidecar is a text file - so a player opened before any
+ * clip exists showed NO PREVIEW AND NO GRID ON THE SHEET, and nothing on screen said why. The
+ * grid is the whole reason a clip is a rectangle on the drawing rather than four numbers, so
+ * it has to be there from the first frame the window is up.
+ */
+static const CLIP CLIP_NEW = { "UNKNOWN", 0.1f, 1, 0, 0, 32, 32 };
+
+static CLIP box = { "UNKNOWN", 0.1f, 1, 0, 0, 32, 32 };
 
 /* Which entry the editor is writing back to, or -1 for a new one.
  *
@@ -90,6 +103,11 @@ static CLIP box = { "UNKNOWN", 0.1f, 0, 0, 0, 32, 32 };
  * its close box left "new" set and the next edit appended a duplicate instead of updating.
  * One value that says both things cannot fall out of step with itself. */
 static int  edit_at = -1;
+
+/* Which document's sidecar the list came from, so summoning the window on a DIFFERENT
+ * drawing reads that drawing's clips instead of showing the last one's. Zero is "none yet".
+ * The tab id and not the pointer: a closed tab's address can come back as another one. */
+static Uint32 list_for = 0;
 
 static float clock_s = 0.0f;   /* seconds since the clip started playing */
 static int   vert    = 0;      /* the row on the sheet */
@@ -186,6 +204,8 @@ int anim_load (const char *path)
 
 	if (list_lot > 0) box = list[0];
 	return list_lot;
+	/* list_for is NOT set here: this says what was read, and the caller says what it was
+	 * reading FOR. anim_load is also the check suite's entry point. */
 }
 
 static bool anim_save (const char *path)
@@ -204,17 +224,53 @@ static bool anim_save (const char *path)
 	return true;
 }
 
-/* Beside the executable, which is where the fonts and the palette list already live: a file
-   manager, a shortcut and a terminal each launch from a different directory. */
+/*
+ * THE CLIPS BELONG TO THE IMAGE, SO THEY ARE KEPT BESIDE IT AND UNDER ITS NAME.
+ *
+ * hero.png keeps its clips in hero.vnganime, in the same folder. That is the whole of it, and
+ * it is what makes LOAD a button rather than a file browser: a clip is four numbers pointing
+ * at pixels IN ONE PARTICULAR DRAWING, so there is exactly one file it could mean and nothing
+ * to ask. The first Vangopix put up a dialog to go and find it; the dialog was only ever
+ * asking a question that has one answer.
+ *
+ * It replaces a fixed vangopix.anime beside the executable, which was the wrong file in the
+ * literal sense: one list of rectangles for every image ever opened, saved over by whichever
+ * sheet was on screen last.
+ *
+ * A sheet that has never been saved has no name to hang it on, and that is why this can fail
+ * - the icon strip greys SAVE and LOAD out to say so.
+ */
+#define ANIM_EXT ".vnganime"
+
+static bool anim_path (char *dst, size_t cap)
+{
+	VNG_TAB *t = vng_tab;
+
+	if (!t || !t->path || !t->path[0]) return false;
+	if (SDL_strlcpy(dst, t->path, cap) >= cap) return false;
+
+	/* The last dot AFTER the last separator. A dot in a DIRECTORY is not an extension -
+	 * C:/my.sprites/hero cut at that dot would write the sidecar outside the folder, and
+	 * beside a directory rather than beside the drawing. file.c makes the same distinction
+	 * for the same reason. */
+	size_t cut = SDL_strlen(dst);
+	for (size_t i = cut; i > 0; i--) {
+		char c = dst[i - 1];
+		if (c == '/' || c == '\\') break;
+		if (c == '.') { cut = i - 1; break; }
+	}
+	dst[cut] = 0;
+
+	return SDL_strlcat(dst, ANIM_EXT, cap) < cap;
+}
+
 static void anim_file (bool write)
 {
-	char *path = vangopix_asset("vangopix.anime");
-	if (!path) return;
+	char path[1024];
+	if (!anim_path(path, sizeof path)) return;
 
 	if (write) anim_save(path);
 	else       anim_load(path);
-
-	SDL_free(path);
 }
 
 /* ------------------------------------------------------------------------- the list ops */
@@ -264,9 +320,17 @@ static void edit_text (int i, char *dst, size_t cap)
 	}
 }
 
-/* What ENTER in one box means. It writes only that box, so a half-typed form is never
-   committed as a whole - the original rebuilt the whole clip from all seven buffers on every
-   frame, which is why a stray keystroke could resize a clip mid-play. */
+/*
+ * WHAT A KEYSTROKE IN ONE BOX MEANS, AND IT MEANS IT AT ONCE.
+ *
+ * The clip is a RECTANGLE ON THE DRAWING, and the grid is drawn on the sheet for exactly that
+ * reason - so typing a width with the grid moving under the hand is the difference between
+ * setting a clip and guessing at one. That is the first Vangopix's own behaviour, from the
+ * `write settings` block in gui_animation.c:225, and the field reports every key to get it.
+ *
+ * IT WRITES ONLY THAT BOX, which is the half of the original worth leaving behind: it re-read
+ * all seven buffers every frame, so a stray key anywhere resized the clip that was playing.
+ */
 static void edit_done (const char *text, void *ctx)
 {
 	int i = (int)(intptr_t)ctx;
@@ -287,6 +351,51 @@ static void edit_done (const char *text, void *ctx)
 	if (box.w < 1)           box.w = 1;
 	if (box.h < 1)           box.h = 1;
 	if (!(box.speed > 0.0f)) box.speed = 0.1f;
+}
+
+/*
+ * A FORM TAKES WHAT IS IN IT, and this is the fix for the reported bug.
+ *
+ * field.h leaves `commit` to the owner because a lone box and a form of seven mean different
+ * things by leaving a box. The colour window's hex box is alone: a click elsewhere is a
+ * mis-click and dropping the half-typed colour is the kind reading. Seven boxes are a form,
+ * and in a form the click that leaves a box is the click that MOVES TO THE NEXT ONE - or the
+ * one that presses Create, which is the button that means "take this".
+ *
+ * Nothing was committing here. Filling in all seven boxes and pressing Create produced the
+ * clip the editor opened with - "UNKNOWN", no frames, 32 x 32 - because only ENTER committed
+ * and nobody presses ENTER seven times. And a clip with no frames draws neither the preview
+ * nor the grid, so the two halves of the complaint were one bug.
+ *
+ * `except` is the box the press landed on: it is about to be opened and must not be closed and
+ * reopened underneath itself. Every other one hands back what it is holding.
+ */
+static void edit_take (int except)
+{
+	for (int i = 0; i < FIELDS; i++)
+		if (i != except) field_close(edit_box[i], true);
+}
+
+/*
+ * TAB TO THE NEXT BOX, SHIFT+TAB TO THE ONE BEFORE - the seven-box form the original drove the
+ * same way, from `VNG_INPUT(7)` in gui_animation.c:215.
+ *
+ * CLAMPED AND NOT WRAPPED, which is what the original's __max(reg-1, 0) and __min(reg+1,
+ * lot-1) say. TAB off `h:` stays on `h:`; it does not throw the hand back up to `n:`.
+ *
+ * field.c has already committed the box being left by the time this runs, so `now` is read
+ * from a clip that includes whatever was just typed - which is what makes tabbing through the
+ * whole form and pressing Create work without an ENTER anywhere.
+ */
+static void edit_step (int dir, void *ctx)
+{
+	int i = (int)(intptr_t)ctx + dir;
+	if (i < 0 || i >= FIELDS) return;
+
+	char now[VNG_FIELD_MAX];
+	edit_text(i, now, sizeof now);
+
+	field_open(edit_box[i], now);
 }
 
 static SDL_FRect edit_rect (SDL_FRect a, int i)
@@ -356,12 +465,27 @@ static bool edit_event (SDL_FRect a, const SDL_Event *e, void *ctx)
 
 	float x = e->button.x, y = e->button.y;
 
-	for (int i = 0; i < FIELDS; i++)
-		if (field_press(edit_box[i], edit_rect(a, i), x, y)) return true;
+	/* Which box the press landed on, asked BEFORE anything is opened or closed - because
+	 * field_open drops whatever else was live, without committing, and it has to find the
+	 * others already emptied into the clip by then. */
+	int hit = -1;
+	for (int i = 0; i < FIELDS; i++) {
+		SDL_FRect r = edit_rect(a, i);
+		if (x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h) { hit = i; break; }
+	}
 
-	/* A press anywhere else in the window closes whatever was open WITHOUT committing: a
-	 * click is not an ENTER. */
-	for (int i = 0; i < FIELDS; i++) field_close(edit_box[i], false);
+	edit_take(hit);
+
+	if (hit >= 0) {
+		/* Opened holding what it was READING OUT, which is the clip as it stands - the same
+		 * string edit_body hands field_draw. A box that showed 32 and opened blank is how the
+		 * width got lost by being looked at. */
+		char now[VNG_FIELD_MAX];
+		edit_text(hit, now, sizeof now);
+
+		field_press(edit_box[hit], edit_rect(a, hit), x, y, now);
+		return true;
+	}
 
 	SDL_FRect b = edit_button(a);
 	if (x >= b.x && y >= b.y && x < b.x + b.w && y < b.y + b.h) {
@@ -377,10 +501,17 @@ static void edit_open (int at)
 	edit_at = at;
 
 	if (!edit_win) {
-		for (int i = 0; i < FIELDS; i++)
+		for (int i = 0; i < FIELDS; i++) {
 			edit_box[i] = field_make(i == 0 ? VNG_FIELD_TEXT
 			                       : i == 1 ? VNG_FIELD_REAL : VNG_FIELD_INT,
 			                         edit_done, (void *)(intptr_t)i);
+
+			/* Seven boxes are a form, so they are walkable - see field.h on TAB. */
+			field_step(edit_box[i], edit_step);
+
+			/* And the sheet behind them answers every key - see edit_done. */
+			field_live(edit_box[i], true);
+		}
 
 		SDL_FRect  r = { 0.0f, 0.0f, EDIT_W, EDIT_H };
 		SDL_FPoint m = { EDIT_W, EDIT_H };
@@ -440,15 +571,19 @@ static SDL_FRect list_rect (SDL_FRect a)
 	return r;
 }
 
-static void small_label (SDL_FRect r, const char *s, bool hot)
+/* `live` is what says a word can be pressed at all. Greyed rather than hidden: a strip that
+   loses an entry when a sheet is unsaved is a strip that moves under the hand, and the answer
+   to "why can I not save these" has to be on screen next to the thing that will not. */
+static void small_label (SDL_FRect r, const char *s, bool hot, bool live)
 {
 	float tw, th;
 	if (!vng_text) return;
 
+	Uint32 c = !live ? 0x585858FFu : hot ? 0x0080FFFFu : 0xFFFFFFFFu;
+
 	text_measure(vng_text_small, s, &tw, &th);
 	text_print(vng_text_small, r.x + SDL_floorf((r.w - tw) * 0.5f),
-	           r.y + SDL_floorf((r.h - th) * 0.5f),
-	           hot ? 0x0080FFFFu : 0xFFFFFFFFu, "%s", s);
+	           r.y + SDL_floorf((r.h - th) * 0.5f), c, "%s", s);
 }
 
 static void body (SDL_FRect a, void *ctx)
@@ -475,9 +610,33 @@ static void body (SDL_FRect a, void *ctx)
 	if (t && t->tex && box.frames > 0) {
 		float pw = (float)box.w * gap, ph = (float)box.h * gap;
 
-		SDL_FRect dst = { a.x + SDL_floorf((a.w - pw) * 0.5f),
-		                  a.y - ui_head() - ph - ui_pad(), pw, ph };
+		/* ABOVE the window, UNLESS THERE IS NO ROOM THERE. The head bar is kept on screen
+		 * by win.c, not the space a preview wants over it, so a player summoned near the top
+		 * - or a clip zoomed up to sixteen times - put the preview off the top edge and the
+		 * window went on looking like it was playing nothing. Under the window is the only
+		 * other side that is always there. */
+		float top = a.y - ui_head() - ph - ui_pad();
+		if (top < 0.0f) top = a.y + a.h + ui_pad();
+
+		SDL_FRect dst = { a.x + SDL_floorf((a.w - pw) * 0.5f), top, pw, ph };
 		SDL_FRect src = source(anim_frame_at(clock_s, box.frames, box.speed));
+
+		/*
+		 * IS THIS FRAME EVEN ON THE SHEET, which is the question nothing was asking.
+		 *
+		 * A clip is a rectangle STEPPED RIGHT by n*w, so a four-frame clip of 32 starting at
+		 * x=32 wants the sheet to be 160 wide - and pixel art is 64. SDL_RenderTexture with a
+		 * source rect off the texture DRAWS NOTHING AND RETURNS TRUE: no error, no log, an
+		 * empty box for three quarters of every loop. A rect half off is worse than nothing -
+		 * SDL clamps the sampling, so it stretches the edge column across the frame and shows
+		 * a picture that is not on the sheet anywhere.
+		 *
+		 * So the frame is either wholly on the sheet or it is not drawn, and the rim says
+		 * which. Red rather than a word, because a preview 16 pixels wide has no room for one
+		 * and the rim is already there.
+		 */
+		bool on_sheet = src.x >= 0.0f && src.y >= 0.0f &&
+		                src.x + src.w <= (float)t->w && src.y + src.h <= (float)t->h;
 
 		win_unclip(win);
 
@@ -487,10 +646,12 @@ static void body (SDL_FRect a, void *ctx)
 		if ((BG[bg] >> 24) < 0xFF) vangopix_desk_rect(dst);
 		if ((BG[bg] >> 24) > 0)    prim_fill(dst, BG[bg]);
 
-		SDL_SetTextureScaleMode(t->tex, SDL_SCALEMODE_NEAREST);
-		SDL_RenderTexture(vng_ren, t->tex, &src, &dst);
+		if (on_sheet) {
+			SDL_SetTextureScaleMode(t->tex, SDL_SCALEMODE_NEAREST);
+			SDL_RenderTexture(vng_ren, t->tex, &src, &dst);
+		}
 
-		prim_box(dst, 0xFFFFFFFFu, 0xFF000000u);
+		prim_box(dst, on_sheet ? 0xFFFFFFFFu : 0xFFFF3030u, 0xFF000000u);
 
 		win_clip(win);
 	}
@@ -499,8 +660,8 @@ static void body (SDL_FRect a, void *ctx)
 
 	/* The row step. It says which row of how many, which the original never did. */
 	SDL_FRect l = step_rect(a, 0), r = step_rect(a, 1);
-	small_label(l, "<-", HOT(l));
-	small_label(r, "->", HOT(r));
+	small_label(l, "<-", HOT(l), true);
+	small_label(r, "->", HOT(r), true);
 
 	{
 		char n[24];
@@ -512,12 +673,22 @@ static void body (SDL_FRect a, void *ctx)
 		           a.y + STEP_Y + SDL_floorf((ROW - th) * 0.5f), 0xFF8000FFu, "%s", n);
 	}
 
-	/* The icon strip. The original drew three wireframes; these are words in the small face,
-	 * because five new glyph paths to say NEW, SAVE and OPEN is five paths to maintain. */
-	static const char *const ICON[3] = { "NEW", "SAVE", "OPEN" };
+	/*
+	 * The icon strip. The original drew three wireframes; these are words in the small face,
+	 * because five new glyph paths to say NEW, SAVE and LOAD is five paths to maintain.
+	 *
+	 * LOAD AND NOT OPEN, because it does not open anything: there is no file to go and find,
+	 * only this drawing's own sidecar to read back. OPEN is the word for the dialog that is
+	 * no longer there.
+	 */
+	static const char *const ICON[3] = { "NEW", "SAVE", "LOAD" };
+
+	char side[1024];
+	bool named = anim_path(side, sizeof side);   /* is there an image to hang a file on */
+
 	for (int i = 0; i < 3; i++) {
 		SDL_FRect b = icon_rect(a, i);
-		small_label(b, ICON[i], HOT(b));
+		small_label(b, ICON[i], HOT(b), i == 0 || named);
 	}
 
 	/* The clip list. */
@@ -549,7 +720,7 @@ static void body (SDL_FRect a, void *ctx)
 		           y + SDL_floorf((ROW - ui_line()) * 0.5f),
 		           hot ? 0xFFFFFFFFu : 0xFF8000FFu, "%s", cut);
 
-		small_label(up, "^", HOT(up));
+		small_label(up, "^", HOT(up), true);
 		ui_close_mark(ex, HOT(ex));
 	}
 
@@ -575,6 +746,12 @@ static bool on_event (SDL_FRect a, const SDL_Event *e, void *ctx)
 
 	if (e->type != SDL_EVENT_MOUSE_BUTTON_DOWN) return false;
 
+	/* LEAVING THE FORM TAKES WHAT IS IN IT, and this is the other half of that rule: the
+	 * editor's boxes are settled by a press in the PLAYER too. Without it, typing a width and
+	 * then picking a different clip from the list left the box open holding that width, and
+	 * the next press in the editor spent it on the clip that had just been selected instead. */
+	edit_take(-1);
+
 	float x = e->button.x, y = e->button.y;
 	#define HIT(r) (x >= (r).x && y >= (r).y && x < (r).x + (r).w && y < (r).y + (r).h)
 
@@ -592,8 +769,8 @@ static bool on_event (SDL_FRect a, const SDL_Event *e, void *ctx)
 		if (!HIT(icon_rect(a, i))) continue;
 
 		if (i == 0) edit_open(-1);           /* NEW - and -1 is what says new */
-		if (i == 1) anim_file(true);
-		if (i == 2) anim_file(false);
+		if (i == 1) anim_file(true);         /* SAVE, beside the image and under its name */
+		if (i == 2) anim_file(false);        /* LOAD, the same file back */
 		return true;
 	}
 
@@ -657,6 +834,37 @@ void anim_draw (VNG_TAB *t)
 
 /* --------------------------------------------------------------------------- the frame */
 
+/*
+ * READ THIS DRAWING'S CLIPS, ONCE PER DRAWING.
+ *
+ * Summoning the window is the gesture that means "show me this sheet's animation", so that is
+ * where the sidecar is read - which is what makes LOAD a button nobody has to press.
+ *
+ * ONCE, though, and that is the whole reason list_for exists: reading on every X would throw
+ * away everything typed since the last SAVE the second time the window was put up, and it
+ * would do it silently. A drawing whose sidecar does not exist yet is still marked as read, so
+ * clips being built for it survive the window being hidden.
+ */
+static void anim_follow_tab (void)
+{
+	Uint32 id = vng_tab ? vng_tab->id : 0;
+	if (id == list_for) return;
+
+	list_for = id;
+	list_top = 0;
+	list_lot = 0;      /* another drawing's rectangles are not this one's */
+	edit_at  = -1;     /* nor is the row the editor was writing back to */
+
+	anim_file(false);
+
+	/* AND NEITHER IS THE CLIP IN HAND. anim_load takes list[0] when it reads one; when it
+	 * reads nothing, the player would otherwise go on playing the last drawing's rectangle
+	 * and draw its grid over this one - four numbers about pixels that are not there. */
+	if (list_lot == 0) box = CLIP_NEW;
+
+	clock_s = 0.0f;
+}
+
 void anim_toggle (void)
 {
 	float mx, my;
@@ -665,14 +873,14 @@ void anim_toggle (void)
 	if (win) {
 		bool on = !win_visible(win);
 
-		if (on) { win_place(win, mx, my); clock_s = 0.0f; }
+		if (on) { win_place(win, mx, my); clock_s = 0.0f; anim_follow_tab(); }
 		else if (edit_win) win_show(edit_win, false);   /* the editor belongs to the player */
 
 		win_show(win, on);
 		return;
 	}
 
-	anim_file(false);   /* whatever is beside the exe, if anything */
+	anim_follow_tab();   /* this drawing's sidecar, if it has one */
 
 	SDL_FRect  r = { 0.0f, 0.0f, OPEN_W, OPEN_H };
 	SDL_FPoint m = { OPEN_W, OPEN_H };
@@ -696,6 +904,16 @@ void anim_free (void)
    window drag does not teleport the playhead. */
 void anim_tick (void)
 {
+	/*
+	 * THE CLOSE BOX IS win.c's, AND THE EDITOR NEVER HEARS ABOUT IT - it hides the window and
+	 * that is all. A field left open goes on holding the keyboard with no caret anywhere on
+	 * screen, and while it does, every bare shortcut in the program is dead: Q is not the
+	 * pencil, TAB is not the sidebar and X will not put this window back. Asked here because
+	 * this is the one call that happens whether the windows are showing or not.
+	 */
+	if (!win_visible(edit_win))
+		for (int i = 0; i < FIELDS; i++) field_close(edit_box[i], false);
+
 	if (!win_visible(win)) return;
 
 	clock_s += vng_dt;

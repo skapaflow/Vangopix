@@ -1,6 +1,7 @@
 #include "resize.h"
 #include "keys.h"
 #include "view.h"
+#include "tool.h"
 
 #define GRIP      5.0f    /* the drawn square, in screen pixels */
 #define GRAB      5.0f    /* how far outside the square the mouse is still caught. The
@@ -167,9 +168,54 @@ bool resize_event (const SDL_Event *e, VNG_TAB *t)
 	}
 }
 
+/*
+ * WHICH DIAGONAL THIS CORNER STRETCHES ALONG.
+ *
+ * The two bits of c are the two axes - bit 0 says the corner is on the right edge, bit 1 that
+ * it is on the bottom - so a corner runs top-left to bottom-right exactly when those two bits
+ * AGREE: 00 is the top-left and 11 is the bottom-right. Disagreeing bits are the other
+ * diagonal, 01 top-right and 10 bottom-left.
+ *
+ * It falls out of the encoding rather than needing a table, which is the same reason the
+ * placement above needs no switch.
+ */
+static VNG_CURSOR corner_cursor (int c)
+{
+	return ((c & 1) == ((c >> 1) & 1)) ? VNG_CUR_NWSE : VNG_CUR_NESW;
+}
+
+bool resize_hot (VNG_TAB *t)
+{
+	if (!t) return false;
+	if (held != C_NONE) return true;   /* carrying one counts, wherever the hand has got to */
+
+	float mx, my;
+	SDL_GetMouseState(&mx, &my);
+	return corner_at(t, mx, my) != C_NONE;
+}
+
 void resize_draw (VNG_TAB *t)
 {
 	if (!t) return;
+
+	/*
+	 * THE SYSTEM'S OWN STRETCH ARROWS, turned to the corner they are on.
+	 *
+	 * Asked here rather than in tool.c because this file is the one that knows where the
+	 * grips are, and asked EVERY FRAME because that is the contract - see tool.h: the ask
+	 * lasts one frame and the last asker wins. tool.c has already said "crosshair" by the
+	 * time this runs, and this is drawn after it, which is why this one lands.
+	 *
+	 * The held corner keeps its arrow for the whole drag even when the hand has run past the
+	 * grip, because what the hand is doing has not changed.
+	 */
+	{
+		float mx, my;
+		SDL_GetMouseState(&mx, &my);
+
+		int c = (held != C_NONE) ? held : corner_at(t, mx, my);
+		if (c != C_NONE) tool_cursor(corner_cursor(c));
+	}
 
 	SDL_SetRenderDrawBlendMode(vng_ren, SDL_BLENDMODE_BLEND);
 

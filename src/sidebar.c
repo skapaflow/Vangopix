@@ -3,11 +3,28 @@
 #include "project.h"
 #include "tabbar.h"
 #include "tabs.h"
+#include "core.h"
+#include "primitives.h"
+#include "glyph.h"
 
 #define BAR_W     (ui_cell() * 32.0f)
 #define PAD       (ui_pad() * 2.0f)
 #define INDENT    (ui_pad() * 3.0f)
 #define CLOSE_W   ui_close()
+
+/*
+ * THE FOLDER MARK'S COLUMN, and how big the drawing inside it is.
+ *
+ * Wide enough for the open folder, which is the bigger of the two: its front panel reaches
+ * three units further right than the box does, so a column measured on the shut one would
+ * have the open one leaning into the name beside it.
+ *
+ * The scale is what puts a shape drawn on vector.ini's grid of roughly -8..+10 into a row
+ * measured from the face. It is stated once here rather than at the call, because the column
+ * and the drawing in it are one measurement seen from two sides.
+ */
+#define MARK_W    (ui_cell() * 2.0f)
+#define MARK_S    (MARK_W / 21.0f)
 #define MAX_ROWS  4096   /* what a person can scroll through before giving up and using
                           * a file manager. A deep tree past this is truncated, not
                           * crashed - see rows_build. */
@@ -69,13 +86,47 @@ static int row_lot = 0;
  * only fires if the button comes back up over the same [x]. */
 static VNG_NODE *close_armed = NULL;
 
+/*
+ * DRAGGING A ROOT UP AND DOWN THE LIST - the tab row's gesture, turned on its side, and the
+ * two states are the tab row's two for the same reason.
+ *
+ * `held` is the root the button went down on, which is still only a CLICK. `dragging` is that
+ * click having travelled past the slop. Without the split, every press on a folder would
+ * reorder the list by a pixel of hand tremor.
+ *
+ * The slop earns more here than it does on the tab row, because a press on a root already
+ * MEANS something: it expands the folder. A tab is selected on press and selecting twice is
+ * the same as selecting once, so the tab row can afford to act immediately. Expanding twice
+ * is collapsing, so a root has to wait for the button to come up to know which gesture it
+ * was - see the release below.
+ */
+#define DRAG_SLOP  4.0f
+
+static VNG_NODE *held     = NULL;
+static bool      dragging = false;
+static float     press_y  = 0.0f;
+static float     grab_dy  = 0.0f;   /* where inside the row the hand took hold */
+
 void sidebar_toggle (void)
 {
 	visible = !visible;
+
+	/*
+	 * SUMMONING IT IS ASKING WHAT IS ON DISK, so what is on screen is read again - see
+	 * project_refresh. Putting it away reads nothing: the answer would be drawn on a panel
+	 * that is sliding off, and the next summoning asks again anyway.
+	 *
+	 * Here rather than in project.c because this is the GESTURE. The model has no idea it is
+	 * being looked at; it knows about directories, and being looked at is the panel's half of
+	 * the arrangement - the same split every file in this pair keeps.
+	 */
+	if (visible) project_refresh();
 	/* A press that was armed on an [x] is dropped along with the panel: the button will
 	 * come up somewhere the sidebar is no longer listening, and an arming that outlives
 	 * its panel fires on the next release, in the next session of it. */
 	close_armed = NULL;
+	held        = NULL;
+	dragging    = false;
 }
 
 /* Reports where the panel is HEADED, not where it is. What asks - a folder dropped on a
@@ -83,7 +134,65 @@ void sidebar_toggle (void)
  * must not be toggled back out. */
 bool sidebar_visible (void) { return visible; }
 
-float sidebar_edge (void) { return anim > 0.0f ? slide() + BAR_W : 0.0f; }
+/*
+ * THE COLLAPSED STRIP - see sidebar.h on why it is only ever offered on an empty desk.
+ *
+ * Wide enough for the folder mark and its padding, and no wider: it is a handle, not a panel.
+ * `vng_tab` is asked directly rather than being told by core.c, because "is there a document"
+ * is not a fact core.c owns any better than this file does, and a flag set once a frame is a
+ * flag that can be left set.
+ */
+#define STUB_W  (ui_cell() * 2.0f + ui_pad() * 4.0f)
+
+/* Declared here because the strip is measured against the panel's own row height and the
+   panel's measurements come further down - one line beats moving a block to suit an order
+   the file already has a reason for. */
+static float row_h (void);
+
+static bool stub_up (void) { return vng_tab == NULL; }
+
+static SDL_FRect stub_rect (void)
+{
+	float t = top_y();
+	SDL_FRect r = { 0.0f, t, STUB_W, (float)vng_win_h - t };
+	return r;
+}
+
+static void stub_draw (void)
+{
+	SDL_FRect r = stub_rect();
+
+	float mx, my;
+	SDL_GetMouseState(&mx, &my);
+	bool hot = mx >= r.x && my >= r.y && mx < r.x + r.w && my < r.y + r.h;
+
+	SDL_SetRenderDrawBlendMode(vng_ren, SDL_BLENDMODE_BLEND);
+
+	SDL_SetRenderDrawColor(vng_ren, 0x14, 0x14, 0x14, hot ? 0xF0 : 0xA0);
+	SDL_RenderFillRect(vng_ren, &r);
+
+	/* The same line down the right edge the open panel has, so the strip reads as that panel
+	 * with almost all of it off screen rather than as a new thing. */
+	SDL_FRect edge = { r.x + r.w - 1.0f, r.y, 1.0f, r.h };
+	SDL_SetRenderDrawColor(vng_ren, 0x30, 0x30, 0x30, 0xFF);
+	SDL_RenderFillRect(vng_ren, &edge);
+
+	/*
+	 * The mark sits where the panel's FIRST ROW would be, not in the middle of the strip: it
+	 * is the top of the list peeking out, and a folder floating at the centre of a tall bar
+	 * would be a button that happens to live in a stripe.
+	 */
+	float h = row_h();
+	glyph_draw(GLYPH_DIR_SHUT, r.x + r.w * 0.5f, r.y + PAD + h * 0.5f + MARK_S,
+	           0.0f, MARK_S, hot ? 0xFFFFFFFFu : 0x9A9A9AFFu);
+}
+
+float sidebar_edge (void)
+{
+	if (anim > 0.0f)  return slide() + BAR_W;
+	if (stub_up())    return STUB_W;
+	return 0.0f;
+}
 
 static float row_h (void)
 {
@@ -170,12 +279,65 @@ static int row_at (float x, float y)
 
 static float row_y (int i) { return top_y() + PAD + i * row_h() - scroll; }
 
+/* Is that node still one of the roots. The list can change under a held hand - a folder
+   dropped on the window adds one - and a drag pointed at something no longer in the list
+   would relink memory nobody owns. The tab row asks the same question with vng_tab_index. */
+static bool is_root (VNG_NODE *n)
+{
+	for (VNG_NODE *p = vng_projects; p; p = p->next)
+		if (p == n) return true;
+	return false;
+}
+
+/*
+ * WHICH ROOT THE HEIGHT y BELONGS TO, as a 0-based index into the roots.
+ *
+ * Not which ROW - a root that is expanded owns its own row and every row of its subtree, and
+ * the block is what a hand is aiming at. Dragging a folder into the middle of another one's
+ * open contents means "past that folder", which is the answer this gives.
+ *
+ * Off the top is the first root and off the bottom is the last, so a drag that runs out of
+ * panel keeps meaning something instead of stopping at the edge.
+ */
+static int root_at (float y)
+{
+	float h     = row_h();
+	float local = y - top_y() - PAD + scroll;
+
+	if (local < 0.0f) return 0;
+
+	int seen = -1;
+
+	for (int i = 0; i < row_lot; i++) {
+		if (rows[i].depth == 0) seen++;
+
+		float y0 = i * h;
+		if (local >= y0 && local < y0 + h) return seen < 0 ? 0 : seen;
+	}
+
+	return seen < 0 ? 0 : seen;
+}
+
 bool sidebar_event (const SDL_Event *e)
 {
+	/*
+	 * THE STRIP ANSWERS FIRST, because when it is showing the panel proper is not: at anim 0
+	 * every test below misses on its own, so without this the press would fall through to a
+	 * desk that has nothing on it to press.
+	 */
+	if (anim <= 0.0f) {
+		if (!stub_up() || e->type != SDL_EVENT_MOUSE_BUTTON_DOWN) return false;
+
+		SDL_FRect r = stub_rect();
+		if (e->button.x < r.x || e->button.x >= r.x + r.w ||
+		    e->button.y < r.y || e->button.y >= r.y + r.h) return false;
+
+		if (e->button.button == SDL_BUTTON_LEFT) sidebar_toggle();
+		return true;   /* either button: it landed on the strip, and nothing under it */
+	}
+
 	/* Not `visible`: while the panel is sliding out it still covers pixels, and a click
-	 * on what a person can plainly see must not fall through to the sheet. At anim 0 the
-	 * panel is off screen entirely and every test below misses on its own. */
-	if (anim <= 0.0f) return false;
+	 * on what a person can plainly see must not fall through to the sheet. */
 
 	float ox = slide();
 
@@ -211,30 +373,296 @@ bool sidebar_event (const SDL_Event *e)
 			return true;
 		}
 
+		/*
+		 * A ROOT IS TAKEN HOLD OF, NOT ACTED ON - see the note by `held`. Expanding it is
+		 * what the RELEASE means when the hand did not travel; acting here would collapse
+		 * and expand the folder on the way into every drag.
+		 */
+		if (rows[i].depth == 0) {
+			held     = n;
+			dragging = false;
+			press_y  = y;
+			grab_dy  = y - row_y(i);
+			return true;
+		}
+
 		if (n->is_dir) project_toggle(n);
 		else           vng_tab_open(n->path);
 		return true;
 	}
 
-	case SDL_EVENT_MOUSE_BUTTON_UP: {
-		if (!close_armed) return false;
+	/*
+	 * MOTION IS CONSUMED ONLY WHILE A ROOT IS HELD, which is win.c's rule for its windows and
+	 * for the same reason: a drag that BEGAN on the sheet and crosses this panel - a resize
+	 * grip pulled leftward, a pan - must not be cut in half by it. Hover needs none of this;
+	 * it reads the pointer directly when drawing.
+	 */
+	case SDL_EVENT_MOUSE_MOTION: {
+		if (!held) return false;
 
-		int i = row_at(e->button.x - ox, e->button.y);
-		if (i >= 0 && rows[i].n == close_armed && rows[i].depth == 0 &&
-		    e->button.x - ox >= BAR_W - CLOSE_W - PAD)
-			project_remove(close_armed);
+		/* The list can change under the hand. A held root that is no longer in it is a
+		 * relink into memory nobody owns. */
+		if (!is_root(held)) { held = NULL; dragging = false; return false; }
 
-		close_armed = NULL;
+		float y = e->motion.y;
+
+		if (!dragging && SDL_fabsf(y - press_y) >= DRAG_SLOP) dragging = true;
+		if (!dragging) return true;
+
+		/*
+		 * THE CENTRE OF THE DRAGGED ROW DECIDES, not the cursor. Taking hold of a row near
+		 * its bottom edge would otherwise aim a row early, and the folder would appear to
+		 * jump out from under the hand. The tab row settles it the same way.
+		 */
+		project_move(held, root_at(y - grab_dy + row_h() * 0.5f));
 		return true;
 	}
 
-	/* Motion is never consumed. The sidebar needs none of it - hover reads the pointer
-	 * directly when drawing - and swallowing it would kill any drag that began on the
-	 * sheet and crossed the panel: a resize grip pulled leftward, or a pan. */
+	case SDL_EVENT_MOUSE_BUTTON_UP: {
+		bool consumed = (held != NULL) || (close_armed != NULL);
+
+		if (close_armed) {
+			int i = row_at(e->button.x - ox, e->button.y);
+			if (i >= 0 && rows[i].n == close_armed && rows[i].depth == 0 &&
+			    e->button.x - ox >= BAR_W - CLOSE_W - PAD)
+				project_remove(close_armed);
+
+			close_armed = NULL;
+		}
+
+		if (held) {
+			/* WHICH GESTURE IT WAS, ANSWERED HERE. A hand that never travelled meant to
+			 * open the folder; one that did meant to move it, and the new order becomes a
+			 * decision worth writing down only now that the hand has let go - see the note
+			 * on project_move. */
+			if (dragging) project_save();
+			else if (is_root(held)) project_toggle(held);
+
+			held     = NULL;
+			dragging = false;
+		}
+
+		return consumed;
+	}
 
 	default:
 		return false;
 	}
+}
+
+/* ------------------------------------------------------------------- the hover preview */
+
+/*
+ * HOW BIG THE PICTURE GETS. Sixteen cells, half the panel's own width - big enough to tell two
+ * walk cycles apart and small enough that it does not become the thing on screen.
+ */
+#define PREV_BOX   (ui_cell() * 16.0f)
+
+/*
+ * HOW LONG THE POINTER HAS TO REST BEFORE ANYTHING IS READ OFF DISK.
+ *
+ * This is the whole reason a preview can afford to open files at all. Sweeping down a list of
+ * thirty sprites crosses thirty rows in half a second, and reading each one would be thirty
+ * file opens for a person who was on their way somewhere else. A quarter second is under what
+ * reads as a wait and over what a moving hand can hold still for.
+ */
+#define PREV_WAIT  0.25f
+
+static char        *rest_on  = NULL;    /* the path the pointer is resting on, or NULL */
+static float        rest_for = 0.0f;    /* how long it has rested there, in seconds */
+
+static SDL_Texture *shot   = NULL;      /* the picture, once it has been read */
+static int          shot_w = 0;         /* the FILE's own size, not the texture's - what the */
+static int          shot_h = 0;         /* readout says, and what decides the scale */
+static bool         shot_tried = false; /* so a file that will not open is not retried at 60Hz */
+
+static void shot_drop (void)
+{
+	if (shot) SDL_DestroyTexture(shot);
+	shot       = NULL;
+	shot_w     = 0;
+	shot_h     = 0;
+	shot_tried = false;
+}
+
+void sidebar_free (void)
+{
+	shot_drop();
+	SDL_free(rest_on);
+	rest_on = NULL;
+}
+
+/*
+ * HOW BIG TO DRAW A PICTURE OF w BY h.
+ *
+ * Two rules, because a photograph and a 32 pixel sprite are opposite problems. Shrinking is
+ * free-form: a 4000 pixel wide picture has no business being held to a whole-pixel boundary.
+ * ENLARGING GOES IN WHOLE MULTIPLES - a sprite blown up 4.27 times has some rows two screen
+ * pixels tall and some three, and a preview of pixel art that misreports which pixels are
+ * there is worse than no preview at all. It is the rule the sheet itself follows in core.c.
+ */
+static void shot_size (int w, int h, float *dw, float *dh)
+{
+	float box = PREV_BOX;
+
+	if (w < 1 || h < 1) { *dw = box; *dh = box; return; }
+
+	int   big = w > h ? w : h;
+	float k   = box / (float)big;
+
+	if (k >= 1.0f) {
+		int whole = (int)k;
+		if (whole < 1) whole = 1;
+		*dw = (float)(w * whole);
+		*dh = (float)(h * whole);
+		return;
+	}
+
+	*dw = SDL_floorf((float)w * k);
+	*dh = SDL_floorf((float)h * k);
+	if (*dw < 1.0f) *dw = 1.0f;
+	if (*dh < 1.0f) *dh = 1.0f;
+}
+
+static void shot_read (void)
+{
+	/* Set FIRST, so a file that cannot be read is not attempted again on the next frame and
+	 * every frame after it, for as long as the hand stays still. */
+	shot_tried = true;
+
+	SDL_Surface *raw = IMG_Load(rest_on);
+	if (!raw) return;
+
+	SDL_Surface *img = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
+	SDL_DestroySurface(raw);
+	if (!img) return;
+
+	shot_w = img->w;
+	shot_h = img->h;
+
+	/*
+	 * SHRUNK HERE AND NOT AT DRAW TIME. A photograph is twenty-four megapixels and this box is
+	 * a hundred and thirty across; handing the whole thing to the GPU to be scaled down on
+	 * every frame is ninety megabytes held for a picture nobody is editing. The full surface
+	 * lives on this thread for the length of this function and no longer.
+	 */
+	float dw, dh;
+	shot_size(img->w, img->h, &dw, &dh);
+
+	if (dw < (float)img->w || dh < (float)img->h) {
+		SDL_Surface *small = SDL_ScaleSurface(img, (int)dw, (int)dh, SDL_SCALEMODE_LINEAR);
+		if (small) { SDL_DestroySurface(img); img = small; }
+	}
+
+	shot = SDL_CreateTextureFromSurface(vng_ren, img);
+	SDL_DestroySurface(img);
+
+	if (shot) SDL_SetTextureBlendMode(shot, SDL_BLENDMODE_BLEND);
+}
+
+/* Which file the pointer is resting on, if it is resting on one at all. NULL for a folder, for
+   empty panel space, and for anywhere off the panel. */
+static const char *hovered (void)
+{
+	if (anim <= 0.0f) return NULL;
+
+	float mx, my;
+	SDL_GetMouseState(&mx, &my);
+
+	int i = row_at(mx - slide(), my);
+	if (i < 0) return NULL;
+
+	VNG_NODE *n = rows[i].n;
+	return (n && !n->is_dir && project_is_image(n->name)) ? n->path : NULL;
+}
+
+/* Starts the clock over on a different name, and lets go of the picture the last one owned.
+   Comparing PATHS and not node pointers: a folder collapsed and reopened builds new nodes at
+   whatever addresses happen to be free, and one of them can be the address just released. */
+static void rest_track (const char *path)
+{
+	bool same = (path && rest_on) ? SDL_strcmp(path, rest_on) == 0
+	                              : (path == NULL && rest_on == NULL);
+
+	if (!same) {
+		SDL_free(rest_on);
+		rest_on  = path ? SDL_strdup(path) : NULL;
+		rest_for = 0.0f;
+		shot_drop();
+	}
+
+	if (rest_on) rest_for += vng_dt;
+}
+
+void sidebar_hover_draw (void)
+{
+	rest_track(hovered());
+
+	if (!rest_on)              return;
+	if (rest_for < PREV_WAIT)  return;
+
+	if (!shot_tried) shot_read();
+	if (!shot)       return;
+
+	float dw, dh;
+	shot_size(shot_w, shot_h, &dw, &dh);
+
+	float pad  = ui_pad() * 2.0f;
+	float line = vng_text ? ui_small() : 0.0f;
+
+	SDL_FRect card = { 0.0f, 0.0f, dw + pad * 2.0f, dh + pad * 2.0f + line };
+
+	/*
+	 * BESIDE THE POINTER, which is where a preview belongs - under it and the hand covers the
+	 * thing it was asked about. To the right by default, because the panel it reads from is
+	 * against the LEFT edge and there is always room that way; flipped to the left only when
+	 * the window is too narrow for that to hold, and pushed back on screen vertically rather
+	 * than allowed to hang off an edge.
+	 */
+	float mx, my;
+	SDL_GetMouseState(&mx, &my);
+
+	float step = ui_cell() * 2.0f;
+
+	card.x = mx + step;
+	card.y = my - card.h * 0.5f;
+
+	if (card.x + card.w > (float)vng_win_w) card.x = mx - step - card.w;
+	if (card.x < 0.0f) card.x = 0.0f;
+
+	if (card.y < 0.0f) card.y = 0.0f;
+	if (card.y + card.h > (float)vng_win_h) card.y = (float)vng_win_h - card.h;
+
+	prim_fill(card, 0xF0141414u);
+	prim_rect(card, 0xFF505050u);
+
+	SDL_FRect dst = { card.x + pad, card.y + pad, dw, dh };
+
+	/* The checkerboard first: a sprite is transparent everywhere it is not drawn, and a
+	 * preview on a flat ground makes an empty sheet and a filled one look the same. */
+	vangopix_desk_rect(dst);
+
+	/* Whole multiples on the way up and an exact blit on the way down - shot_read already did
+	 * the shrinking - so NEAREST is the honest filter in both directions. */
+	SDL_SetTextureScaleMode(shot, SDL_SCALEMODE_NEAREST);
+	SDL_RenderTexture(vng_ren, shot, NULL, &dst);
+
+	prim_rect(dst, 0x50FFFFFFu);
+
+	/*
+	 * AND HOW BIG IT IS, which is half of what the list is being asked. Two files called
+	 * walk_02 and walk_03 look alike in a thumbnail; 32 x 40 against 64 x 40 does not.
+	 */
+	if (!vng_text) return;
+
+	char size[32];
+	SDL_snprintf(size, sizeof size, "%d x %d", shot_w, shot_h);
+
+	float tw, th;
+	text_measure(vng_text_small, size, &tw, &th);
+	text_print(vng_text_small, card.x + SDL_floorf((card.w - tw) * 0.5f),
+	           dst.y + dh + SDL_floorf((pad * 2.0f + line - th) * 0.5f),
+	           0xB4B4B4FFu, "%s", size);
 }
 
 void sidebar_draw (void)
@@ -242,7 +670,11 @@ void sidebar_draw (void)
 	/* The clock runs whether the panel shows or not - this is the only place per frame
 	 * that advances it, so an early return above it would freeze the slide half done. */
 	anim_step();
-	if (anim <= 0.0f) return;
+
+	if (anim <= 0.0f) {
+		if (stub_up()) stub_draw();
+		return;
+	}
 
 	float ox = slide();
 
@@ -278,6 +710,20 @@ void sidebar_draw (void)
 
 	for (int i = 0; i < row_lot; i++) {
 		float y = row_y(i);
+
+		/*
+		 * THE DRAGGED ROOT FOLLOWS THE HAND. It has already been relinked into its new place
+		 * by the time this runs - the list reflows on every motion - so what is drawn here is
+		 * only the distance between the slot it now owns and where the hand actually is.
+		 * Its open contents stay in the block, which is the honest picture: the row is the
+		 * handle, and the folder is already where it is being put.
+		 */
+		if (dragging && rows[i].n == held) {
+			y = my - grab_dy;
+			if (y < top) y = top;
+			if (y > vng_win_h - h) y = vng_win_h - h;
+		}
+
 		/* A row scrolled half under the bar is drawn whole and then painted over:
 		 * tabbar_draw runs after this, and its strip is opaque across the width. */
 		if (y + h < top) continue;
@@ -285,7 +731,7 @@ void sidebar_draw (void)
 
 		VNG_NODE *n   = rows[i].n;
 		float     ind = PAD + rows[i].depth * INDENT;
-		bool      hot = (rx >= 0.0f && rx < BAR_W && my >= y && my < y + h);
+		bool      hot = (rx >= 0.0f && rx < BAR_W && my >= y && my < y + h) && !dragging;
 
 		/* The file that is open right now is named in white. In a folder of thirty
 		 * sprites, finding which one is on screen is otherwise a matter of reading the
@@ -293,24 +739,45 @@ void sidebar_draw (void)
 		bool current = (!n->is_dir && vng_tab && vng_tab->path &&
 		                SDL_strcmp(vng_tab->path, n->path) == 0);
 
-		if (hot || current) {
+		bool lifted = (dragging && n == held);
+
+		if (hot || current || lifted) {
 			SDL_FRect r = { ox, y, BAR_W - 1.0f, h };
-			SDL_SetRenderDrawColor(vng_ren, 0x2E, 0x2E, 0x2E, current ? 0xFF : 0x80);
+			SDL_SetRenderDrawColor(vng_ren, 0x2E, 0x2E, 0x2E,
+			                       (current || lifted) ? 0xFF : 0x80);
 			SDL_RenderFillRect(vng_ren, &r);
+		}
+
+		/* OPAQUE AND OUTLINED WHILE IT IS BEING CARRIED. It is drawn over rows it does not
+		 * belong between, and without an edge it reads as two names overlapping rather than
+		 * as one being moved. */
+		if (lifted) {
+			SDL_FRect r = { ox, y, BAR_W - 1.0f, h };
+			SDL_SetRenderDrawColor(vng_ren, 0x80, 0x80, 0x80, 0xFF);
+			SDL_RenderRect(vng_ren, &r);
 		}
 
 		/* How much room the name has before it would run under the panel edge - or
 		 * under the [x], on a root. The [x] only appears on hover, but the space is
 		 * reserved whether it is showing or not: a name that fits until the pointer
 		 * arrives and then gets overwritten is worse than a name that is always cut. */
-		float name_x = ind + 12.0f;
+		float name_x = ind + MARK_W;
 		float room   = BAR_W - PAD - name_x - (rows[i].depth == 0 ? CLOSE_W + PAD : 0.0f);
 
 		char label[160];
 		text_fit(vng_text, label, sizeof label, n->name, room);
 
 		if (n->is_dir) {
-			text_print(vng_text, ox + ind, y + 1.0f, 0x707070FF, n->open ? "v" : ">");
+			/*
+			 * Hung from the middle of its column, and one unit low: the shapes run from -8
+			 * to +6 in y, so their own middle is a unit above the origin they are drawn
+			 * around. Putting the ORIGIN in the middle of the row would sit the folder high
+			 * in it by exactly that much.
+			 */
+			glyph_draw(n->open ? GLYPH_DIR_OPEN : GLYPH_DIR_SHUT,
+			           ox + ind + MARK_W * 0.5f, y + h * 0.5f + MARK_S,
+			           0.0f, MARK_S, hot ? 0xDCDCDCFFu : 0x8C8C8CFFu);
+
 			text_print(vng_text, ox + name_x, y + 1.0f,
 			           rows[i].depth == 0 ? 0xDCDCDCFF : 0xB4B4B4FF, "%s", label);
 		} else {

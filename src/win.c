@@ -5,6 +5,9 @@
    one pixel edge does not. Everything else here now comes from the face. */
 #define BORDER   1.0f
 
+/* How solid the ground behind a window is. Half, so the sheet reads through it. */
+#define WIN_BODY_A  0x80
+
 /* Enough of the head must stay on screen to take hold of again. A window dragged off the
  * bottom of a window that is then made smaller is otherwise gone for good. */
 #define KEEP    (ui_head() + ui_pad())
@@ -383,7 +386,16 @@ void win_draw (void)
 		SDL_FRect o = outer(w);
 		SDL_FRect h = head_rect(w);
 
-		SDL_SetRenderDrawColor(vng_ren, 0x14, 0x14, 0x14, 0xF0);
+		/*
+		 * HALF TRANSPARENT, AND IT IS THE BODY ONLY.
+		 *
+		 * The head bar, the border and everything an owner draws inside stay opaque: what a
+		 * window is FOR has to be readable over whatever it was parked on, and a title you
+		 * have to squint at is a window you cannot find again. It is the ground behind the
+		 * work that lets the drawing through - which is the point of a floating panel over a
+		 * canvas, and which the first Vangopix's own windows did.
+		 */
+		SDL_SetRenderDrawColor(vng_ren, 0x14, 0x14, 0x14, WIN_BODY_A);
 		SDL_RenderFillRect(vng_ren, &o);
 
 		SDL_SetRenderDrawColor(vng_ren, 0x22, 0x22, 0x22, 0xFF);

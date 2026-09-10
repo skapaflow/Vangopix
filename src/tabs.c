@@ -345,11 +345,16 @@ VNG_TAB *vng_tab_open (const char *path)
 }
 
 /*
- * Closing the LAST tab opens a blank sheet in its place.
+ * CLOSING THE LAST SHEET LEAVES NO SHEET, and the empty desk is a real state now.
  *
- * It is the only way to have no "no document" state - and in an editor whose entire
- * interface is the sheet, that state would be an empty window with nothing to click
- * and nothing explaining what to do. The program always has paper.
+ * It used to open a blank one in its place, and the reason given was sound: an editor whose
+ * whole interface is the sheet has nothing to click and nothing explaining what to do without
+ * one. That was an argument about the EMPTY SCREEN, not about the document - and the answer
+ * to an empty screen is to put something on it. core.c now writes the keys there, so the
+ * state that had to be avoided is the state that teaches the program.
+ *
+ * What it buys: a blank untitled sheet nobody asked for is not sitting in the way of the file
+ * somebody is about to drop in, and CTRL+W means what it says.
  */
 void vng_tab_close (VNG_TAB *t)
 {
@@ -369,13 +374,8 @@ void vng_tab_close (VNG_TAB *t)
 	SDL_free(t->path);
 	SDL_free(t);
 
-	if (fallback) {
-		vng_tab = fallback;
-		vng_tab_title();
-	} else {
-		vng_tab = NULL;
-		vng_tab_new(64, 64);
-	}
+	vng_tab = fallback;   /* NULL when that was the last one - the desk, and the keys on it */
+	vng_tab_title();
 }
 
 /* dir > 0 walks right, dir < 0 walks left; wraps around at both ends. */

@@ -23,6 +23,11 @@ extern bool tabbar_visible (void);
 /* How much of the top of the window the bar is occupying: its height when it is up, 0
  * when it is down. The sidebar drops below it rather than starting under it, and this
  * is what keeps BAR_H a number only this file knows. */
+/*
+ * Zero unless the bar is BOTH asked for and drawable, and drawable means there is at least one
+ * sheet for it to be a row of. Everything that steps aside for the bar - the project panel,
+ * the colour slots, the tool glyph - is asking where the screen ends, not what a flag says.
+ */
 extern float tabbar_height (void);
 
 /* Returns true when the bar consumed the event, so the caller stops handling it. */

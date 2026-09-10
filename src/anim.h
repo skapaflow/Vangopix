@@ -38,6 +38,22 @@
  *                the first window in this program that genuinely IS a form, and it is why
  *                field.c exists.
  *
+ * AND BEING A FORM RATHER THAN A BOX IS A BEHAVIOUR, not a description. field.h leaves the
+ * question to the owner because a lone box and a form of seven mean different things by
+ * leaving a box: the colour window's hex field is alone, so a click elsewhere is a mis-click
+ * and dropping what was half-typed is the kind reading. Here the click that leaves a box is
+ * the click that MOVES TO THE NEXT ONE - or the one that presses Create, which is the button
+ * that means "take this" - so leaving a box commits it, by any route, including a press over
+ * in the player. Only ENTER committing meant filling in all seven boxes and pressing Create
+ * produced the clip the editor opened with: no name, 32 x 32, AND NO FRAMES. That last is why
+ * it read as two faults - a clip with no frames draws neither the preview nor the grid, so the
+ * window that would not keep the numbers was also the window showing nothing.
+ *
+ * Each box also OPENS HOLDING WHAT IT WAS READING OUT. They are the first fields in the
+ * program to report a value they do not own, and they opened from their own buffer, which is
+ * empty until somebody has typed into that box once - so clicking the width to change it
+ * blanked the width first.
+ *
  * WHAT IS FIXED RATHER THAN CARRIED OVER. The design is good and the implementation was not;
  * every one of these is a real defect in gui_animation.c, and each is named again at the line
  * that fixes it:
@@ -60,6 +76,22 @@
  *     conversion to int;
  *   - THE ROW INDEX HAD NO UPPER CLAMP, so it walked off the bottom of the sheet for ever
  *     with nothing on screen to say how many rows there were.
+ *
+ * AND TWO THINGS THAT GO BLANK WITHOUT SAYING SO, which are neither the original's nor the
+ * form's - they are what a preview drawn from a texture does when nobody asks the awkward
+ * question:
+ *
+ *   - THE FRAME MAY NOT BE ON THE SHEET. A clip is a rectangle stepped RIGHT by n*w, so four
+ *     frames of 32 starting at x=32 want a sheet 160 wide, and pixel art is 64.
+ *     SDL_RenderTexture with a source rect off the texture draws nothing and RETURNS TRUE -
+ *     no error, no log, an empty box for three quarters of every loop. Half off is worse: SDL
+ *     clamps the sampling and stretches the edge column into a picture that is nowhere on the
+ *     sheet. So a frame is wholly on the sheet or it is not drawn, and the preview's rim goes
+ *     red to say which;
+ *   - THE PREVIEW SITS ABOVE THE WINDOW, and win.c keeps the head bar on screen, not the room
+ *     a preview wants over it. Summoned near the top edge - or zoomed up sixteen times - it
+ *     went off the top and the player looked like it was playing nothing. It flips below when
+ *     there is no room above.
  */
 
 /* How many clips a .anime may hold, and how long a name may be. Both are stated because the

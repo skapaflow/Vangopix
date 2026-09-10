@@ -67,11 +67,14 @@ LFLAGS  = $(SDL_LIBS)
 #   primitives.c the shapes SDL does not draw, and the ones it draws loosely
 #   ui.c       the measurements that come from the face, so a layout follows it
 #   field.c    one line of text inside a window - the first widget win.c grew
+#   expr.c     a line of arithmetic, answered - what a number box means by 32*4
+#   keymap.c   what the keys are, and the keyboard.txt a person can edit
+#   splash.c   the picture the program opens with, and the one place it is named
 #   anim.c     sprite animation: a clip is a region of the sheet, not a buffer
 #   glyph.c    the line-art glyphs, drawn as wireframe paths
 #   text.c     glyphs packed into one atlas by stb_truetype
 OBJDIR = build
-SRC = src/main.c src/vangopix.c src/core.c src/keys.c src/tabs.c src/tabbar.c src/view.c src/resize.c src/project.c src/sidebar.c src/prompt.c src/file.c src/undo.c src/tool.c src/select.c src/thumb.c src/win.c src/colour.c src/palette.c src/primitives.c src/ui.c src/field.c src/anim.c src/glyph.c src/text.c
+SRC = src/main.c src/vangopix.c src/core.c src/keys.c src/tabs.c src/tabbar.c src/view.c src/resize.c src/project.c src/sidebar.c src/prompt.c src/file.c src/undo.c src/tool.c src/select.c src/thumb.c src/win.c src/colour.c src/palette.c src/primitives.c src/ui.c src/field.c src/expr.c src/keymap.c src/splash.c src/anim.c src/glyph.c src/text.c
 DEP = $(wildcard src/*.h)
 OBJ = $(SRC:src/%.c=$(OBJDIR)/%.o)
 

@@ -7,6 +7,8 @@
 #include "view.h"
 #include "resize.h"
 #include "sidebar.h"
+#include "keymap.h"
+#include "splash.h"
 #include "project.h"
 #include "keys.h"
 #include "prompt.h"
@@ -245,12 +247,6 @@ static void new_sheet_ask (void)
 		vng_tab_new(VNG_NEW_W, VNG_NEW_H);
 }
 
-/* No modifier at all - see the comment where this is used. */
-static bool bare (SDL_Keymod m)
-{
-	return (m & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT | SDL_KMOD_ALT | SDL_KMOD_GUI)) == 0;
-}
-
 void vangopix_input (void)
 {
 	SDL_Event e;
@@ -260,6 +256,16 @@ void vangopix_input (void)
 		/* The bar gets first refusal while it is up. It floats OVER the sheet, so
 		 * without this a click meant for a tab would also land on the drawing
 		 * underneath - and once tools exist, that is a stray pixel every time. */
+		/*
+		 * BEFORE EVEN RUNG 0, and only for as long as the program has not started.
+		 *
+		 * The splash covers everything, so it answers before everything - including the
+		 * keyboard's owner, which is the one thing the layer chain already had above it.
+		 * SDL_EVENT_QUIT still falls through: see splash.h.
+		 */
+		if (splash_event(&e))
+			continue;
+
 		/* RUNG 0, AND IT IS NOT PART OF THE LAYER CHAIN BELOW.
 		 *
 		 * The layers under this line are ordered by what is on top of the screen,
@@ -373,15 +379,47 @@ void vangopix_input (void)
 			 * Testing for the one modifier that happens to collide today is how every
 			 * later collision gets built in. There is only one right question.
 			 */
-			if (bare(e.key.mod)) {
-				if (e.key.key == SDLK_F1)     { overlay = !overlay; break; }
-				if (e.key.key == SDLK_V)      { thumb_toggle();     break; }
-				if (e.key.key == SDLK_C)      { colour_toggle();    break; }
-				if (e.key.key == SDLK_P)      { palette_toggle();   break; }
-				if (e.key.key == SDLK_X)      { anim_toggle();      break; }
-				if (e.key.key == SDLK_ESCAPE) { tabbar_toggle();    break; }
-				if (e.key.key == SDLK_TAB)    { sidebar_toggle();   break; }
-			}
+			/*
+			 * THE BARE SHORTCUTS, ASKED BY NAME.
+			 *
+			 * Every one of these used to test a keycode here. They test an ACTION now, and
+			 * the key each action sits on comes from keymap.c and from the keyboard.txt
+			 * beside the executable - see keymap.h.
+			 *
+			 * Two things fell out with the keycodes and are worth naming, because they were
+			 * the reason this block had a comment at all.
+			 *
+			 * The first is `bare`. It asked whether NO modifier was down rather than whether
+			 * the one that collides today was - which was the fix for a real bug, SHIFT+TAB
+			 * raising the project panel as well as swapping the change-colours limiter.
+			 * keymap_hit asks it that same way, in one place, for the whole program.
+			 *
+			 * The second is that "which key" and "what it does" are no longer written on the
+			 * same line. That is the point: the line below is what the program DOES, and the
+			 * table in keymap.c is where it lives. A help list built from that table cannot
+			 * describe a key the program does not answer.
+			 */
+			if (keymap_hit(VNG_ACT_OVERLAY, &e))        { overlay = !overlay;   break; }
+			if (keymap_hit(VNG_ACT_PANEL_THUMB, &e))    { thumb_toggle();       break; }
+			if (keymap_hit(VNG_ACT_PANEL_COLOUR, &e))   { colour_toggle();      break; }
+			if (keymap_hit(VNG_ACT_PANEL_PALETTE, &e))  { palette_toggle();     break; }
+			if (keymap_hit(VNG_ACT_PANEL_ANIM, &e))     { anim_toggle();        break; }
+			if (keymap_hit(VNG_ACT_PANEL_SHEETS, &e))   { tabbar_toggle();      break; }
+			if (keymap_hit(VNG_ACT_PANEL_PROJECTS, &e)) { sidebar_toggle();     break; }
+
+			/*
+			 * THE THREE UNDER THE LEFT HAND. 1 and 2 walk the row of sheets and 0 puts one
+			 * back, and they are together because they are the same kind of gesture: getting
+			 * your bearings, not editing.
+			 *
+			 * They replaced CTRL+TAB and CTRL+SHIFT+TAB as the way anybody would actually do
+			 * it - going BACK a sheet took three keys, one of them a modifier that exists
+			 * only to reverse the other. Two adjacent keys say the direction by where they
+			 * are, and cost nothing to hold.
+			 */
+			if (keymap_hit(VNG_ACT_SHEET_PREV, &e))     { vng_tab_step(-1);     break; }
+			if (keymap_hit(VNG_ACT_SHEET_NEXT, &e))     { vng_tab_step(+1);     break; }
+			if (keymap_hit(VNG_ACT_VIEW_HOME, &e))      { view_home(vng_tab);   break; }
 
 			if (e.key.mod & SDL_KMOD_CTRL) {
 				switch (e.key.key) {
@@ -408,10 +446,6 @@ void vangopix_input (void)
 				case SDLK_TAB:
 					vng_tab_step((e.key.mod & SDL_KMOD_SHIFT) ? -1 : +1);
 					break;
-				/* The two framings every editor has: fit the whole sheet, and go to
-				 * 1:1 where one art pixel is one screen pixel. */
-				case SDLK_0: view_reset(vng_tab);       break;
-				case SDLK_1: view_actual_size(vng_tab); break;
 				default: break;
 				}
 			}
@@ -603,6 +637,171 @@ static void draw_overlay (VNG_TAB *t, float zoom)
 	           vng_tab_index(t), vng_tab_count());
 }
 
+/*
+ * ---- WHAT THE KEYS ARE, WRITTEN ON THE EMPTY DESK ----
+ *
+ * The list itself lives in keymap.c, which owns it and the keyboard.txt beside the executable
+ * that a person can edit. This is only the drawing of it.
+ *
+ * THE BLOCK IS CENTRED, NOT THE LINES.
+ *
+ * Centring each line on its own would leave every left edge in a different place and the key
+ * column in none at all - a list nobody can run an eye down. So the widest WHOLE row decides
+ * where a column starts, and after that every row in it begins at the same x. The key column
+ * is as wide as the widest KEY, so the descriptions line up too. Two measurements, and no
+ * layout system.
+ *
+ * IT IS CENTRED IN WHAT IS LEFT OF THE WINDOW, not in the window. The project strip is at the
+ * left edge when the program starts; a block centred behind it is a block half hidden by the
+ * thing that was put there to help. sidebar_edge is how far the panel reaches THIS FRAME, so
+ * the list also slides over as the panel slides away.
+ */
+
+/* One column of the list: which rows, how wide its key column is, and how wide it is. */
+typedef struct { int from, to; float kw, w; } KEYCOL;
+
+static bool row_is_head (const VNG_KEYROW *r) { return r && r->key && !r->does; }
+
+static void col_measure (KEYCOL *c, float gap)
+{
+	c->kw = 0.0f;
+	c->w  = 0.0f;
+
+	/* MEASURED PER COLUMN, not once for the whole list. A column of `Q W E R` beside one of
+	 * `CTRL SHIFT S` would otherwise carry the wide one's key column through both, and the
+	 * short side would be a stripe of nothing as wide as the words next to it. */
+	for (int i = c->from; i < c->to; i++) {
+		const VNG_KEYROW *r = keymap_row(i);
+		if (!r || !r->key || !r->does) continue;
+
+		float w;
+		text_measure(vng_text, r->key, &w, NULL);
+		if (w > c->kw) c->kw = w;
+	}
+
+	for (int i = c->from; i < c->to; i++) {
+		const VNG_KEYROW *r = keymap_row(i);
+		if (!r || !r->key) continue;
+
+		float w;
+		if (r->does) {
+			text_measure(vng_text, r->does, &w, NULL);
+			w += c->kw + gap;
+		} else {
+			text_measure(vng_text, r->key, &w, NULL);
+		}
+		if (w > c->w) c->w = w;
+	}
+}
+
+static void col_draw (const KEYCOL *c, float x, float y, float line, float gap)
+{
+	for (int i = c->from; i < c->to; i++) {
+		float ry = y + (float)(i - c->from) * line;
+		if (ry > (float)vng_win_h) break;
+
+		const VNG_KEYROW *r = keymap_row(i);
+		if (!r || !r->key) continue;
+
+		if (!r->does) {
+			text_print(vng_text, x, ry, 0xFF8000FF, "%s", r->key);
+			continue;
+		}
+
+		text_print(vng_text, x,               ry, 0xE6E6E6FF, "%s", r->key);
+		text_print(vng_text, x + c->kw + gap, ry, 0x8C8C8CFF, "%s", r->does);
+	}
+}
+
+/*
+ * WHERE TO BREAK THE LIST IN TWO, and it is not halfway.
+ *
+ * Halfway by row count lands wherever it lands - in the middle of `tools`, with four of the
+ * nine in one column and five in the other under no heading at all. A reader hunting for the
+ * eraser then has to know the list is continuous across a gap that looks like a boundary.
+ *
+ * So the break happens at a HEADING, and the search walks outward from the middle to find the
+ * nearest one: the columns come out uneven, and that is the cheaper cost by far. A blank line
+ * would be left stranded at the top of the second column, so the heading itself starts it.
+ *
+ * Returns `lot` when there is no heading to break at - one column, uneven or not.
+ */
+static int col_break (int lot)
+{
+	int mid = (lot + 1) / 2;
+
+	for (int step = 0; step < lot; step++) {
+		int up = mid + step, down = mid - step;
+
+		if (up   < lot && row_is_head(keymap_row(up)))   return up;
+		if (down > 0   && row_is_head(keymap_row(down))) return down;
+	}
+	return lot;
+}
+
+static void draw_keys (void)
+{
+	if (!vng_text) return;
+
+	float line = ui_line() + ui_pad();
+	float gap  = ui_cell() * 2.0f;
+	float pad  = ui_pad() * 2.0f;
+
+	int lot = keymap_lot();
+	if (lot < 1) return;
+
+	/*
+	 * TWO COLUMNS ONLY WHEN ONE WILL NOT FIT.
+	 *
+	 * The number of columns follows the room rather than being decided in advance: on a tall
+	 * window one column is the easier thing to read, and on a short one the list was being cut
+	 * off at the bottom with nothing to say that it went on.
+	 */
+	int room_rows = (int)(((float)vng_win_h - pad * 2.0f) / line);
+
+	KEYCOL col[2];
+	int    lots = 1;
+
+	col[0].from = 0;
+	col[0].to   = lot;
+
+	if (lot > room_rows) {
+		int cut = col_break(lot);
+
+		if (cut > 0 && cut < lot) {
+			col[0].to   = cut;
+			col[1].from = cut;
+			col[1].to   = lot;
+			lots = 2;
+		}
+	}
+
+	for (int i = 0; i < lots; i++) col_measure(&col[i], gap);
+
+	float wide = col[0].w + (lots > 1 ? gap * 2.0f + col[1].w : 0.0f);
+
+	int tall = col[0].to - col[0].from;
+	if (lots > 1 && col[1].to - col[1].from > tall) tall = col[1].to - col[1].from;
+
+	float edge = sidebar_edge();
+
+	float x = edge + SDL_floorf(((float)vng_win_w - edge - wide) * 0.5f);
+	float y = SDL_floorf(((float)vng_win_h - (float)tall * line) * 0.5f);
+
+	/* A window too short even for the columns shows the TOP of them rather than the middle:
+	 * the first rows are the ones somebody arriving needs, and a list centred out of both
+	 * edges at once shows neither end. */
+	if (y < pad)        y = pad;
+	if (x < edge + pad) x = edge + pad;
+
+	/* BOTH COLUMNS START ON THE SAME LINE. Hanging the shorter one from the middle would put
+	 * its heading somewhere no eye expects a list to begin. */
+	col_draw(&col[0], x, y, line, gap);
+
+	if (lots > 1)
+		col_draw(&col[1], x + col[0].w + gap * 2.0f, y, line, gap);
+}
+
 /* The frame clock. It lives here because the frame does, and it is handed to the rest of
  * the program as vng_dt so that nothing else has to start a clock of its own.
  *
@@ -634,6 +833,20 @@ void vangopix_core (void)
 
 	VNG_TAB *t = vng_tab;
 	if (t) {
+		/*
+		 * F1 PUTS THE KEYS BACK, BEHIND THE ARTWORK.
+		 *
+		 * The empty desk teaches the program once, and then the first sheet covers it for
+		 * good - which is fine for the twenty keys somebody has learned and no use at all for
+		 * the twentieth they have not. So the same list comes back under F1.
+		 *
+		 * BEHIND the sheet, drawn before it, and that is the whole reason this is up here
+		 * rather than beside draw_overlay at the bottom of the block: a reminder that covers
+		 * the drawing is a reminder you have to dismiss before you can act on it. Behind, the
+		 * artwork stays exactly where it was and the list fills the desk around it.
+		 */
+		if (overlay) draw_keys();
+
 		/* Before the sheet is drawn, because what the spray lays down this frame has to
 		 * reach the texture in the same frame. */
 		anim_tick();       /* the playhead, on the program clock */
@@ -657,12 +870,35 @@ void vangopix_core (void)
 		 * for as long as a hand keeps a key down should come up behind something parked. It
 		 * matches where it sits in the chain above. */
 		palette_quick_draw(t);
+
+		/* AND THE PREVIEW UNDER THE POINTER, for the same reason and in the same place: it
+		 * exists only while a hand is holding still on a name in the sidebar, and a picture
+		 * that came up behind a parked window would be answering nobody. */
+		sidebar_hover_draw();
+	} else {
+		/*
+		 * NO DOCUMENT, AND THAT IS A STATE NOW. The desk is already drawn; what goes on it
+		 * is the only place this program can say what it does - see draw_keys.
+		 *
+		 * THE PROJECT PANEL STAYS UP HERE, which is the other half of the answer: the list
+		 * says which keys open a file and the panel is somewhere to open one FROM, without
+		 * knowing any key at all. It is also the only thing on screen with a slide to
+		 * advance, so leaving it out of this branch would freeze the panel half open the
+		 * moment the last sheet was closed.
+		 */
+		draw_keys();
+		sidebar_draw();
+		sidebar_hover_draw();
 	}
 
 	/* OUTSIDE the block: the field holds the keyboard, and a keyboard captured with no
 	 * caret on screen is a program that has stopped answering. It does not depend on
 	 * there being a document, and it draws over everything that does. */
 	prompt_draw();
+
+	/* OVER EVERYTHING, because until it is dismissed there is nothing else on screen worth
+	 * seeing - the mirror of it answering events before everything. */
+	splash_draw();
 
 	/* LAST, after everything that could have asked for a shape. One place owns the cursor
 	 * because the machine has one - see tool_cursor in tool.h. */
