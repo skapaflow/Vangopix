@@ -25,6 +25,20 @@
  */
 #define MARK_W    (ui_cell() * 2.0f)
 #define MARK_S    (MARK_W / 21.0f)
+
+/*
+ * AND AIR BETWEEN THE MARK AND THE NAME.
+ *
+ * The column is measured on the OPEN folder, whose front panel reaches three units further
+ * right than its box - so with the name starting where the column ends, an open folder had
+ * about half a pixel of daylight and read as one shape with the word beside it. The shut one
+ * looked fine, which is the worst kind of wrong: it only appeared when a folder was expanded.
+ *
+ * A separate number rather than a wider column, because they are two different facts. The
+ * column is how much room the drawing needs; this is how far apart two things sit, and that
+ * is what ui_pad already means everywhere else in this program.
+ */
+#define MARK_GAP  ui_pad()
 #define MAX_ROWS  4096   /* what a person can scroll through before giving up and using
                           * a file manager. A deep tree past this is truncated, not
                           * crashed - see rows_build. */
@@ -450,6 +464,79 @@ bool sidebar_event (const SDL_Event *e)
 	}
 }
 
+/* ------------------------------------------------------------------ the panel's backdrop */
+
+/*
+ * A PICTURE BEHIND THE LIST, stretched to whatever the panel is.
+ *
+ * THE TWO NUMBERS ARE THE WHOLE THING TO TUNE, so they are named and sit together. They are
+ * OPACITY, not transparency: 0.20 means a fifth of the picture and four fifths of the panel
+ * under it. Said that way round because it is the number that decides whether the file names
+ * on top of it stay readable, which is the only thing this backdrop can get wrong.
+ *
+ * It fades LEFT TO RIGHT, strongest at the window's edge and weakest where the panel meets
+ * the drawing. That is the direction that costs the least: the right-hand end of every row is
+ * where a long name runs out and where the [x] sits, so it is the end that most needs to be
+ * plain - and the left edge is the one part of this panel that never has anything on it.
+ */
+#define BG_PNG      "icon/project.png"
+#define BG_A_LEFT   1.0f
+#define BG_A_RIGHT  0.1f
+
+static SDL_Texture *bg = NULL;
+static bool         bg_tried = false;
+
+static void bg_draw (SDL_FRect panel)
+{
+	if (!bg) {
+		/* Read once, and once only even when it fails: a missing file must not be opened
+		 * again on every frame for as long as the panel is up. */
+		if (bg_tried) return;
+		bg_tried = true;
+
+		char *path = vangopix_asset(BG_PNG);
+		if (!path) return;
+
+		SDL_Surface *raw = IMG_Load(path);
+		SDL_free(path);
+		if (!raw) return;
+
+		bg = SDL_CreateTextureFromSurface(vng_ren, raw);
+		SDL_DestroySurface(raw);
+
+		if (!bg) return;
+		SDL_SetTextureBlendMode(bg, SDL_BLENDMODE_BLEND);
+
+		/* Stretched rather than tiled, so the smooth filter is the honest one - this is a
+		 * backdrop, not artwork whose pixels mean something. */
+		SDL_SetTextureScaleMode(bg, SDL_SCALEMODE_LINEAR);
+	}
+
+	/*
+	 * DRAWN AS GEOMETRY AND NOT AS A RECTANGLE, because the alpha has to change ACROSS it.
+	 *
+	 * SDL_SetTextureAlphaMod is one number for the whole texture, so a gradient made that way
+	 * would be a stack of thin strips - a seam per step and a loop per frame. Four vertices
+	 * carrying their own alpha hand the ramp to the renderer, which is what interpolating
+	 * between vertices is for.
+	 */
+	const SDL_FColor l = { 1.0f, 1.0f, 1.0f, BG_A_LEFT  };
+	const SDL_FColor r = { 1.0f, 1.0f, 1.0f, BG_A_RIGHT };
+
+	float x0 = panel.x, x1 = panel.x + panel.w;
+	float y0 = panel.y, y1 = panel.y + panel.h;
+
+	SDL_Vertex v[4] = {
+		{ { x0, y0 }, l, { 0.0f, 0.0f } },
+		{ { x1, y0 }, r, { 1.0f, 0.0f } },
+		{ { x1, y1 }, r, { 1.0f, 1.0f } },
+		{ { x0, y1 }, l, { 0.0f, 1.0f } },
+	};
+	static const int idx[6] = { 0, 1, 2, 0, 2, 3 };
+
+	SDL_RenderGeometry(vng_ren, bg, v, 4, idx, 6);
+}
+
 /* ------------------------------------------------------------------- the hover preview */
 
 /*
@@ -487,6 +574,10 @@ static void shot_drop (void)
 
 void sidebar_free (void)
 {
+	if (bg) SDL_DestroyTexture(bg);
+	bg       = NULL;
+	bg_tried = false;
+
 	shot_drop();
 	SDL_free(rest_on);
 	rest_on = NULL;
@@ -690,8 +781,12 @@ void sidebar_draw (void)
 	float top = top_y();
 
 	SDL_FRect panel = { ox, top, BAR_W, vng_win_h - top };
-	SDL_SetRenderDrawColor(vng_ren, 0x14, 0x14, 0x14, 0xF0);
+	SDL_SetRenderDrawColor(vng_ren, 0x0, 0x0, 0x0, 0xDD	);
 	SDL_RenderFillRect(vng_ren, &panel);
+
+	/* Over the ground and under everything else: it is a backdrop, and a backdrop that lands
+	 * on top of a file name has stopped being one. */
+	bg_draw(panel);
 
 	/* A line down the right edge. The panel is translucent over a checkerboard, and
 	 * without it the two greys blur into each other exactly where the edge should be. */
@@ -761,7 +856,7 @@ void sidebar_draw (void)
 		 * under the [x], on a root. The [x] only appears on hover, but the space is
 		 * reserved whether it is showing or not: a name that fits until the pointer
 		 * arrives and then gets overwritten is worse than a name that is always cut. */
-		float name_x = ind + MARK_W;
+		float name_x = ind + MARK_W + MARK_GAP;
 		float room   = BAR_W - PAD - name_x - (rows[i].depth == 0 ? CLOSE_W + PAD : 0.0f);
 
 		char label[160];
@@ -776,7 +871,7 @@ void sidebar_draw (void)
 			 */
 			glyph_draw(n->open ? GLYPH_DIR_OPEN : GLYPH_DIR_SHUT,
 			           ox + ind + MARK_W * 0.5f, y + h * 0.5f + MARK_S,
-			           0.0f, MARK_S, hot ? 0xDCDCDCFFu : 0x8C8C8CFFu);
+			           0.0f, MARK_S, hot ? 0x0080ffFF : 0xFFFFFFFF);
 
 			text_print(vng_text, ox + name_x, y + 1.0f,
 			           rows[i].depth == 0 ? 0xDCDCDCFF : 0xB4B4B4FF, "%s", label);

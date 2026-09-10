@@ -1016,6 +1016,67 @@ static void label (const char *text, float mx, float my)
 }
 
 /*
+ * ---- WHERE YOU ARE, AND HOW BIG IT IS ----
+ *
+ * Two readouts beside the pointer, and the first Vangopix drew them in two colours on
+ * purpose - tool_measure_and_position in its src/tool/tool_misc.c:
+ *
+ *     vango_text_set(2, YELLOW,  BLANK); vango_print(mouse.x+10, mouse.y+16, "(%d,%d)", ...);
+ *     vango_text_set(2, SKYBLUE, BLANK); vango_print(mouse.x+10, mouse.y-2,  "[%dx%d]", ...);
+ *
+ * THEY ANSWER DIFFERENT QUESTIONS, WHICH IS THE WHOLE REASON THERE ARE TWO.
+ *
+ * The yellow one is a POSITION - which pixel of the drawing is under the hand. It is a fact
+ * about the sheet and it is true whether anything is happening or not, so it is always up.
+ *
+ * The blue one is a DISTANCE - how far the drag has got from where it began, in pixels,
+ * counting both ends. It is a fact about the GESTURE and it exists only while one is running.
+ *
+ * A number that is always there and a number that comes and goes must not look alike: read at
+ * a glance, mid-stroke, the colour is what says which of the two you are reading. And they sit
+ * on separate lines, above and below the hand, so both can be read without the eye choosing.
+ *
+ * WHY THE COUNT IS +1 ON EACH AXIS, which looks like an off-by-one and is not: a rectangle
+ * from pixel 4 to pixel 4 is one pixel wide, not zero. The old one wrote abs(fwx-wx)+1 for
+ * exactly this. It is a count of pixels, not a difference between coordinates.
+ *
+ * NOT SHOWN WHILE PICKING A COLOUR. The eyedropper has its own readout under the pointer and
+ * it answers a third question; three labels round one hand is a hand you cannot see past. The
+ * original gated the whole function on KB_TOOL_PICKCOLOR for the same reason.
+ */
+#define WHERE_DX    32.0f
+#define WHERE_DY    16.0f    /* the position, below the hand  */
+#define SPAN_DY     (-2.0f)  /* the measurement, just above it */
+
+#define WHERE_INK   0xFFD800FFu   /* yellow  */
+#define SPAN_INK    0x50C0FFFFu   /* sky blue */
+
+static void beside (float mx, float my, float dy, Uint32 ink, const char *fmt, int a, int b) {
+
+	if (!vng_text) return;
+
+	char buf[32];
+	SDL_snprintf(buf, sizeof buf, fmt, a, b);
+
+	float tw, th;
+	text_measure(vng_text, buf, &tw, &th);
+
+	float x = mx + WHERE_DX;
+	float y = my + dy;
+
+	/* Kept on screen the way `label` is: flipped to the other side rather than clipped, so a
+	 * pointer near an edge still answers. */
+	if (x + tw > vng_win_w)      x = mx - WHERE_DX - tw;
+	if (y < tabbar_height())     y = my - dy + th;
+	if (y + th > vng_win_h)      y = vng_win_h - th;
+
+	/* Shadowed rather than boxed. `label` puts a panel behind one word because a word is
+	 * rare; these two are up continuously over the artwork, and two filled boxes following
+	 * the hand would hide more of the drawing than they explain. */
+	text_print_shadow(vng_text, x, y, ink, "%s", buf);
+}
+
+/*
  * The tip, outlined where it would land. This is what makes a size worth having: a tip whose
  * extent cannot be seen until it is used is a tip nobody trusts.
  *
@@ -1269,6 +1330,16 @@ void tool_draw (VNG_TAB *t)
 	 * while the modifier that chooses it is held. */
 	if (on && !eyedropper && current == T_BUCKET && (keys_mods() & SDL_KMOD_SHIFT))
 		label("barrier", mx, my);
+
+	/* WHERE THE HAND IS, and - while a shape is being pulled - HOW BIG IT HAS GOT. See the
+	 * note above `beside` for why these are two colours rather than one line. */
+	if (on && !eyedropper && inside(t, x, y)) {
+
+		beside(mx, my, WHERE_DY, WHERE_INK, "(%d,%d)", x, y);
+
+		if (drawing && (current == T_LINE || current == T_RECT || current == T_ELLIPSE))
+			beside(mx, my, SPAN_DY, SPAN_INK, "[%dx%d]", SDL_abs(x - anchor_x) + 1, SDL_abs(y - anchor_y) + 1);
+	}
 
 	slots_draw();
 }

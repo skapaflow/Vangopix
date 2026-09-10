@@ -2485,6 +2485,47 @@ int main (void)
 		#undef NOPE
 	}
 
+	/* ---- HOW BIG A FILE IS, IN WORDS ----
+	 *
+	 * What F1 says about the document on disk. Pinned because the branches are all at
+	 * BOUNDARIES: the step from one unit to the next, and the rounding that decides which
+	 * side of it a number falls on. A readout that says "1024.0 KB" is naming a unit that
+	 * does not exist, and it is the kind of thing that ships because nobody has a file of
+	 * exactly that size to hand.
+	 */
+	{
+		char out[32];
+		#define SIZE(n) (vangopix_size_text((Uint64)(n), out, sizeof out), out)
+
+		ok("bytes are whole, and say B",
+		   SDL_strcmp(SIZE(0), "0 B") == 0 && SDL_strcmp(SIZE(512), "512 B") == 0);
+		ok("up to the last one before a kilobyte", SDL_strcmp(SIZE(1023), "1023 B") == 0);
+
+		ok("A KILOBYTE IS 1024, the way the file manager beside this counts",
+		   SDL_strcmp(SIZE(1024), "1.0 KB") == 0);
+		ok("and everything above bytes carries one decimal",
+		   SDL_strcmp(SIZE(1536), "1.5 KB") == 0 && SDL_strcmp(SIZE(25190), "24.6 KB") == 0);
+
+		ok("megabytes and gigabytes are the same rule again",
+		   SDL_strcmp(SIZE(1024 * 1024), "1.0 MB") == 0 &&
+		   SDL_strcmp(SIZE(1024ull * 1024 * 1024), "1.0 GB") == 0);
+
+		/*
+		 * THE ONE THAT WOULD HAVE SHIPPED. 1048570 is 1023.994 KB, which prints as 1024.0 at
+		 * one decimal - so the carry has to be decided on the ROUNDED number, not the raw
+		 * one, or the readout invents a unit.
+		 */
+		ok("A NUMBER THAT ROUNDS UP TO 1024 IS THE NEXT UNIT, not 1024.0 of this one",
+		   SDL_strcmp(SIZE(1048570), "1.0 MB") == 0);
+		ok("and the same one step down",
+		   SDL_strcmp(SIZE(1023), "1023 B") == 0 && SDL_strcmp(SIZE(1048576), "1.0 MB") == 0);
+
+		ok("it stops at the top of the table rather than running off it",
+		   SDL_strstr(SIZE(1024ull * 1024 * 1024 * 1024 * 8), "TB") != NULL);
+
+		#undef SIZE
+	}
+
 	/* ---- what a save dialog's answer means ----
 	 *
 	 * Filter 0 is PNG and filter 1 is "jpg;jpeg" in file.c's list. -1 is a platform that

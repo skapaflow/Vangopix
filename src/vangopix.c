@@ -28,22 +28,30 @@ float         vng_dt    = 0.0f;
  *
  * THE ORDER WAS A LICENSING PROBLEM, AND IT IS SETTLED.
  *
- * It used to ask for Lucida Console first, which is monospaced and therefore right for
- * VagrantUI - and Bigelow & Holmes property, shipped with Windows, never redistributable
- * from a public repository. FreeSans was the committed fallback so a fresh clone would
- * run at all, and it is proportional, which is wrong for a UI laid out in columns.
+ * It used to ask for Lucida Console first, which is monospaced and therefore right - and
+ * Bigelow & Holmes property, shipped with Windows, never redistributable from a public
+ * repository.
  *
  * DejaVu Sans Mono is both things at once: monospaced, and under the Bitstream Vera /
  * DejaVu licence, which permits redistribution outright. It is committed, with its
  * licence text beside it as that licence requires, so a clone runs with the same face
- * the author sees and text_cell() finally means what it says.
+ * the author sees and ui_cell() finally means what it says.
  *
- * FreeSans stays as the one behind it. Not because it is a good answer - it is
- * proportional - but because a missing or corrupt first file should cost a nicer face
- * and not the ability to read anything on screen. */
+ * IT IS A LIST OF ONE, AND THAT IS ON PURPOSE. GNU FreeFont sat behind it as a fallback,
+ * on the grounds that a corrupt first file should cost a nicer face rather than the
+ * ability to read anything. Three things were wrong with that answer at once: it is
+ * PROPORTIONAL, so the fallback that was meant to rescue the interface is the one thing
+ * that makes every column in it drift; it is GPL, which is a licence obligation carried
+ * for an emergency; and it was 1.5MB of a 2.9MB repository.
+ *
+ * And the emergency it insured against is already handled better than a second face
+ * could: no font at all is a SUPPORTED STATE here. text_draw on a NULL system is a no-op
+ * by design, every panel that prints checks vng_text first, and the check suite runs
+ * without a face loaded precisely so that path stays walked. A second name on this list
+ * would want to be another MONOSPACED, permissively licensed face - not any face at all.
+ */
 static const char *const vng_fonts[] = {
 	"font/DejaVuSansMono.ttf",  /* monospaced, redistributable, committed */
-	"font/FreeSans.ttf",        /* proportional; only if the first is gone */
 };
 /*
  * TWENTY, AND IT MOVED FROM SIXTEEN ONLY ONCE THE LAYOUT FOLLOWED IT.

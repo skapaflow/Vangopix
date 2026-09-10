@@ -6,7 +6,7 @@
 #define BAR_H     (ui_row() + ui_pad())
 #define TAB_MIN   (ui_cell() * 8.0f)     /* below this a name is unreadable and the bar is useless */
 #define TAB_MAX   (ui_cell() * 22.0f)     /* above this two tabs look like a menu, not like tabs     */
-#define PLUS_W    26.0f     /* the [+] that opens a fresh sheet                        */
+#define PLUS_W    32.0f     /* the [+] that opens a fresh sheet                        */
 #define CLOSE_W   ui_close()
 #define PAD       (ui_pad() + 3.0f)
 #define DRAG_SLOP  4.0f     /* travel before a click becomes a drag                    */
@@ -183,8 +183,8 @@ bool tabbar_event (const SDL_Event *e)
 	}
 }
 
-void tabbar_draw (void)
-{
+void tabbar_draw (void) {
+
 	if (!up()) return;
 
 	float w  = tab_w();
@@ -196,9 +196,9 @@ void tabbar_draw (void)
 	/* The strip behind the tabs is translucent, not opaque: the bar floats over the
 	 * sheet, and letting the drawing show through is what keeps it reading as
 	 * something summoned rather than something the window always had. */
-	SDL_FRect strip = { 0.0f, 0.0f, (float)vng_win_w, BAR_H };
-	SDL_SetRenderDrawColor(vng_ren, 0x14, 0x14, 0x14, 0xE0);
-	SDL_RenderFillRect(vng_ren, &strip);
+	// SDL_FRect strip = { 0.0f, 0.0f, (float)vng_win_w, BAR_H };
+	// SDL_SetRenderDrawColor(vng_ren, 0x20, 0x20, 0x20, 0xDD);
+	// SDL_RenderFillRect(vng_ren, &strip);
 
 	int i = 0;
 	for (VNG_TAB *p = vng_tabs; p; p = p->next, i++) {
@@ -217,9 +217,9 @@ void tabbar_draw (void)
 		bool active = (p == vng_tab);
 
 		SDL_FRect r = { x + 1.0f, 1.0f, w - 2.0f, BAR_H - 1.0f };
-		SDL_SetRenderDrawColor(vng_ren,
-		                       active ? 0x2E : 0x1A, active ? 0x2E : 0x1A,
-		                       active ? 0x2E : 0x1A, 0xFF);
+		Uint32 hcolor = (active ? 0x30 : 0x10);
+		Uint32 halpha = (active ? 0x40 : 0x80);
+		SDL_SetRenderDrawColor(vng_ren, hcolor, hcolor, hcolor, halpha);
 		SDL_RenderFillRect(vng_ren, &r);
 
 		/* The active tab is marked by a line on top rather than by colour alone -
@@ -232,8 +232,8 @@ void tabbar_draw (void)
 
 		char label[80];
 		text_fit(vng_text, label, sizeof label, p->name, w - CLOSE_W - PAD * 2.0f);
-		text_print(vng_text, x + PAD, 5.0f,
-		           active ? 0xFFFFFFFF : 0x909090FF, "%s", label);
+		text_print(vng_text, x + PAD + 1, 5.0f + 1, 0x000000FF, "%s", label);
+		text_print(vng_text, x + PAD, 5.0f, active ? 0xFFFFFFFF : 0x909090FF, "%s", label);
 
 		/* The dirty marker takes the [x]'s place until the pointer comes near, so the
 		 * two never fight for the same corner. */
@@ -244,7 +244,8 @@ void tabbar_draw (void)
 			SDL_FRect c = { cx, 0.0f, CLOSE_W, BAR_H };
 			ui_close_mark(c, mx >= cx);
 		} else if (p->dirty) {
-			text_print(vng_text, cx + 3.0f, 5.0f, 0x909090FF, "*");
+			text_print(vng_text, cx + 3.0f + 1, 9.0f + 1, 0x000000FF, "*");
+			text_print(vng_text, cx + 3.0f, 9.0f, 0xFFFFFFFF, "*");
 		}
 	}
 
@@ -254,7 +255,8 @@ void tabbar_draw (void)
 	bool  plus_hot = on_plus(mx, my);
 
 	SDL_FRect pr = { px + 1.0f, 1.0f, PLUS_W - 2.0f, BAR_H - 1.0f };
-	SDL_SetRenderDrawColor(vng_ren, 0x1A, 0x1A, 0x1A, 0xFF);
+	SDL_SetRenderDrawColor(vng_ren, 0x1A, 0x1A, 0x1A, 0xBB);
 	SDL_RenderFillRect(vng_ren, &pr);
-	text_print(vng_text, px + 9.0f, 5.0f, plus_hot ? 0xFFFFFFFF : 0x909090FF, "+");
+	text_print(vng_text, px + 11.0f + 1, 7.0f + 1, 0x000000FF, "+");
+	text_print(vng_text, px + 11.0f, 7.0f, plus_hot ? 0xFFFFFFFF : 0x909090FF, "+");
 }

@@ -35,6 +35,36 @@ void text_print (TextSystem *ts, float x, float y, uint32_t color, const char *f
 void text_print_center (TextSystem *ts, float x, float y, uint32_t color,
                         const char *fmt, ...);
 
+/*
+ * THE SAME TWO, DRAWN TWICE: black one pixel down and right, then `color` over it.
+ *
+ * WHAT IT IS FOR. Text on a PANEL needs none of this - a panel is a shadow that covers more,
+ * and every readout in this program that has one is already legible. What needs it is text
+ * printed straight onto the ARTWORK, which can be any colour at all: white letters vanish on
+ * white pixels and black ones on black, and the only ground a drawing cannot supply is one
+ * that follows the letters themselves.
+ *
+ * OPAQUE BLACK, not a wash, and glyph.c learned that the expensive way. Its wireframe shadow
+ * was three quarters of black, and three quarters of a shadow takes the colour of whatever it
+ * lands on - over the hue ring it went red, green or blue and stopped separating anything
+ * from anything. The point of the pass underneath is to be the one thing that is the same
+ * everywhere.
+ *
+ * AND WHAT YOU PASS AS `color` SHOULD BE OPAQUE TOO, for the mirror of that reason: three
+ * quarters of a letter is a letter its own shadow shows through, every stroke muddied by the
+ * black beneath it. The alpha that softens a readout and the shadow that makes it legible are
+ * two ways of solving the same problem, and using both leaves you with neither.
+ *
+ * The offset is +1,+1 - glyph.c's, so a letter and a tool glyph beside it are lit the same
+ * way. It is not scaled: a hairline stays a hairline whatever the face does, which is the
+ * rule ui.h states for every other one-pixel edge in the program.
+ */
+void text_print_shadow (TextSystem *ts, float x, float y, uint32_t color,
+                        const char *fmt, ...);
+
+void text_print_center_shadow (TextSystem *ts, float x, float y, uint32_t color,
+                               const char *fmt, ...);
+
 /* Width and height text would occupy, without drawing it. */
 void text_measure (TextSystem *ts, const char *text, float *out_w, float *out_h);
 

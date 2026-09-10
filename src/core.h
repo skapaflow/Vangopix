@@ -71,6 +71,23 @@ extern void vangopix_desk_disc (float cx, float cy, float r, Uint32 argb, Uint32
  */
 extern void vangopix_zoom_text (float zoom, char *dst, size_t cap);
 
+/*
+ * HOW BIG THE FILE IS, in the unit a person would say it in: 512 B, 24.6 KB, 3.2 MB.
+ *
+ * K is 1024 and not 1000, which is the convention the file manager beside this program uses -
+ * and the one that matters is that ONE of them is picked and written down, because a readout
+ * that disagrees with Explorer about the same file is a readout nobody trusts twice.
+ *
+ * Bytes come out whole and everything above them gets one decimal. A second decimal on a
+ * megabyte is four digits of noise about a number that is being glanced at.
+ *
+ * Its own named call for the same reason vangopix_zoom_text is one: a format with branches in
+ * it, written twice, is a format that disagrees with itself the first time either copy is
+ * touched. It is pinned in test/checks.c at the boundaries, where rounding decides whether
+ * 1023.6 KB is a megabyte yet.
+ */
+extern void vangopix_size_text (Uint64 bytes, char *dst, size_t cap);
+
 #define VNG_CHECK    6
 #define VNG_CHECK_A  0xFF252525u
 #define VNG_CHECK_B  0xFF303030u

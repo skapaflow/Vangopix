@@ -150,8 +150,23 @@ ifeq ($(OS),Windows_NT)
 # it. As a RULE rather than a comment, editing either one rebuilds the binary on its own
 # - a windres line parked in a text file leaves a manual step waiting to be forgotten,
 # and an exe carrying last week's icon reports no error at all.
+#
+# That is what icon/make_icon was: the same windres line, in a comment, in a file nothing
+# runs. It is gone, and this is where it went - a second copy of a build command is a
+# command that goes stale silently, because the copy nobody runs is the copy nobody
+# notices is wrong.
 $(RES): icon/recicon.rc icon/vangopix.ico
 	windres -i icon/recicon.rc --input-format=rc --target=pe-x86-64 -o $(RES) -O coff
+
+# `make icon` - the resource on its own, without waiting for a link.
+#
+# It is the RULE above that does the work; this only gives it a name to be asked for. Worth
+# having because the .res is the one output whose sources are not C: changing the .ico or the
+# version block wants a way to say "just that" and see windres either speak or stay quiet.
+#
+# Up to date means nothing happens, which is make behaving correctly rather than make
+# failing. `make -B icon` forces it.
+icon: $(RES)
 
 # The dlls have to sit next to the exe, and only Windows works that way. The
 # libpng16 / libtiff / libwebp / libavif dlls in the root are NOT copied here: they come
@@ -174,6 +189,12 @@ else
 dll:
 	@echo "dll: nothing to do - shared libraries come from the package manager here"
 
+# Nothing to build: a .res is a COFF resource blob and only the Windows linker takes one.
+# Answered rather than left undefined, so `make icon` says something on every platform
+# instead of failing on two of them.
+icon:
+	@echo "icon: nothing to do - the exe icon is a Windows resource"
+
 clean:
 	rm -f $(OUT) $(TEST_OUT)
 	$(RMBUILD)
@@ -183,4 +204,4 @@ endif
 # `test` is also the name of a DIRECTORY. Without it on this list make finds the
 # directory, decides the target is up to date and runs nothing - reporting success for a
 # suite it never built.
-.PHONY: all clean run release dll test
+.PHONY: all clean run release dll test icon

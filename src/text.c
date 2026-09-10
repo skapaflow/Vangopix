@@ -236,6 +236,57 @@ void text_print_center (TextSystem *ts, float x, float y, uint32_t color,
 	text_draw(ts, buf, x - w * 0.5f, y - h * 0.5f, color);
 }
 
+/*
+ * THE SHADOW PASS, AND WHY IT IS ONE NUMBER IN ONE PLACE.
+ *
+ * Both calls below are the same two draws with a different idea of where (x, y) is, so the
+ * offset and the colour are stated once. Written into each of them, the day somebody decides
+ * the shadow should sit two pixels away is the day half the program's text moves and the
+ * other half does not.
+ */
+#define SHADOW_OFF  1.0f
+#define SHADOW_INK  0x000000FFu
+
+void text_print_shadow (TextSystem *ts, float x, float y, uint32_t color, const char *fmt, ...)
+{
+	char    buf[4096];
+	va_list ap;
+
+	va_start(ap, fmt);
+	SDL_vsnprintf(buf, sizeof buf, fmt, ap);
+	va_end(ap);
+
+	/* FORMATTED ONCE AND DRAWN TWICE. Calling text_print twice with the same arguments would
+	 * work and would run vsnprintf twice - but the reason it is not done that way is the
+	 * other one: two calls are two argument lists to keep in step, and a shadow that says
+	 * something different from its face is a bug nobody looks for. */
+	text_draw(ts, buf, x + SHADOW_OFF, y + SHADOW_OFF, SHADOW_INK);
+	text_draw(ts, buf, x, y, color);
+}
+
+void text_print_center_shadow (TextSystem *ts, float x, float y, uint32_t color,
+                               const char *fmt, ...)
+{
+	char    buf[4096];
+	va_list ap;
+
+	va_start(ap, fmt);
+	SDL_vsnprintf(buf, sizeof buf, fmt, ap);
+	va_end(ap);
+
+	/* Measured once as well, and both passes hang off the SAME corner. Centring each of them
+	 * on its own would centre two identical blocks identically - which is a shadow exactly
+	 * behind its letters, and therefore no shadow at all. */
+	float w, h;
+	text_measure(ts, buf, &w, &h);
+
+	float cx = x - w * 0.5f;
+	float cy = y - h * 0.5f;
+
+	text_draw(ts, buf, cx + SHADOW_OFF, cy + SHADOW_OFF, SHADOW_INK);
+	text_draw(ts, buf, cx, cy, color);
+}
+
 void text_free (TextSystem *ts)
 {
 	if (!ts) return;

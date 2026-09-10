@@ -10,7 +10,7 @@
  * redrawn there is a single line to move.
  */
 #define SPLASH_PNG  "icon/vangopix_splash_screen.png"
-#define BAND_Y      448.0f
+#define BAND_Y      445.0f
 
 /*
  * THE YEAR COMES FROM THE BUILD, so it cannot go stale.
@@ -37,21 +37,22 @@ bool splash_up (void) { return showing && shot != NULL; }
  * hang from the left, the version and the year from the right, and the way out sits under
  * them both. Change the art's band height and this follows it.
  */
-static void band (float w, float h)
-{
+static void band (float w, float h) {
+
 	if (!vng_text) return;
 
 	const float pad  = ui_pad() * 2.0f;
 	const float line = ui_line();
 	const float top  = BAND_Y + pad;
 
-	const Uint32 INK  = 0x202020FFu;
-	const Uint32 SOFT = 0x808080FFu;
+	const Uint32 WHITE  = 0xFFFFFFFFu;
+	// const Uint32 INK  = 0x202020FFu;
+	// const Uint32 SOFT = 0x808080FFu;
 
 	(void)h;
 
-	text_print(vng_text, pad, top, INK, "Vangopix");
-	text_print(vng_text_small, pad, top + line, SOFT, "a pixel art editor");
+	text_print_shadow(vng_text, pad, top, WHITE, "Vangopix");
+	text_print_shadow(vng_text_small, pad, top + line, WHITE, "a pixel art editor");
 
 	/* Right-aligned, so the two numbers stack against the edge whatever their width. */
 	{
@@ -64,8 +65,8 @@ static void band (float w, float h)
 		text_measure(vng_text,       ver,  &vw, NULL);
 		text_measure(vng_text_small, year, &yw, NULL);
 
-		text_print(vng_text,       w - pad - vw, top,        INK,  "%s", ver);
-		text_print(vng_text_small, w - pad - yw, top + line, SOFT, "%s", year);
+		text_print_shadow(vng_text,       w - pad - vw, top,        WHITE,  "%s", ver);
+		text_print_shadow(vng_text_small, w - pad - yw, top + line, WHITE, "%s", year);
 	}
 
 	/*
@@ -77,13 +78,12 @@ static void band (float w, float h)
 		float tw;
 
 		text_measure(vng_text_small, out, &tw, NULL);
-		text_print(vng_text_small, SDL_floorf((w - tw) * 0.5f), top + line * 2.0f,
-		           SOFT, "%s", out);
+		text_print_shadow(vng_text_small, SDL_floorf((w - tw) * 0.5f), top + line * 2.0f, WHITE, "%s", out);
 	}
 }
 
-void splash_open (void)
-{
+void splash_open (void) {
+
 	char *path = vangopix_asset(SPLASH_PNG);
 	if (!path) return;
 
@@ -106,7 +106,7 @@ void splash_open (void)
 	 * why that is the whole reason the words are not simply drawn beside the picture.
 	 */
 	shot = SDL_CreateTexture(vng_ren, SDL_PIXELFORMAT_ARGB8888,
-	                         SDL_TEXTUREACCESS_TARGET, (int)w, (int)h);
+							 SDL_TEXTUREACCESS_TARGET, (int)w, (int)h);
 	if (!shot) { SDL_DestroyTexture(art); return; }
 
 	SDL_Texture *was = SDL_GetRenderTarget(vng_ren);
@@ -130,8 +130,8 @@ void splash_open (void)
 	showing = true;
 }
 
-bool splash_event (const SDL_Event *e)
-{
+bool splash_event (const SDL_Event *e) {
+
 	if (!splash_up()) return false;
 
 	switch (e->type) {
@@ -164,8 +164,8 @@ bool splash_event (const SDL_Event *e)
 	}
 }
 
-void splash_draw (void)
-{
+void splash_draw (void) {
+
 	if (!splash_up()) return;
 
 	SDL_SetRenderDrawBlendMode(vng_ren, SDL_BLENDMODE_BLEND);
@@ -192,8 +192,11 @@ void splash_draw (void)
 	float w = SDL_floorf(shot_w * k);
 	float h = SDL_floorf(shot_h * k);
 
-	SDL_FRect dst = { SDL_floorf(((float)vng_win_w - w) * 0.5f),
-	                  SDL_floorf(((float)vng_win_h - h) * 0.5f), w, h };
+	SDL_FRect dst = {
+		SDL_floorf(((float)vng_win_w - w) * 0.5f),
+		SDL_floorf(((float)vng_win_h - h) * 0.5f),
+		w, h
+	};
 
 	/* Linear only when it is being shrunk. At 1:1 the two are the same call, and nearest on a
 	 * reduced image throws away whole rows - the rule core.c states for the sheet. */
@@ -201,8 +204,8 @@ void splash_draw (void)
 	SDL_RenderTexture(vng_ren, shot, NULL, &dst);
 }
 
-void splash_free (void)
-{
+void splash_free (void) {
+
 	if (shot) SDL_DestroyTexture(shot);
 	shot    = NULL;
 	showing = false;

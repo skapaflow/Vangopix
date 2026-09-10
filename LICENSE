@@ -1,0 +1,43 @@
+MIT License
+
+Copyright (c) 2026 Alberto F. Jr.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+THIRD-PARTY MATERIAL BUNDLED WITH THIS REPOSITORY
+
+The MIT terms above cover the Vangopix source code. Three things travelling with
+it carry their own terms, and those terms are not replaced by the MIT licence:
+
+  src/stb_truetype.h
+      Sean Barrett. Public domain (or MIT at your option) - the notice is in the
+      file itself.
+
+  font/DejaVuSansMono.ttf
+      Bitstream Vera Fonts Copyright (c) 2003 Bitstream, Inc., with the DejaVu
+      changes. Free to use, copy, modify and redistribute; the licence requires
+      that its notice travel with the font, which is why it is committed beside
+      it as font/LICENSE_DEJAVU.txt. Not copyleft: it places no condition on
+      this program.
+
+  SDL3 and SDL3_image
+      Not in this repository - they are a build dependency, obtained separately.
+      Both are zlib-licensed.

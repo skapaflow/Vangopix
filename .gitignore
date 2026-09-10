@@ -41,3 +41,7 @@ build/
 # it is not there, so committing it would be committing a copy that goes stale the moment the
 # defaults change - and deleting it is the documented way to get those defaults back.
 keyboard.txt
+
+# The design document. It is the reasoning BEHIND this repository rather than part of it -
+# a working notebook, kept beside the source and not shipped with it.
+CLAUDE.md

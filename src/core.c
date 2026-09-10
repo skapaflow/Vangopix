@@ -559,6 +559,28 @@ void vangopix_zoom_text (float z, char *dst, size_t cap)
 	SDL_snprintf(dst + n, cap - n, "x");
 }
 
+void vangopix_size_text (Uint64 bytes, char *dst, size_t cap)
+{
+	static const char *const UNIT[] = { "B", "KB", "MB", "GB", "TB" };
+
+	double v = (double)bytes;
+	int    u = 0;
+
+	/*
+	 * ROUNDED BEFORE THE COMPARISON, not after it, which is the whole of what this loop has
+	 * to get right. 1048570 bytes is 1023.99 KB and prints as "1024.0 KB" at one decimal -
+	 * a unit that does not exist, sitting where "1.0 MB" belongs. Asking whether the number
+	 * WILL round up to 1024 is what carries it to the next unit instead.
+	 */
+	while (u + 1 < (int)SDL_arraysize(UNIT) && v + 0.05 >= 1024.0) {
+		v /= 1024.0;
+		u++;
+	}
+
+	if (u == 0) SDL_snprintf(dst, cap, "%llu B", (unsigned long long)bytes);
+	else        SDL_snprintf(dst, cap, "%.1f %s", v, UNIT[u]);
+}
+
 /*
  * ONE READOUT BAR, AND THERE ARE NOW THREE THINGS ON THAT LINE.
  *
@@ -623,18 +645,51 @@ static void draw_zoom (VNG_TAB *t)
 	readout((float)vng_win_w - ZOOM_MARGIN - readout_w(text), text);
 }
 
-static void draw_overlay (VNG_TAB *t, float zoom)
+static void draw_overlay (VNG_TAB *t)
 {
 	if (!vng_text) return;
 
-	/* The same units as the corner readout, and from the same call - see vangopix_zoom_text. */
-	char z[16];
-	vangopix_zoom_text(zoom, z, sizeof z);
+	/*
+	 * THE FILE'S SIZE WHERE THE ZOOM USED TO BE.
+	 *
+	 * The zoom is not lost: it has its own readout in the corner, beside the two colours, and
+	 * it was the one thing on this line that was already on screen without F1. What was
+	 * missing is the number nothing else in the program says - how heavy the thing you are
+	 * about to hand somebody actually is.
+	 *
+	 * READ FROM DISK EACH TIME, and this line only runs while F1 is up. Cached, it would want
+	 * invalidating on save, on save-as, on open and on close - four places to keep in step
+	 * with a number that is a syscall away. Asked fresh, it simply becomes right the moment
+	 * the file does.
+	 *
+	 * IT IS THE FILE'S SIZE, NOT THE DOCUMENT'S, and they differ the instant anything is
+	 * drawn: what is on disk is the last thing SAVED. That is the honest number for the
+	 * question being asked - the dirty mark in the window title is what says the two have
+	 * parted company - and the alternative, guessing what a PNG encoder would make of the
+	 * pixels in hand, is a number that would be wrong in a way nobody could check.
+	 */
+	char size[32];
+	SDL_PathInfo info;
 
-	text_print(vng_text, 8.0f, 6.0f, 0xFFFFFFC0,
-	           "%s\n%d x %d   %s   tab %d/%d",
-	           t->name, t->w, t->h, z,
-	           vng_tab_index(t), vng_tab_count());
+	if (!t->path)                            SDL_strlcpy(size, "not saved", sizeof size);
+	else if (!SDL_GetPathInfo(t->path, &info)) SDL_strlcpy(size, "gone", sizeof size);
+	else vangopix_size_text(info.size, size, sizeof size);
+
+	/*
+	 * THIS IS THE ONLY TEXT IN THE PROGRAM PRINTED STRAIGHT ONTO THE ARTWORK - the corner
+	 * readouts each sit on a panel of their own, and a panel is a shadow that covers more. So
+	 * it is the one caller that needs the shadowed print, and text.h is where the reasoning
+	 * for it lives now.
+	 *
+	 * OPAQUE WHITE, which is what the shadow pays for. It was 0xC0, and three quarters of a
+	 * letter is a letter its own shadow shows through - the alpha was doing two jobs,
+	 * softening the readout and letting the drawing through, and the shadow does the second
+	 * one better.
+	 */
+	text_print_shadow(vng_text, 8.0f, 6.0f, 0xFFFFFFFFu,
+	                  "%s\n%d x %d   %s   tab %d/%d",
+	                  t->name, t->w, t->h, size,
+	                  vng_tab_index(t), vng_tab_count());
 }
 
 /*
@@ -860,7 +915,7 @@ void vangopix_core (void)
 		draw_size(t);      /* beside the two colours: how big the sheet is */
 		draw_zoom(t);      /* and the other end of the same line */
 		resize_draw(t);
-		if (overlay) draw_overlay(t, t->zoom);
+		if (overlay) draw_overlay(t);
 		sidebar_draw();
 		palette_grid_draw(t);   /* the swatches beside the palette box, under the windows */
 		win_draw();      /* the floating windows, over the sheet and under the panels */
