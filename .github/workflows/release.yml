@@ -25,8 +25,8 @@ permissions:
   contents: write         # attaching a file to a release is a write
 
 env:
-  SDL3_VERSION: 3.2.24
-  SDL3_IMAGE_VERSION: 3.2.4
+  SDL3_VERSION: 3.4.16
+  SDL3_IMAGE_VERSION: 3.4.6
 
 jobs:
   windows:
@@ -44,15 +44,33 @@ jobs:
         run: |
           $tmp = "$env:RUNNER_TEMP"
 
+          # A wrong version number is the likeliest way this file goes stale, and a bare 404
+          # from Invoke-WebRequest says nothing about where to go and look. This does.
+          function Fetch($url, $out, $what) {
+            try { Invoke-WebRequest -Uri $url -OutFile $out }
+            catch {
+              throw "Could not download $what from $url -- check the version numbers in the env: block at the top of this workflow against that project's releases page."
+            }
+          }
+
           $sdl = "SDL3-devel-$env:SDL3_VERSION-mingw"
-          Invoke-WebRequest -Uri "https://github.com/libsdl-org/SDL/releases/download/release-$env:SDL3_VERSION/$sdl.zip" -OutFile "$tmp\sdl.zip"
+          Fetch "https://github.com/libsdl-org/SDL/releases/download/release-$env:SDL3_VERSION/$sdl.zip" "$tmp\sdl.zip" "SDL3 $env:SDL3_VERSION"
           Expand-Archive "$tmp\sdl.zip" -DestinationPath $tmp -Force
           Move-Item "$tmp\SDL3-$env:SDL3_VERSION\x86_64-w64-mingw32" "C:\SDL3"
 
           $img = "SDL3_image-devel-$env:SDL3_IMAGE_VERSION-mingw"
-          Invoke-WebRequest -Uri "https://github.com/libsdl-org/SDL_image/releases/download/release-$env:SDL3_IMAGE_VERSION/$img.zip" -OutFile "$tmp\img.zip"
+          Fetch "https://github.com/libsdl-org/SDL_image/releases/download/release-$env:SDL3_IMAGE_VERSION/$img.zip" "$tmp\img.zip" "SDL3_image $env:SDL3_IMAGE_VERSION"
           Expand-Archive "$tmp\img.zip" -DestinationPath $tmp -Force
           Move-Item "$tmp\SDL3_image-$env:SDL3_IMAGE_VERSION\x86_64-w64-mingw32" "C:\SDL3_image"
+
+          # The headers are what the compile actually needs, so their absence is caught here
+          # rather than as a confusing compiler error forty lines further on.
+          if (-not (Test-Path "C:\SDL3\include\SDL3\SDL.h")) {
+            throw "SDL3 unpacked, but C:/SDL3/include/SDL3/SDL.h is not there - the archive layout has changed."
+          }
+          if (-not (Test-Path "C:\SDL3_image\include\SDL3_image\SDL_image.h")) {
+            throw "SDL3_image unpacked, but its header is not where the Makefile looks."
+          }
 
       # gcc and windres come from the MSYS2 that ships with the runner; make comes from
       # chocolatey. Both are put on the PATH of the plain cmd shell the Makefile expects,
