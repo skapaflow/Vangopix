@@ -1,0 +1,97 @@
+# Builds the Windows package and attaches it to a GitHub Release.
+#
+# Publishing becomes two commands:
+#
+#     git tag v1.0
+#     git push --tags
+#
+# WHAT THIS DELIBERATELY DOES NOT DO is describe the package. It calls `make dist`, which is
+# the same command used by hand - so the list of what a person downloads lives in exactly one
+# place. A workflow that assembled its own zip would be a second copy of that list, and the
+# day the two disagree is the day somebody downloads a build with no font in it.
+#
+# NOTE ON THE VERSIONS BELOW: they are the only thing here that has to be kept current by
+# hand. Check them against https://github.com/libsdl-org/SDL/releases and
+# https://github.com/libsdl-org/SDL_image/releases when a build fails to find its headers.
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:      # so the packaging can be exercised without cutting a release
+
+permissions:
+  contents: write         # attaching a file to a release is a write
+
+env:
+  SDL3_VERSION: 3.2.24
+  SDL3_IMAGE_VERSION: 3.2.4
+
+jobs:
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The official mingw development packages, unpacked into the SAME layout the Makefile
+      # expects locally - C:/SDL3 and C:/SDL3_image, each with include/ lib/ bin/. Matching
+      # the local layout is the point: a CI that builds a different way only proves that the
+      # CI works.
+      - name: SDL3 and SDL3_image
+        shell: pwsh
+        run: |
+          $tmp = "$env:RUNNER_TEMP"
+
+          $sdl = "SDL3-devel-$env:SDL3_VERSION-mingw"
+          Invoke-WebRequest -Uri "https://github.com/libsdl-org/SDL/releases/download/release-$env:SDL3_VERSION/$sdl.zip" -OutFile "$tmp\sdl.zip"
+          Expand-Archive "$tmp\sdl.zip" -DestinationPath $tmp -Force
+          Move-Item "$tmp\SDL3-$env:SDL3_VERSION\x86_64-w64-mingw32" "C:\SDL3"
+
+          $img = "SDL3_image-devel-$env:SDL3_IMAGE_VERSION-mingw"
+          Invoke-WebRequest -Uri "https://github.com/libsdl-org/SDL_image/releases/download/release-$env:SDL3_IMAGE_VERSION/$img.zip" -OutFile "$tmp\img.zip"
+          Expand-Archive "$tmp\img.zip" -DestinationPath $tmp -Force
+          Move-Item "$tmp\SDL3_image-$env:SDL3_IMAGE_VERSION\x86_64-w64-mingw32" "C:\SDL3_image"
+
+      # gcc and windres come from the MSYS2 that ships with the runner; make comes from
+      # chocolatey. Both are put on the PATH of the plain cmd shell the Makefile expects,
+      # rather than running the build inside a unix shell - the Makefile chooses cmd.exe on
+      # Windows on purpose, and this keeps that choice honest.
+      - name: toolchain
+        shell: pwsh
+        run: |
+          choco install make --no-progress -y
+          "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      # The checks first, so a package is never attached to a release that does not pass them.
+      # They open a hidden window because a document owns a texture; the runner has a desktop
+      # session, so SDL video comes up.
+      - name: checks
+        shell: cmd
+        run: make test
+
+      - name: package
+        shell: cmd
+        run: make dist
+
+      # THE VERSION COMES FROM THE TAG, and it is the only place a released build is named.
+      # vangopix.h carries one too, for the splash screen to print - but a file named after
+      # a constant somebody forgot to raise is worse than one named after the tag that
+      # actually produced it.
+      - name: name the archive after the tag
+        shell: pwsh
+        run: Rename-Item vangopix-win64.zip "vangopix-$env:GITHUB_REF_NAME-win64.zip"
+
+      - name: attach it to the release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: vangopix-*-win64.zip
+          draft: true         # so the notes can be written before anyone can download it
+          body: |
+            Unzip anywhere and run `vangopix.exe`. Nothing to install: the SDL libraries
+            travel with it, and the C runtime it needs is part of Windows 10 and 11.
+
+            Windows will say **"Windows protected your PC"** the first time, because the
+            executable is not signed with a paid certificate. *More info* → *Run anyway*.

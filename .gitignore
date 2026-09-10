@@ -45,3 +45,7 @@ keyboard.txt
 # The design document. It is the reasoning BEHIND this repository rather than part of it -
 # a working notebook, kept beside the source and not shipped with it.
 CLAUDE.md
+
+# What `make dist` assembles on its way to the .zip. Derived from the tree beside it, and
+# rebuilt from nothing every time - committing it would be committing a copy of the repo.
+dist/

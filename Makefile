@@ -144,6 +144,32 @@ endif
 release: CFLAGS += -DNDEBUG
 release: clean $(OUT)
 
+#
+# `make dist` - THE FOLDER SOMEBODY ELSE CAN ACTUALLY RUN.
+#
+# The exe alone is not the program. It reads five things off the disk beside it at runtime,
+# and every one of them was found by following vangopix_asset() rather than by remembering:
+#
+#   font/DejaVuSansMono.ttf     without it the program runs with NO TEXT - a supported
+#                               state, and not one to ship on purpose
+#   font/LICENSE_DEJAVU.txt     the font's licence requires its notice to travel with it,
+#                               so this is an obligation and not a courtesy
+#   icon/vangopix_splash_screen.png   the splash
+#   icon/project.png            the project panel's backdrop
+#   vangopix_palette.ini        the palette list
+#
+# keyboard.txt, projects.vngproj and the .vnganime sidecars are WRITTEN by the program, not
+# read from the package, so they are deliberately absent.
+#
+# THE ARCHIVE CARRIES NO VERSION IN ITS NAME, and that is not an oversight. A version here
+# would be a second copy of the one in vangopix.h, and the two would part company on the
+# first release nobody thought about. The release workflow renames it after the git TAG,
+# which is the version of record for anything published.
+#
+DIST     = vangopix-win64
+DIST_DIR = dist/$(DIST)
+
+
 ifeq ($(OS),Windows_NT)
 
 # The .res is derived, not authored: the sources are icon/recicon.rc and the .ico beside
@@ -178,7 +204,38 @@ dll:
 	copy /Y "$(subst /,\,$(SDL3))\bin\SDL3.dll" SDL3.dll
 	copy /Y "$(subst /,\,$(SDL3IMG))\bin\SDL3_image.dll" SDL3_image.dll
 
+# Built on `release`, so a package can never be made out of a debug build by accident.
+#
+# The format dlls are copied only IF PRESENT: they are optional in the literal sense -
+# SDL3_image calls LoadLibrary on them by name and survives their absence - so a machine
+# without them should produce a smaller package, not a failed one.
+#
+# Zipped with PowerShell rather than tar. Windows 10 ships a bsdtar that can write zips and
+# git ships a GNU tar that cannot, and which of the two answers `tar` depends on PATH -
+# Compress-Archive is on every Windows 10 and 11 and does not depend on anything.
+dist: release
+	@if exist $(subst /,\,$(DIST_DIR)) rmdir /S /Q $(subst /,\,$(DIST_DIR))
+	@if exist $(DIST).zip del $(DIST).zip
+	@mkdir $(subst /,\,$(DIST_DIR))\font
+	@mkdir $(subst /,\,$(DIST_DIR))\icon
+	@copy /Y $(OUT) $(subst /,\,$(DIST_DIR)) >nul
+	@copy /Y SDL3.dll $(subst /,\,$(DIST_DIR)) >nul
+	@copy /Y SDL3_image.dll $(subst /,\,$(DIST_DIR)) >nul
+	@for %%d in (libpng16-16 libtiff-6 libwebp-7 libwebpdemux-2 libwebpmux-3 libavif-16) do \
+	    @if exist %%d.dll copy /Y %%d.dll $(subst /,\,$(DIST_DIR)) >nul
+	@copy /Y vangopix_palette.ini $(subst /,\,$(DIST_DIR)) >nul
+	@copy /Y LICENSE $(subst /,\,$(DIST_DIR)) >nul
+	@copy /Y README.md $(subst /,\,$(DIST_DIR)) >nul
+	@copy /Y font\DejaVuSansMono.ttf $(subst /,\,$(DIST_DIR))\font >nul
+	@copy /Y font\LICENSE_DEJAVU.txt $(subst /,\,$(DIST_DIR))\font >nul
+	@copy /Y icon\vangopix_splash_screen.png $(subst /,\,$(DIST_DIR))\icon >nul
+	@copy /Y icon\project.png $(subst /,\,$(DIST_DIR))\icon >nul
+	@powershell -NoProfile -Command "Compress-Archive -Path '$(DIST_DIR)/*' -DestinationPath '$(DIST).zip' -Force"
+	@echo $(DIST).zip is ready - unzip it anywhere and run vangopix.exe
+
 clean:
+	@if exist dist rmdir /S /Q dist
+	@if exist $(DIST).zip del $(DIST).zip
 	@if exist $(OUT) del $(OUT)
 	@if exist $(TEST_OUT) del $(TEST_OUT)
 	@if exist $(subst /,\,$(RES)) del $(subst /,\,$(RES))
@@ -195,7 +252,20 @@ dll:
 icon:
 	@echo "icon: nothing to do - the exe icon is a Windows resource"
 
+# The same package, minus the dlls: here SDL comes from the package manager and belongs to
+# the system rather than to this folder. Tarred because a unix archive that loses the
+# executable bit is an archive nobody can run.
+dist: release
+	@rm -rf $(DIST_DIR) $(DIST).tar.gz
+	@mkdir -p $(DIST_DIR)/font $(DIST_DIR)/icon
+	@cp $(OUT) vangopix_palette.ini LICENSE README.md $(DIST_DIR)/
+	@cp font/DejaVuSansMono.ttf font/LICENSE_DEJAVU.txt $(DIST_DIR)/font/
+	@cp icon/vangopix_splash_screen.png icon/project.png $(DIST_DIR)/icon/
+	@tar czf $(DIST).tar.gz -C dist $(DIST)
+	@echo "$(DIST).tar.gz is ready"
+
 clean:
+	rm -rf dist $(DIST).tar.gz
 	rm -f $(OUT) $(TEST_OUT)
 	$(RMBUILD)
 
@@ -204,4 +274,4 @@ endif
 # `test` is also the name of a DIRECTORY. Without it on this list make finds the
 # directory, decides the target is up to date and runs nothing - reporting success for a
 # suite it never built.
-.PHONY: all clean run release dll test icon
+.PHONY: all clean run release dll test icon dist
