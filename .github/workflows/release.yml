@@ -44,12 +44,25 @@ jobs:
         run: |
           $tmp = "$env:RUNNER_TEMP"
 
+          # Invoke-WebRequest renders a progress bar into a non-interactive host and spends
+          # most of its time doing it. Off, this is seconds rather than minutes.
+          $ProgressPreference = 'SilentlyContinue'
+
           # A wrong version number is the likeliest way this file goes stale, and a bare 404
-          # from Invoke-WebRequest says nothing about where to go and look. This does.
+          # says nothing about where to go and look - so the advice is added.
+          #
+          # ADDED, NOT SUBSTITUTED, and that distinction cost a run. The first version of
+          # this caught the exception and threw its own message in place of it, which reads
+          # well and destroys the only evidence of what actually went wrong: a 404 and a
+          # refused connection came out word for word the same. The cause goes first, the
+          # advice second.
           function Fetch($url, $out, $what) {
             try { Invoke-WebRequest -Uri $url -OutFile $out }
             catch {
-              throw "Could not download $what from $url -- check the version numbers in the env: block at the top of this workflow against that project's releases page."
+              throw "Downloading $what failed: $($_.Exception.Message)`n" +
+                    "  url: $url`n" +
+                    "  If that is a 404, check the version numbers in the env: block at the " +
+                    "top of this workflow against that project's releases page."
             }
           }
 
