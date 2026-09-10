@@ -16,18 +16,8 @@
 #define VNG_NAME    "Vangopix"
 #define VNG_WIN_W   1024
 #define VNG_WIN_H   768
-/*
- * WHAT THIS BUILD CALLS ITSELF, and the only place it is written down.
- *
- * The splash reads it and nothing else does yet - which is exactly why it is here rather than
- * in splash.c: the moment a second thing wants it, a version living in the thing that
- * DISPLAYS it is a version that gets copied.
- *
- * icon/recicon.rc carries two more and they disagree with each other: FILEVERSION says
- * 3,3,0,0 while its own "FileVersion" string says 1.0. Windows reads that resource, not this,
- * so the two want reconciling by somebody who knows which is true.
- */
-#define VNG_VERSION "1.0"
+/* What this build calls itself - see version.h, which the Windows resource reads too. */
+#include "version.h"
 
 #define VNG_NEW_W   256      /* a fresh sheet, in document pixels */
 #define VNG_NEW_H   256

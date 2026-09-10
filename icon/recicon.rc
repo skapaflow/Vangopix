@@ -1,31 +1,53 @@
 #include <winver.h>
 
+/*
+ * The exe's icon and the version block Windows shows in a file's Properties.
+ *
+ * THE VERSION IS INCLUDED, NOT TYPED. It used to be typed twice in this file alone -
+ * FILEVERSION 3,3,0,0 sitting above a "FileVersion" string of "1.0" - and disagreeing with
+ * the header the program itself reads. Both now come from src/version.h, which is the only
+ * file either of them may be edited in.
+ */
+#include "../src/version.h"
+
 MEUAPLIC ICON DISCARDABLE "vangopix.ico"
 
 1 VERSIONINFO
-FILEVERSION 3,3,0,0
-PRODUCTVERSION 3,3,0,0
-#ifndef _DEBUG
-FILEFLAGS 0xbl
+FILEVERSION    VNG_VERSION_N
+PRODUCTVERSION VNG_VERSION_N
+
+/*
+ * FILEFLAGS 0, and it was 0xb.
+ *
+ * That is VS_FF_DEBUG | VS_FF_PRERELEASE | VS_FF_PATCHED - three claims, all of them false
+ * about a release build, and all of them repeated by anything that reads a binary's metadata.
+ * FILEFLAGSMASK says which bits of it are meaningful at all; without it the field is not read
+ * as a considered answer.
+ */
+FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+FILEFLAGS      0x0L
+FILEOS         VOS_NT_WINDOWS32
+FILETYPE       VFT_APP
+FILESUBTYPE    VFT2_UNKNOWN
 BEGIN
-BLOCK "StringFileInfo"
-BEGIN
-BLOCK "040904B0"
-BEGIN
-VALUE "CompanyName", "GenericCompany\0"
-VALUE "FileDescription", "Vangopix\0"
-VALUE "FileVersion", "1.0\0"
-VALUE "InternalName", "1.0\0"
-VALUE "LegalCopyright", "Copyright \251 Generic Company. 2024\0"
-VALUE "LegalTrademarks", "Generic Trademark.\0"
-VALUE "OriginalFilename", "\0"
-VALUE "ProductName", "Generic Application.\0"
-VALUE "ProductVersion", "1.0\0"
+    BLOCK "StringFileInfo"
+    BEGIN
+        /* 0409 is US English, 04B0 is UTF-16 - the pair repeated in VarFileInfo below, and
+           the two have to agree or nothing here is shown at all. */
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "Alberto F. Jr.\0"
+            VALUE "FileDescription",  "Vangopix - a pixel art editor\0"
+            VALUE "FileVersion",      VNG_VERSION "\0"
+            VALUE "InternalName",     "vangopix\0"
+            VALUE "LegalCopyright",   "Copyright \251 2026 Alberto F. Jr. MIT licensed.\0"
+            VALUE "OriginalFilename", "vangopix.exe\0"
+            VALUE "ProductName",      "Vangopix\0"
+            VALUE "ProductVersion",   VNG_VERSION "\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
 END
-END
-BLOCK "VarFileInfo"
-BEGIN
-VALUE "Translation", 0x400, 1200
-END
-END
-#endif
