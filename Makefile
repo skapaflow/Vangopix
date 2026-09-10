@@ -124,7 +124,20 @@ TEST_OBJ = $(filter-out $(OBJDIR)/main.o,$(OBJ))
 $(OBJDIR)/checks.o: test/checks.c $(DEP) | $(OBJDIR)
 	$(CC) $(CFLAGS) -c test/checks.c -o $@
 
-test: $(OBJDIR)/checks.o $(TEST_OBJ)
+#
+# ON `dll`, WHICH LOOKS LIKE A WINDOWS DETAIL AND IS THE DIFFERENCE BETWEEN A CHECK THAT
+# FAILS AND ONE THAT CANNOT START.
+#
+# checks.exe links against SDL, and Windows resolves a dll beside the executable or on PATH -
+# not from wherever the import library came from. Without the copy, it dies before main() with
+# 0xC0000135, which make reports as `Error -1073741515`: no output, no PASS, no FAIL, and
+# nothing on screen connecting that number to a missing file. It cost a CI run to read.
+#
+# It is a dependency rather than a line in the workflow because a fresh clone has the same
+# problem, and a suite that cannot run for anyone who has not already run `make dll` is a
+# suite people learn to distrust. On Linux and macOS `dll` prints that it has nothing to do.
+#
+test: dll $(OBJDIR)/checks.o $(TEST_OBJ)
 	$(CC) $(OBJDIR)/checks.o $(TEST_OBJ) -o $(TEST_OUT) $(LFLAGS)
 	./$(TEST_OUT)
 
@@ -213,7 +226,7 @@ dll:
 # Zipped with PowerShell rather than tar. Windows 10 ships a bsdtar that can write zips and
 # git ships a GNU tar that cannot, and which of the two answers `tar` depends on PATH -
 # Compress-Archive is on every Windows 10 and 11 and does not depend on anything.
-dist: release
+dist: release dll
 	@if exist $(subst /,\,$(DIST_DIR)) rmdir /S /Q $(subst /,\,$(DIST_DIR))
 	@if exist $(DIST).zip del $(DIST).zip
 	@mkdir $(subst /,\,$(DIST_DIR))\font
