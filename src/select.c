@@ -517,8 +517,8 @@ static void tex_make (VNG_SEL *s)
 
 /* The marching rectangle: black and white dashes that walk, so the outline reads against
  * any artwork and reads as a SELECTION rather than as something drawn. */
-static void ants (SDL_FRect r)
-{
+static void ants (SDL_FRect r) {
+
 	float off = march;
 
 	SDL_SetRenderDrawColor(vng_ren, 0x00, 0x00, 0x00, 0xFF);
@@ -531,14 +531,15 @@ static void ants (SDL_FRect r)
 		float x1 = x + DASH > r.x + r.w ? r.x + r.w : x + DASH;
 		if (x1 <= x0) continue;
 		SDL_RenderLine(vng_ren, x0, r.y, x1, r.y);
-		SDL_RenderLine(vng_ren, x0, r.y + r.h, x1, r.y + r.h);
+		SDL_RenderLine(vng_ren, x0, r.y + r.h - 1, x1, r.y + r.h - 1);
 	}
+
 	for (float y = r.y - off; y < r.y + r.h; y += DASH * 2.0f) {
 		float y0 = y < r.y ? r.y : y;
 		float y1 = y + DASH > r.y + r.h ? r.y + r.h : y + DASH;
 		if (y1 <= y0) continue;
 		SDL_RenderLine(vng_ren, r.x, y0, r.x, y1);
-		SDL_RenderLine(vng_ren, r.x + r.w, y0, r.x + r.w, y1);
+		SDL_RenderLine(vng_ren, r.x + r.w - 1, y0, r.x + r.w - 1, y1);
 	}
 }
 
