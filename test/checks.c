@@ -2555,6 +2555,68 @@ int main (void)
 		#undef EXT
 	}
 
+	/* ---- A PRESS BESIDE THE PROJECT PANEL PUTS IT AWAY ----
+	 *
+	 * The panel floats over the sheet, so a click beside it is somebody done with the list.
+	 * The press is spent on that, not passed through: otherwise closing a panel would leave a
+	 * pixel in the artwork. The middle button is the pan and is left alone.
+	 *
+	 * The slide is driven by sidebar_draw, the one place that advances it, so it is run until
+	 * the panel has arrived - a press tested against a panel still at anim 0 would be testing
+	 * the collapsed strip instead.
+	 */
+	{
+		int   was_w  = vng_win_w, was_h = vng_win_h;
+		float was_dt = vng_dt;
+
+		vng_win_w = 800;
+		vng_win_h = 600;
+		vng_dt    = 0.1f;
+
+		#define SETTLE() for (int i = 0; i < 60; i++) sidebar_draw()
+
+		SDL_Event e;
+		SDL_zero(e);
+		e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+
+		sidebar_toggle();
+		SETTLE();
+		float edge = sidebar_edge();
+		ok("the panel slides in", sidebar_visible() && edge > 0.0f);
+
+		e.button.button = SDL_BUTTON_LEFT;
+		e.button.x = edge * 0.5f;
+		e.button.y = 300.0f;
+		ok("a press INSIDE the panel is the panel's", sidebar_event(&e));
+		ok("and leaves it where it is", sidebar_visible());
+
+		e.button.button = SDL_BUTTON_MIDDLE;
+		e.button.x = edge + 40.0f;
+		ok("the middle button beside it still goes to the pan", !sidebar_event(&e));
+		ok("and does not dismiss it", sidebar_visible());
+
+		e.button.button = SDL_BUTTON_LEFT;
+		ok("A LEFT PRESS BESIDE THE PANEL IS SPENT ON IT", sidebar_event(&e));
+		ok("AND PUTS IT AWAY", !sidebar_visible());
+
+		ok("one already sliding out lets the sheet have the press again", !sidebar_event(&e));
+
+		sidebar_toggle();
+		SETTLE();
+		e.button.button = SDL_BUTTON_RIGHT;
+		ok("A RIGHT PRESS BESIDE IT DOES THE SAME",
+		   sidebar_event(&e) && !sidebar_visible());
+
+		SETTLE();
+		ok("and it goes all the way out", sidebar_edge() < edge);
+
+		#undef SETTLE
+
+		vng_win_w = was_w;
+		vng_win_h = was_h;
+		vng_dt    = was_dt;
+	}
+
 	vng_tabs_free();
 	SDL_DestroyRenderer(vng_ren);
 	SDL_DestroyWindow(vng_win);

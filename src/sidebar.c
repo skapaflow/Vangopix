@@ -372,7 +372,25 @@ bool sidebar_event (const SDL_Event *e)
 
 	case SDL_EVENT_MOUSE_BUTTON_DOWN: {
 		float x = e->button.x - ox, y = e->button.y;
-		if (x >= BAR_W) return false;
+
+		/*
+		 * A PRESS OUTSIDE THE PANEL PUTS IT AWAY, and is spent doing so. The panel floats over
+		 * the sheet, so a click beside it is a person done with the list - and letting the same
+		 * press through would leave a pixel in the artwork as the price of closing a panel.
+		 * Left and right only: the middle button is the pan, and a hand panning to find its
+		 * place in the drawing with the list still up is not asking for the list to go.
+		 *
+		 * Only while it is HEADED in. One already sliding out has been dismissed, and a press on
+		 * the sheet beside it is the sheet's again, as it always was.
+		 */
+		if (x >= BAR_W) {
+			if (!visible) return false;
+			if (e->button.button != SDL_BUTTON_LEFT &&
+			    e->button.button != SDL_BUTTON_RIGHT) return false;
+			sidebar_toggle();
+			return true;
+		}
+
 		if (e->button.button != SDL_BUTTON_LEFT) return true;
 
 		int i = row_at(x, y);
