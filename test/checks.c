@@ -2617,6 +2617,116 @@ int main (void)
 		vng_dt    = was_dt;
 	}
 
+	/* ---- A FOLDER SHOWS EVERY FILE IN IT, HOWEVER MANY ----
+	 *
+	 * The panel's walk once kept every node still waiting to be drawn on a stack of 64, and
+	 * dropped whatever did not fit. What that bounded was the WIDTH of a folder, not its
+	 * depth: a folder of a hundred sprites showed the first sixty-four and said nothing, and
+	 * every root waiting below it took one more away. The files were in the tree the whole
+	 * time - read off disk and never drawn.
+	 *
+	 * The root is built by hand rather than with project_add, because that call writes
+	 * projects.vngproj beside the executable, and checks.exe lives beside vangopix.exe. A
+	 * suite that ran over somebody's project list would be a suite nobody runs twice.
+	 */
+	{
+		#define FILES 100
+		#define SUBS  3
+
+		char *dir = vangopix_asset("checks_tree");
+		ok("a temp folder can be named", dir != NULL);
+
+		if (dir) {
+			char path[1024];
+
+			SDL_CreateDirectory(dir);
+			SDL_snprintf(path, sizeof path, "%s/a_sub", dir);
+			SDL_CreateDirectory(path);
+
+			/* Empty files are enough: the scan decides by the name, not the contents. */
+			for (int i = 0; i < SUBS; i++) {
+				SDL_snprintf(path, sizeof path, "%s/a_sub/s%d.png", dir, i);
+				SDL_IOStream *io = SDL_IOFromFile(path, "w");
+				if (io) SDL_CloseIO(io);
+			}
+			for (int i = 0; i < FILES; i++) {
+				SDL_snprintf(path, sizeof path, "%s/f%03d.png", dir, i);
+				SDL_IOStream *io = SDL_IOFromFile(path, "w");
+				if (io) SDL_CloseIO(io);
+			}
+
+			/* Two roots, the second left shut: a root waiting below the open one is what
+			 * took a row away from the old walk, so the check has to have one. */
+			VNG_NODE *was   = vng_projects;
+			VNG_NODE *roots[2];
+			for (int i = 0; i < 2; i++) {
+				roots[i]         = (VNG_NODE *) SDL_calloc(1, sizeof *roots[i]);
+				roots[i]->path   = SDL_strdup(dir);
+				roots[i]->is_dir = true;
+				SDL_strlcpy(roots[i]->name, "checks_tree", sizeof roots[i]->name);
+			}
+			roots[0]->next = roots[1];
+			vng_projects   = roots[0];
+
+			project_toggle(roots[0]);
+			VNG_NODE *sub = roots[0]->child;
+			ok("the subfolder sorts first", sub && sub->is_dir);
+			project_toggle(sub);
+
+			int        d = -1;
+			VNG_NODE  *n = sidebar_row(0, &d);
+			ok("the open root is the first row", n == roots[0] && d == 0);
+			n = sidebar_row(1, &d);
+			ok("its subfolder is under it", n == sub && d == 1);
+
+			bool subs = true;
+			for (int i = 0; i < SUBS; i++) {
+				char want[16];
+				SDL_snprintf(want, sizeof want, "s%d.png", i);
+				n = sidebar_row(2 + i, &d);
+				if (!n || d != 2 || SDL_strcmp(n->name, want) != 0) subs = false;
+			}
+			ok("an open subfolder of a wide folder shows its own files", subs);
+
+			int  first = 2 + SUBS;
+			bool all   = true;
+			for (int i = 0; i < FILES; i++) {
+				char want[16];
+				SDL_snprintf(want, sizeof want, "f%03d.png", i);
+				n = sidebar_row(first + i, &d);
+				if (!n || d != 1 || SDL_strcmp(n->name, want) != 0) {
+					if (all) SDL_Log("  row %d: wanted %s, got %s", first + i, want,
+					                 n ? n->name : "nothing");
+					all = false;
+				}
+			}
+			ok("A FOLDER OF A HUNDRED FILES SHOWS ALL HUNDRED, IN ORDER", all);
+
+			n = sidebar_row(first + FILES, &d);
+			ok("and the root below it still comes after them", n == roots[1] && d == 0);
+			ok("and nothing after that", sidebar_row(first + FILES + 1, NULL) == NULL);
+
+			project_free();
+			vng_projects = was;
+
+			for (int i = 0; i < SUBS; i++) {
+				SDL_snprintf(path, sizeof path, "%s/a_sub/s%d.png", dir, i);
+				SDL_RemovePath(path);
+			}
+			for (int i = 0; i < FILES; i++) {
+				SDL_snprintf(path, sizeof path, "%s/f%03d.png", dir, i);
+				SDL_RemovePath(path);
+			}
+			SDL_snprintf(path, sizeof path, "%s/a_sub", dir);
+			SDL_RemovePath(path);
+			SDL_RemovePath(dir);
+			SDL_free(dir);
+		}
+
+		#undef SUBS
+		#undef FILES
+	}
+
 	vng_tabs_free();
 	SDL_DestroyRenderer(vng_ren);
 	SDL_DestroyWindow(vng_win);

@@ -42,6 +42,8 @@
 #define MAX_ROWS  4096   /* what a person can scroll through before giving up and using
                           * a file manager. A deep tree past this is truncated, not
                           * crashed - see rows_build. */
+#define MAX_DEEP  64     /* how many folders deep the panel follows. A LEVEL, not a count of
+                          * files - see rows_build for what happened when it was the other. */
 
 static bool  visible = false;
 static float scroll  = 0.0f;
@@ -226,51 +228,56 @@ static void rows_build (void)
 {
 	row_lot = 0;
 
-	VNG_NODE *stack[64];
-	int       depth[64];
+	/*
+	 * ONE CURSOR PER LEVEL, AND THAT IS WHAT MAKES THE BOUND A DEPTH.
+	 *
+	 * Explicit rather than recursion, because the depth of a directory tree is decided by
+	 * whatever folder was dropped in, and a deep one must truncate rather than run the C stack
+	 * out. at[d] is the node the walk is on at depth d; the next row is always reached by going
+	 * down to a first child, along to a sibling, or up until there is a sibling to go along to.
+	 *
+	 * The walk used to push every node still WAITING to be drawn - all the roots, then all the
+	 * children of whatever opened - onto a stack of 64, and drop whatever did not fit. That
+	 * bounded the WIDTH of a folder, not its depth: a folder of a hundred sprites showed
+	 * sixty-four and said nothing, every root waiting below it took one more away, and a
+	 * subfolder opened near the end of a wide one could show nothing at all. The files were
+	 * in the tree the whole time, read off disk and never drawn.
+	 */
+	VNG_NODE *at[MAX_DEEP];
 	int       top = 0;
 
-	/* Explicit stack rather than recursion: the depth of a directory tree is decided by
-	 * whatever folder was dropped in, and a deep one must truncate rather than run the
-	 * C stack out. */
-	for (VNG_NODE *p = vng_projects; p; p = p->next) {
-		if (top >= 64) break;
-		stack[top] = p;
-		depth[top] = 0;
-		top++;
-	}
-
-	/* The roots went on in order, so they have to come off in order. */
-	for (int i = 0; i < top / 2; i++) {
-		VNG_NODE *tn = stack[i]; stack[i] = stack[top - 1 - i]; stack[top - 1 - i] = tn;
-		int       td = depth[i]; depth[i] = depth[top - 1 - i]; depth[top - 1 - i] = td;
-	}
+	if (vng_projects) at[top++] = vng_projects;
 
 	while (top > 0 && row_lot < MAX_ROWS) {
-		VNG_NODE *n = stack[--top];
-		int       d = depth[top];
+		VNG_NODE *n = at[top - 1];
 
 		rows[row_lot].n     = n;
-		rows[row_lot].depth = d;
+		rows[row_lot].depth = top - 1;
 		row_lot++;
 
-		if (n->is_dir && n->open) {
-			int first = top;
-			for (VNG_NODE *c = n->child; c && top < 64; c = c->next) {
-				stack[top] = c;
-				depth[top] = d + 1;
-				top++;
-			}
-			for (int i = first; i < first + (top - first) / 2; i++) {
-				int j = top - 1 - (i - first);
-				VNG_NODE *tn = stack[i]; stack[i] = stack[j]; stack[j] = tn;
-				int       td = depth[i]; depth[i] = depth[j]; depth[j] = td;
-			}
+		/* Down, when it is open and there is room to remember the way back up. A folder past
+		 * the last level is still shown - open, and empty. */
+		if (n->is_dir && n->open && n->child && top < MAX_DEEP) {
+			at[top++] = n->child;
+			continue;
 		}
+
+		/* Otherwise along - climbing out of every level that has nothing further along. */
+		while (top > 0 && !at[top - 1]->next) top--;
+		if (top > 0) at[top - 1] = at[top - 1]->next;
 	}
 }
 
 static float content_h (void) { return row_lot * row_h(); }
+
+VNG_NODE *sidebar_row (int i, int *depth)
+{
+	rows_build();
+	if (i < 0 || i >= row_lot) return NULL;
+
+	if (depth) *depth = rows[i].depth;
+	return rows[i].n;
+}
 
 static void scroll_clamp (void)
 {

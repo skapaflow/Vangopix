@@ -2,6 +2,7 @@
 #define VANGOPIX_SIDEBAR_H
 
 #include "vangopix.h"
+#include "project.h"
 
 /*
  * The project sidebar: the only file that draws a folder.
@@ -53,6 +54,16 @@ extern bool sidebar_event (const SDL_Event *e);
 extern float sidebar_edge (void);
 
 extern void sidebar_draw (void);
+
+/*
+ * The node on row `i` of the panel as it would be drawn now, and its depth; NULL past the
+ * last row. `depth` may be NULL.
+ *
+ * Exported for the reason win_top is: which rows the panel shows is decided by a walk of the
+ * tree, and a check cannot read that walk off the screen - the suite runs with no face loaded,
+ * so there are no names on it to count.
+ */
+extern VNG_NODE *sidebar_row (int i, int *depth);
 
 /*
  * THE PREVIEW UNDER THE POINTER, and it is drawn separately for the same reason the palette
