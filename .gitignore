@@ -42,6 +42,11 @@ build/
 # defaults change - and deleting it is the documented way to get those defaults back.
 keyboard.txt
 
+# The colours and sizes, beside the executable - config.txt. Ignored for the same reason as
+# keyboard.txt: written from the built-in defaults when it is not there, so a committed copy
+# goes stale the moment one of them changes, and deleting it is how the defaults come back.
+config.txt
+
 # The design document. It is the reasoning BEHIND this repository rather than part of it -
 # a working notebook, kept beside the source and not shipped with it.
 CLAUDE.md

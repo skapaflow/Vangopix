@@ -1,5 +1,6 @@
 #include "ui.h"
 #include "primitives.h"
+#include "style.h"
 
 /*
  * WHAT THESE ARE WHEN THERE IS NO FONT.
@@ -69,9 +70,9 @@ float ui_grip (void) { return whole(ui_line() * 0.75f); }
  * bar, a tab and a list row are three different greys, and a flat disc on the lightest of them
  * loses its edge.
  */
-#define CLOSE_COLD  0xFFC03A3Au
-#define CLOSE_HOT   0xFFFF5A5Au
-#define CLOSE_RIM   0xFF401414u
+#define CLOSE_COLD  (vng_style.close)       /* close_color and close_hot_color, config.txt */
+#define CLOSE_HOT   (vng_style.close_hot)
+#define CLOSE_RIM   0xFF401414u             /* the rim is for READING, not for the theme */
 
 void ui_close_mark (SDL_FRect box, bool hot)
 {

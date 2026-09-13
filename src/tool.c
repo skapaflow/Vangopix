@@ -152,6 +152,45 @@ void tool_hex (Uint32 argb, char *dst, size_t cap)
 	             (unsigned)((argb >> 24) & 0xFF));  /* A, last - see tool.h */
 }
 
+bool tool_hex_read (const char *t, Uint32 *out)
+{
+	char d[9];
+	int  n = 0;
+
+	if (!t || !out) return false;
+
+	while (*t == ' ' || *t == '\t') t++;
+	if (t[0] == '0' && (t[1] == 'x' || t[1] == 'X')) t += 2;   /* the shape code is written in */
+
+	for (; *t; t++) {
+		if (*t == '#' || *t == ' ' || *t == '\t') continue;
+		if (!SDL_isxdigit((unsigned char)*t)) return false;
+
+		/* A NINTH DIGIT IS REFUSED, not dropped. The loop used to stop reading at eight, so a
+		 * colour pasted with one digit too many came in as its first eight and nobody was
+		 * told the ninth had been thrown away. */
+		if (n == 8) return false;
+		d[n++] = *t;
+	}
+	d[n] = 0;
+
+	if (n != 3 && n != 6 && n != 8) return false;
+
+	unsigned long v32 = SDL_strtoul(d, NULL, 16);
+
+	if (n == 3) {
+		unsigned r = (v32 >> 8) & 0xF, g = (v32 >> 4) & 0xF, b = v32 & 0xF;
+		*out = 0xFF000000u | (r * 0x11u << 16) | (g * 0x11u << 8) | (b * 0x11u);
+		return true;
+	}
+	if (n == 6) { *out = 0xFF000000u | (Uint32)v32; return true; }
+
+	/* RRGGBBAA on the way in, because that is how it is shown - the shape a person can paste
+	 * elsewhere. The document is 0xAARRGGBB and the two orders must not be confused. */
+	*out = ((Uint32)(v32 & 0xFFu) << 24) | (Uint32)(v32 >> 8);
+	return true;
+}
+
 bool tool_init (void)
 {
 	cur[VNG_CUR_ARROW] = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
@@ -1048,8 +1087,10 @@ static void label (const char *text, float mx, float my)
 #define WHERE_DY    16.0f    /* the position, below the hand  */
 #define SPAN_DY     (-2.0f)  /* the measurement, just above it */
 
-#define WHERE_INK   0xFFD800FFu   /* yellow  */
-#define SPAN_INK    0x50C0FFFFu   /* sky blue */
+/* Yellow and sky blue by default - position_color and size_color in config.txt. In text_print's
+   0xRRGGBBAA, which is where they go. */
+#define WHERE_INK   style_rgba(vng_style.where)
+#define SPAN_INK    style_rgba(vng_style.span)
 
 static void beside (float mx, float my, float dy, Uint32 ink, const char *fmt, int a, int b) {
 

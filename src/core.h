@@ -2,6 +2,7 @@
 #define VANGOPIX_CORE_H
 
 #include "vangopix.h"
+#include "style.h"
 
 /* The frame. Everything that happens between two presents happens in here. */
 
@@ -88,8 +89,10 @@ extern void vangopix_zoom_text (float zoom, char *dst, size_t cap);
  */
 extern void vangopix_size_text (Uint64 bytes, char *dst, size_t cap);
 
-#define VNG_CHECK    6
-#define VNG_CHECK_A  0xFF252525u
-#define VNG_CHECK_B  0xFF303030u
+/* The desk, from config.txt now - background_size and background_color. Still named here and
+   still read through these three, so every place that shows THE DESK keeps asking one place. */
+#define VNG_CHECK    (vng_style.desk_square)
+#define VNG_CHECK_A  (vng_style.desk_a)
+#define VNG_CHECK_B  (vng_style.desk_b)
 
 #endif

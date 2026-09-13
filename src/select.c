@@ -7,6 +7,7 @@
 #include "ui.h"
 #include "win.h"
 #include "palette.h"
+#include "style.h"
 
 /* The dashes of the marching rectangle, in SCREEN pixels: it is an annotation about the
  * document, not part of it, so it stays the same size at any zoom. */
@@ -417,7 +418,7 @@ static void menu_body (SDL_FRect area, void *ctx)
 {
 	(void)ctx;
 
-	SDL_SetRenderDrawColor(vng_ren, 0x0C, 0x0C, 0x0C, 0xFF);
+	style_ink(vng_style.win_inset);
 	SDL_RenderFillRect(vng_ren, &area);
 
 	if (!vng_text) return;
@@ -439,7 +440,7 @@ static void menu_body (SDL_FRect area, void *ctx)
 		float tw, th;
 		text_measure(vng_text, MENU[i], &tw, &th);
 		text_print(vng_text, row.x + ui_pad(), row.y + SDL_floorf((MENU_ROW - th) * 0.5f),
-		           hot ? 0xFFFFFFFFu : 0xFF8000FFu, "%s", MENU[i]);
+		           hot ? 0xFFFFFFFFu : style_rgba(vng_style.accent), "%s", MENU[i]);
 	}
 }
 

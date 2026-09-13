@@ -503,8 +503,7 @@ static void draw_sheet (VNG_TAB *t)
 	 * see while resizing or drawing near the border. Outside by one pixel so it never
 	 * hides the outermost row of the artwork - the same rule the corner grips follow. */
 	SDL_FRect edge = { dst.x - 1.0f, dst.y - 1.0f, dst.w + 2.0f, dst.h + 2.0f };
-	SDL_SetRenderDrawColor(vng_ren, 0x00, 0x00, 0x00, 0xFF);
-	SDL_RenderRect(vng_ren, &edge);
+	prim_rect(edge, vng_style.sheet_frame);
 
 }
 
@@ -611,11 +610,11 @@ static void readout (float x, const char *text)
 
 	SDL_FRect r = { x, (float)vng_win_h - ZOOM_MARGIN - bh, readout_w(text), bh };
 
-	prim_fill(r, 0xF0141414u);
-	prim_rect(r, 0xFF303030u);
+	prim_fill(r, style_alpha(vng_style.panel, 0xF0));
+	prim_rect(r, vng_style.win_border);
 
 	text_print(vng_text, r.x + ZOOM_PAD, r.y + SDL_floorf((bh - th) * 0.5f),
-	           0xDCDCDCFF, "%s", text);
+	           style_rgba(vng_style.text), "%s", text);
 }
 
 /*
@@ -759,12 +758,15 @@ static void col_draw (const KEYCOL *c, float x, float y, float line, float gap)
 		if (!r || !r->key) continue;
 
 		if (!r->does) {
-			text_print(vng_text, x, ry, 0xFF8000FF, "%s", r->key);
+			text_print(vng_text, x, ry, style_rgba(vng_style.accent), "%s", r->key);
 			continue;
 		}
 
-		text_print(vng_text, x,               ry, 0xE6E6E6FF, "%s", r->key);
-		text_print(vng_text, x + c->kw + gap, ry, 0x8C8C8CFF, "%s", r->does);
+		/* The key bright and what it does dim - text_color and text_dim_color, which is the
+		 * same pair of roles every panel uses. They were 0xE6E6E6 and 0x8C8C8C here, a few
+		 * steps off the panels' own for no reason either could give. */
+		text_print(vng_text, x,               ry, style_rgba(vng_style.text),     "%s", r->key);
+		text_print(vng_text, x + c->kw + gap, ry, style_rgba(vng_style.text_dim), "%s", r->does);
 	}
 }
 
@@ -882,7 +884,9 @@ void vangopix_core (void)
 	frame_clock();
 	SDL_GetWindowSize(vng_win, &vng_win_w, &vng_win_h);
 
-	SDL_SetRenderDrawColor(vng_ren, 0x25, 0x25, 0x25, 0xFF);
+	/* The desk's darker tone, so a frame that somehow draws no desk is still the desk's
+	 * colour rather than a flash of the old one. */
+	style_ink(style_alpha(VNG_CHECK_A, 0xFF));
 	SDL_RenderClear(vng_ren);
 	draw_desk();
 

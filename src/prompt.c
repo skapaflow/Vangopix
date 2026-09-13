@@ -1,5 +1,6 @@
 #include "prompt.h"
 #include "keys.h"
+#include "style.h"
 
 #define BOX_W   320.0f
 #define PAD       8.0f
@@ -111,12 +112,14 @@ void prompt_draw (void)
 	SDL_SetRenderDrawBlendMode(vng_ren, SDL_BLENDMODE_BLEND);
 
 	SDL_FRect box = { bx, by, bw, bh };
-	SDL_SetRenderDrawColor(vng_ren, 0x14, 0x14, 0x14, 0xF4);
+	/* panel_color, at the prompt's own opacity. SDL's rect rather than prim_fill, for the
+	 * rounding the comment above is about: the border is drawn the same way beside it. */
+	style_ink(style_alpha(vng_style.panel, 0xF4));
 	SDL_RenderFillRect(vng_ren, &box);
 	SDL_SetRenderDrawColor(vng_ren, 0x50, 0x50, 0x50, 0xFF);
 	SDL_RenderRect(vng_ren, &box);
 
-	text_print(vng_text, bx + PAD, by + PAD, 0x909090FF, "%s", label);
+	text_print(vng_text, bx + PAD, by + PAD, style_rgba(vng_style.text_dim), "%s", label);
 
 	float ty = by + PAD * 2.0f + lh;
 	text_print(vng_text, bx + PAD, ty, 0xFFFFFFFF, "%s", buf);

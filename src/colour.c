@@ -397,44 +397,6 @@ static bool in_rect (SDL_FRect r, float x, float y)
 
 /* ------------------------------------------------------------------------- the field */
 
-/*
- * Liberal in what it takes, because a colour is copied from somewhere else and arrives in
- * whatever shape that somewhere used: with or without the hash, three digits or six or eight.
- * Refusing "#2E3440" for its hash would be refusing the only form most palettes are published
- * in.
- *
- * Six digits means OPAQUE, which is what #RRGGBB means everywhere; eight says the alpha
- * outright. Three is the shorthand, each digit doubled.
- */
-static bool hex_parse (const char *t, Uint32 *out)
-{
-	char d[9];
-	int  n = 0;
-
-	for (; *t && n < 8; t++) {
-		if (*t == '#' || *t == ' ') continue;
-		if (!SDL_isxdigit((unsigned char)*t)) return false;
-		d[n++] = *t;
-	}
-	d[n] = 0;
-
-	if (n != 3 && n != 6 && n != 8) return false;
-
-	unsigned long v32 = SDL_strtoul(d, NULL, 16);
-
-	if (n == 3) {
-		unsigned r = (v32 >> 8) & 0xF, g = (v32 >> 4) & 0xF, b = v32 & 0xF;
-		*out = 0xFF000000u | (r * 0x11u << 16) | (g * 0x11u << 8) | (b * 0x11u);
-		return true;
-	}
-	if (n == 6) { *out = 0xFF000000u | (Uint32)v32; return true; }
-
-	/* RRGGBBAA on the way in, because that is how it is shown - the shape a person can paste
-	 * elsewhere. The document is 0xAARRGGBB and the two orders must not be confused. */
-	*out = ((Uint32)(v32 & 0xFFu) << 24) | (Uint32)(v32 >> 8);
-	return true;
-}
-
 /* What ENTER means. ESC and a press elsewhere close the box without arriving here, so
    escaping costs nothing and a mis-click cannot commit half a colour. */
 static void hex_done (const char *text, void *ctx)
@@ -442,7 +404,7 @@ static void hex_done (const char *text, void *ctx)
 	(void)ctx;
 
 	Uint32 c;
-	if (!hex_parse(text, &c)) return;
+	if (!tool_hex_read(text, &c)) return;
 
 	argb_hsv(c, &h, &s, &v);
 	alpha = (Uint8)((c >> 24) & 0xFF);

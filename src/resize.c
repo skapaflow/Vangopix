@@ -2,6 +2,7 @@
 #include "keys.h"
 #include "view.h"
 #include "tool.h"
+#include "style.h"
 
 #define GRIP      5.0f    /* the drawn square, in screen pixels */
 #define GRAB      5.0f    /* how far outside the square the mouse is still caught. The
@@ -228,7 +229,7 @@ void resize_draw (VNG_TAB *t)
 
 		/* An outline, not a fill: the drawing underneath is what the person is judging
 		 * the new size against, and a wash over it defeats the purpose. */
-		SDL_SetRenderDrawColor(vng_ren, 0x4C, 0x9A, 0xFF, 0xFF);
+		style_ink(vng_style.highlight);
 		SDL_RenderRect(vng_ren, &box);
 
 		int w, h, dx, dy;
@@ -238,10 +239,10 @@ void resize_draw (VNG_TAB *t)
 		 * but only once the hand has moved - a person who presses SHIFT and pauses
 		 * deserves to know it took. */
 		if (keys_mods() & SDL_KMOD_SHIFT)
-			text_print(vng_text, box.x, box.y + box.h + 4.0f, 0x4C9AFFFF,
+			text_print(vng_text, box.x, box.y + box.h + 4.0f, style_rgba(vng_style.highlight),
 			           "%d x %d  [%d]", w, h, SNAP);
 		else
-			text_print(vng_text, box.x, box.y + box.h + 4.0f, 0x4C9AFFFF,
+			text_print(vng_text, box.x, box.y + box.h + 4.0f, style_rgba(vng_style.highlight),
 			           "%d x %d", w, h);
 	}
 
@@ -251,7 +252,7 @@ void resize_draw (VNG_TAB *t)
 		/* The held grip goes white so the hand can see which corner it actually caught
 		 * when two of them are close together on a small canvas. */
 		if (c == held) SDL_SetRenderDrawColor(vng_ren, 0xFF, 0xFF, 0xFF, 0xFF);
-		else           SDL_SetRenderDrawColor(vng_ren, 0x4C, 0x9A, 0xFF, 0xFF);
+		else           style_ink(vng_style.highlight);
 		SDL_RenderFillRect(vng_ren, &r);
 	}
 }

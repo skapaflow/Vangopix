@@ -25,6 +25,7 @@
 #include "file.h"
 #include "expr.h"
 #include "splash.h"
+#include "style.h"
 
 /* Text and ENTER, the way core.c hands them to whoever owns the keyboard. */
 static void typed (const char *t)
@@ -2831,6 +2832,136 @@ int main (void)
 		vng_win_w = was_w;
 		vng_win_h = was_h;
 		vng_dt    = was_dt;
+	}
+
+	/* ---- config.txt, and the one reader of a colour ----
+	 *
+	 * The file is read through the same line parser the checks call here, and written from the
+	 * same table - so what is pinned is the parser, the byte order, the clamps, and the one
+	 * promise keyboard.txt does not make: an old file's values survive being rewritten.
+	 *
+	 * It is exercised on checks_config.txt, never on config.txt: checks.exe lives beside
+	 * vangopix.exe, and a suite that rewrote somebody's colours would be run once.
+	 */
+	{
+		Uint32 c = 0;
+
+		ok("a colour reads with 0x, as the source is written",
+		   tool_hex_read("0x2E3440FF", &c) && c == 0xFF2E3440u);
+		ok("and with a hash and six digits, opaque",
+		   tool_hex_read("#2E3440", &c) && c == 0xFF2E3440u);
+		ok("and in lower case with a capital X", tool_hex_read("0X2e3440", &c) && c == 0xFF2E3440u);
+		ok("A NINTH DIGIT IS REFUSED, NOT DROPPED", !tool_hex_read("123456789", &c));
+		ok("and a word is not a colour", !tool_hex_read("pink", &c));
+
+		style_reset();
+		ok("the defaults are the program as it was: the desk",
+		   VNG_CHECK == 6 && VNG_CHECK_A == 0xFF252525u && VNG_CHECK_B == 0xFF303030u);
+		ok("and the palette's cell", VNG_PAL_CELL == 24.0f);
+		ok("style_rgba is the order text_print takes",
+		   style_rgba(0xFFFF8000u) == 0xFF8000FFu && style_rgba(0x80102030u) == 0x10203080u);
+
+		ok("THE AUTHOR'S OWN LINE READS",
+		   style_line("background_color: 0x202020FF,0x101010FF") &&
+		   vng_style.desk_a == 0xFF202020u && vng_style.desk_b == 0xFF101010u);
+		ok("and a size", style_line("background_size: 32") && VNG_CHECK == 32);
+		ok("keyboard.txt's = reads as well", style_line("window_bg_alpha = 200") &&
+		   vng_style.win_bg_alpha == 200);
+		ok("the shorthand, each digit doubled",
+		   style_line("window_bar_color: #abc") && vng_style.win_bar == 0xFFAABBCCu);
+
+		ok("a palette cell lands on a multiple of four",
+		   style_line("palette_size: 30") && VNG_PAL_CELL == 28.0f);
+		ok("and too big is pulled in, not refused",
+		   style_line("palette_size: 999") && VNG_PAL_CELL == 64.0f);
+		ok("the font's ceiling is the atlas's",
+		   style_line("font_size: 60") && vng_style.font_size == 32.0f);
+
+		ok("a panel's colour keeps no alpha of its own",
+		   style_line("window_bg_color: 0x11223344") && vng_style.win_bg == 0xFF112233u);
+
+		Uint32 was_text = vng_style.text;
+		ok("A WORD WHERE A COLOUR GOES IS REFUSED", !style_line("text_color: pink"));
+		ok("AND THE SETTING KEEPS WHAT IT HAD", vng_style.text == was_text);
+		ok("a name it does not know is refused", !style_line("text_colour: 0xFFFFFFFF"));
+		ok("a pair wants two", !style_line("background_color: 0x101010FF"));
+		ok("comments, headings and blanks are not settings",
+		   !style_line("# text_color: 0x000000FF") && !style_line("[text]") && !style_line("   "));
+
+		ok("the preview's backgrounds may be one",
+		   style_line("animation_backgrounds: 0xFF0000FF") && vng_style.anim_bg_lot == 1 &&
+		   vng_style.anim_bg[0] == 0xFFFF0000u);
+		ok("and no more than it has room for",
+		   !style_line("animation_backgrounds: #111,#222,#333,#444,#555,#666,#777,#888,#999") &&
+		   vng_style.anim_bg_lot == 1);
+		ok("while eight is room enough",
+		   style_line("animation_backgrounds: #111,#222,#333,#444,#555,#666,#777,#888") &&
+		   vng_style.anim_bg_lot == 8 && vng_style.anim_bg[7] == 0xFF888888u);
+
+		/* THE FILE. Missing: written from the defaults, stamped. */
+		char *path = vangopix_asset("checks_config.txt");
+		if (path) {
+			SDL_RemovePath(path);
+			style_load_from(path);
+
+			char *txt = (char *) SDL_LoadFile(path, NULL);
+			ok("a missing file is written", txt != NULL);
+			ok("stamped, and holding the defaults",
+			   txt && SDL_strstr(txt, "# vangopix-config 1") &&
+			   SDL_strstr(txt, "background_size: 6") &&
+			   SDL_strstr(txt, "background_color: 0x252525FF,0x303030FF"));
+			SDL_free(txt);
+
+			/*
+			 * AN OLD FILE KEEPS ITS VALUES. A stamp from before, two settings somebody chose,
+			 * one that no longer exists - read, then written again with everything this build
+			 * has. keyboard.txt would have gone back to its defaults here.
+			 */
+			SDL_IOStream *io = SDL_IOFromFile(path, "w");
+			if (io) {
+				const char *old = "# vangopix-config 0\n"
+				                  "background_size: 12\n"
+				                  "font_size: 18\n"
+				                  "gone_setting: 1\n";
+				SDL_WriteIO(io, old, SDL_strlen(old));
+				SDL_CloseIO(io);
+			}
+			style_load_from(path);
+			ok("an old file's values are read", VNG_CHECK == 12 && vng_style.font_size == 18.0f);
+
+			txt = (char *) SDL_LoadFile(path, NULL);
+			ok("AND KEPT WHEN IT IS WRITTEN AGAIN",
+			   txt && SDL_strstr(txt, "# vangopix-config 1") &&
+			   SDL_strstr(txt, "background_size: 12") && SDL_strstr(txt, "font_size: 18"));
+			ok("with what this build added beside them",
+			   txt && SDL_strstr(txt, "palette_size: 24"));
+			ok("and what it no longer has gone", txt && !SDL_strstr(txt, "gone_setting"));
+			SDL_free(txt);
+
+			/* And a file this build wrote is read as it stands, every time. */
+			style_load_from(path);
+			ok("read again, it says the same", VNG_CHECK == 12);
+
+			SDL_RemovePath(path);
+			SDL_free(path);
+		}
+
+		style_reset();   /* the rest of the suite was written against the defaults */
+
+		/* THE FONT CEILING IS THE ATLAS'S. At the biggest size config.txt allows, the last
+		 * glyph in the range still has to land: a face packed past the atlas leaves its tail
+		 * with no width, and the interface would print the end of the alphabet as nothing. */
+		char       *fp = vangopix_asset("font/DejaVuSansMono.ttf");
+		TextSystem *ts = fp ? text_init(vng_ren, fp, 32.0f) : NULL;
+		SDL_free(fp);
+		if (!ts) {
+			SDL_Log("SKIP the font ceiling - no font beside the executable");
+		} else {
+			float w = 0.0f;
+			text_measure(ts, "~", &w, NULL);
+			ok("THE LARGEST font_size STILL PACKS THE WHOLE RANGE", w > 0.0f);
+			text_free(ts);
+		}
 	}
 
 	/* ---- A FILE DROPPED ON THE SPLASH PUTS IT AWAY, AND STILL OPENS ----

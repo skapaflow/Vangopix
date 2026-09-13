@@ -136,6 +136,21 @@ extern void tool_snap_iso (int ax, int ay, int *x, int *y);
 extern void tool_hex (Uint32 argb, char *dst, size_t cap);
 
 /*
+ * And back: a colour as a person writes it, into 0xAARRGGBB. The inverse of tool_hex, beside
+ * it for the same reason - two readers of one format would disagree about it the first time
+ * either was touched. The colour window's hex field and config.txt both read through here.
+ *
+ * LIBERAL IN WHAT IT TAKES, because a colour is copied from somewhere else and arrives in
+ * whatever shape that somewhere used: a hash or not, `0x` or not, three digits or six or eight.
+ * Refusing "#2E3440" for its hash would be refusing the only form most palettes are published
+ * in, and refusing "0x2E3440FF" would be refusing the form the source itself is written in.
+ *
+ * Six digits means OPAQUE, which is what #RRGGBB means everywhere; eight is RRGGBBAA and says
+ * the alpha outright; three is the shorthand, each digit doubled. Anything else is refused.
+ */
+extern bool tool_hex_read (const char *text, Uint32 *argb);
+
+/*
  * THE POINTER'S SHAPE, AND ONE PLACE OWNS IT.
  *
  * The machine has exactly one cursor, so two modules setting it independently is two

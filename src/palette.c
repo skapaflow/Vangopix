@@ -4,6 +4,7 @@
 #include "tool.h"
 #include "core.h"
 #include "keys.h"
+#include "primitives.h"
 
 /*
  * THE NUMBERS ARE THE FIRST VANGOPIX'S, from where it built these three.
@@ -74,8 +75,8 @@
  * 0xRRGGBBAA there and 0xAARRGGBB here, which is the conversion that once turned the
  * checkerboard red.
  */
-#define TILE_A  0xFF303050u
-#define TILE_B  0xFF606080u
+#define TILE_A  (vng_style.pal_a)   /* palette_board_color in config.txt */
+#define TILE_B  (vng_style.pal_b)
 
 #define COLS_OPEN  3      /* 64 / 20, which is what the original's minimum snapped to - kept
                            * as a COUNT of cells, so it stays three however big a cell is */
@@ -791,10 +792,11 @@ void palette_grid_draw (VNG_TAB *t)
 	int fit = cols * rows;
 
 	if (lot > fit)
-		text_print(vng_text, g.x + 4.0f, g.y - COUNT_H, 0xFF8000FFu,
+		text_print(vng_text, g.x + 4.0f, g.y - COUNT_H, style_rgba(vng_style.accent),
 		           "%d colors  (%d shown)", lot, fit);
 	else
-		text_print(vng_text, g.x + 4.0f, g.y - COUNT_H, 0xFF8000FFu, "%d colors", lot);
+		text_print(vng_text, g.x + 4.0f, g.y - COUNT_H, style_rgba(vng_style.accent),
+		           "%d colors", lot);
 }
 
 /* -------------------------------------------------------------------- the list, on COLOR */
@@ -822,8 +824,7 @@ static void list_body (SDL_FRect area, void *ctx)
 {
 	(void)ctx;
 
-	SDL_SetRenderDrawColor(vng_ren, 0x0C, 0x0C, 0x0C, 0xFF);
-	SDL_RenderFillRect(vng_ren, &area);
+	prim_fill(area, vng_style.win_inset);
 
 	if (!vng_text) return;
 
@@ -854,7 +855,7 @@ static void list_body (SDL_FRect area, void *ctx)
 		text_fit(vng_text, cut, sizeof cut, row_name(i), area.w - 12.0f);
 
 		text_print(vng_text, area.x + 5.0f, y + 2.0f,
-		           hot ? 0xFFFFFFFFu : 0xFF8000FFu, "%s", cut);
+		           hot ? 0xFFFFFFFFu : style_rgba(vng_style.accent), "%s", cut);
 	}
 
 	/* A mark saying there is more below rather than a scrollbar: winmgr_scrollbar was a whole

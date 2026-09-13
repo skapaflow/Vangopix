@@ -1,12 +1,15 @@
 #include "win.h"
 #include "ui.h"
+#include "style.h"
+#include "primitives.h"
 
 /* A hairline stays a hairline whatever the face does - see ui.h on why text scales and a
    one pixel edge does not. Everything else here now comes from the face. */
 #define BORDER   1.0f
 
-/* How solid the ground behind a window is. Half, so the sheet reads through it. */
-#define WIN_BODY_A  0x80
+/* How solid the ground behind a window is. Half by default, so the sheet reads through it -
+   window_bg_alpha in config.txt. */
+#define WIN_BODY_A  ((Uint8)vng_style.win_bg_alpha)
 
 /* Enough of the head must stay on screen to take hold of again. A window dragged off the
  * bottom of a window that is then made smaller is otherwise gone for good. */
@@ -395,14 +398,9 @@ void win_draw (void)
 		 * work that lets the drawing through - which is the point of a floating panel over a
 		 * canvas, and which the first Vangopix's own windows did.
 		 */
-		SDL_SetRenderDrawColor(vng_ren, 0x14, 0x14, 0x14, WIN_BODY_A);
-		SDL_RenderFillRect(vng_ren, &o);
-
-		SDL_SetRenderDrawColor(vng_ren, 0x22, 0x22, 0x22, 0xFF);
-		SDL_RenderFillRect(vng_ren, &h);
-
-		SDL_SetRenderDrawColor(vng_ren, 0x30, 0x30, 0x30, 0xFF);
-		SDL_RenderRect(vng_ren, &o);
+		prim_fill(o, style_alpha(vng_style.win_bg, WIN_BODY_A));
+		prim_fill(h, vng_style.win_bar);
+		prim_rect(o, vng_style.win_border);
 
 		if (vng_text) {
 			/* Cut with a tilde like every other name in this program - text_fit is where
@@ -410,7 +408,8 @@ void win_draw (void)
 			char name[48];
 			text_fit(vng_text, name, sizeof name, w->title,
 			         h.w - ui_close() - ui_pad() * 3.0f);
-			text_print(vng_text, h.x + ui_pad(), h.y + ui_pad(), 0xB4B4B4FF, "%s", name);
+			text_print(vng_text, h.x + ui_pad(), h.y + ui_pad(),
+			           style_rgba(vng_style.win_title), "%s", name);
 
 		}
 
@@ -426,10 +425,9 @@ void win_draw (void)
 		 * being a thing on screen. */
 		SDL_FRect g = grip_rect(w);
 		if (g.w > 0.0f) {
-			SDL_SetRenderDrawColor(vng_ren, 0x60, 0x60, 0x60, 0xFF);
 			for (float i = 3.0f; i < g.w; i += 4.0f)
-				SDL_RenderLine(vng_ren, g.x + g.w - i, g.y + g.h - 2.0f,
-				                        g.x + g.w - 2.0f, g.y + g.h - i);
+				prim_line(g.x + g.w - i, g.y + g.h - 2.0f,
+				          g.x + g.w - 2.0f, g.y + g.h - i, vng_style.win_grip);
 		}
 
 		if (!w->draw) continue;

@@ -60,11 +60,12 @@
 #define EDIT_W     (ui_cell() * 20.0f)
 #define EDIT_H     (EDIT_TOP + EDIT_ROW * (float)FIELDS + ui_pad() + EDIT_BTN + ui_pad())
 
-/* The preview's four backgrounds, cycled by the right button. 0xRRGGBBAA there, 0xAARRGGBB
-   here - the conversion that has caught this program twice. The last is NOTHING: the clip is
-   drawn over whatever is behind the preview, with no board laid under it. */
-static const Uint32 BG[] = { 0xFF455212u, 0xFF000000u, 0xFFFFFFFFu, 0x00000000u };
-#define BG_LOT ((int)(sizeof BG / sizeof BG[0]))
+/* The preview's backgrounds, cycled by the right button - animation_backgrounds in config.txt,
+   the original's four by default: green, black, white and NOTHING, where the clip is drawn over
+   whatever is behind the preview with no board laid under it. 0xRRGGBBAA in the file and in
+   the original, 0xAARRGGBB here - the conversion that has caught this program twice. */
+#define BG      (vng_style.anim_bg)
+#define BG_LOT  (vng_style.anim_bg_lot)
 
 /* --------------------------------------------------------------------------- the model */
 
@@ -650,6 +651,7 @@ static void body (SDL_FRect a, void *ctx)
 		 * choice is for is seeing the clip against what it will really be drawn over. The rim
 		 * below still says where the frame ends.
 		 */
+		if (bg >= BG_LOT) bg = 0;   /* a list that shrank since the last cycle */
 		if ((BG[bg] >> 24) > 0) prim_fill(dst, BG[bg]);
 
 		if (on_sheet) {
@@ -676,7 +678,8 @@ static void body (SDL_FRect a, void *ctx)
 		float tw, th;
 		text_measure(vng_text_small, n, &tw, &th);
 		text_print(vng_text_small, a.x + SDL_floorf((a.w - tw) * 0.5f),
-		           a.y + STEP_Y + SDL_floorf((ROW - th) * 0.5f), 0xFF8000FFu, "%s", n);
+		           a.y + STEP_Y + SDL_floorf((ROW - th) * 0.5f),
+		           style_rgba(vng_style.accent), "%s", n);
 	}
 
 	/*
@@ -699,7 +702,7 @@ static void body (SDL_FRect a, void *ctx)
 
 	/* The clip list. */
 	SDL_FRect lr = list_rect(a);
-	prim_rect(lr, 0xFF303030u);
+	prim_rect(lr, vng_style.win_border);
 
 	int fit = (int)(lr.h / ROW);
 	if (fit < 1) fit = 1;
@@ -724,7 +727,7 @@ static void body (SDL_FRect a, void *ctx)
 
 		text_print(vng_text, lr.x + ROW + ui_pad(),
 		           y + SDL_floorf((ROW - ui_line()) * 0.5f),
-		           hot ? 0xFFFFFFFFu : 0xFF8000FFu, "%s", cut);
+		           hot ? 0xFFFFFFFFu : style_rgba(vng_style.accent), "%s", cut);
 
 		small_label(up, "^", HOT(up), true);
 		ui_close_mark(ex, HOT(ex));

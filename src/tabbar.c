@@ -2,6 +2,8 @@
 #include "ui.h"
 #include "file.h"
 #include "tabs.h"
+#include "style.h"
+#include "primitives.h"
 
 #define BAR_H     (ui_row() + ui_pad())
 #define TAB_MIN   (ui_cell() * 8.0f)     /* below this a name is unreadable and the bar is useless */
@@ -217,23 +219,20 @@ void tabbar_draw (void) {
 		bool active = (p == vng_tab);
 
 		SDL_FRect r = { x + 1.0f, 1.0f, w - 2.0f, BAR_H - 1.0f };
-		Uint32 hcolor = (active ? 0x30 : 0x10);
-		Uint32 halpha = (active ? 0x40 : 0x80);
-		SDL_SetRenderDrawColor(vng_ren, hcolor, hcolor, hcolor, halpha);
-		SDL_RenderFillRect(vng_ren, &r);
+		prim_fill(r, active ? vng_style.tab_active : vng_style.tab);
 
 		/* The active tab is marked by a line on top rather than by colour alone -
 		 * colour alone disappears for anyone who cannot separate two dark greys. */
 		if (active) {
 			SDL_FRect bar = { x + 1.0f, 0.0f, w - 2.0f, 2.0f };
-			SDL_SetRenderDrawColor(vng_ren, 0x4C, 0x9A, 0xFF, 0xFF);
-			SDL_RenderFillRect(vng_ren, &bar);
+			prim_fill(bar, vng_style.highlight);
 		}
 
 		char label[80];
 		text_fit(vng_text, label, sizeof label, p->name, w - CLOSE_W - PAD * 2.0f);
 		text_print(vng_text, x + PAD + 1, 5.0f + 1, 0x000000FF, "%s", label);
-		text_print(vng_text, x + PAD, 5.0f, active ? 0xFFFFFFFF : 0x909090FF, "%s", label);
+		text_print(vng_text, x + PAD, 5.0f,
+		           active ? 0xFFFFFFFF : style_rgba(vng_style.text_dim), "%s", label);
 
 		/* The dirty marker takes the [x]'s place until the pointer comes near, so the
 		 * two never fight for the same corner. */
@@ -255,8 +254,11 @@ void tabbar_draw (void) {
 	bool  plus_hot = on_plus(mx, my);
 
 	SDL_FRect pr = { px + 1.0f, 1.0f, PLUS_W - 2.0f, BAR_H - 1.0f };
-	SDL_SetRenderDrawColor(vng_ren, 0x1A, 0x1A, 0x1A, 0xBB);
-	SDL_RenderFillRect(vng_ren, &pr);
+	/* The ground of a tab that is not in front - which is what the [+] is, a tab-shaped thing
+	 * that is not current. It had a third grey of its own, 0x1A1A1A at 0xBB, for no reason it
+	 * could give. */
+	prim_fill(pr, vng_style.tab);
 	text_print(vng_text, px + 11.0f + 1, 7.0f + 1, 0x000000FF, "+");
-	text_print(vng_text, px + 11.0f, 7.0f, plus_hot ? 0xFFFFFFFF : 0x909090FF, "+");
+	text_print(vng_text, px + 11.0f, 7.0f,
+	           plus_hot ? 0xFFFFFFFF : style_rgba(vng_style.text_dim), "+");
 }

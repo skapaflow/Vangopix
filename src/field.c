@@ -3,14 +3,15 @@
 #include "ui.h"
 #include "keys.h"
 #include "primitives.h"
+#include "style.h"
 
 /* The box: dark inside, a rim that brightens while it is open, and the caret a hairline. The
  * colour window's hex box had these and they are its numbers. */
-#define BOX_BG    0xFF0C0C0Cu
+#define BOX_BG    (vng_style.win_inset)                /* window_inset_color */
 #define BOX_RIM   0xFF383838u
 #define BOX_LIVE  0xFFC0C0C0u    /* the rim while the field holds the keyboard */
-#define BOX_TEXT  0xDCDCDCFFu    /* 0xRRGGBBAA - text_print's order, not the primitives' */
-#define BOX_LABEL 0xFF8000FFu
+#define BOX_TEXT  style_rgba(vng_style.text)           /* text_print's order, not the primitives' */
+#define BOX_LABEL style_rgba(vng_style.accent)
 #define PAD        ui_pad()
 #define GAP        ui_pad()      /* between a label and its box */
 

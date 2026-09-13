@@ -4,6 +4,7 @@
 #include "vangopix.h"
 #include "tabs.h"
 #include "tool.h"   /* VNG_CURSOR - the grid asks for a resize shape on its bands */
+#include "style.h"  /* the cell's size and the board's two tones */
 
 /*
  * THE PALETTE: ONE LIST OF COLOURS, SHOWN TWO WAYS.
@@ -69,14 +70,15 @@
 
 /*
  * One swatch, in screen pixels - the same in the grid beside the box and in the grid under
- * ALT, because they are one grid. The original's gd was 20; it is 24 now, at the author's
- * asking, so a colour is a bigger thing to hit and to see.
+ * ALT, because they are one grid. The original's gd was 20; it is 24 by default now, at the
+ * author's asking, and palette_size in config.txt from there - kept a multiple of four by
+ * style.c, because the board under the cells is four squares to one.
  *
  * Here and not private to palette.c because the checks stretch the grid a whole number of
  * cells and measure what they get; a test carrying its own 20 is a second copy of the layout,
  * and it is exactly the copy that went stale when this changed.
  */
-#define VNG_PAL_CELL  24.0f
+#define VNG_PAL_CELL  (vng_style.pal_cell)
 
 /* VNG_PAL is declared in tabs.h, beside the undo stack and the selection, because that is
    where it is stored - and a second typedef of it here would not be legal C99. */

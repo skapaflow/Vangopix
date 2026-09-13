@@ -11,6 +11,7 @@
 #include "select.h"
 #include "win.h"
 #include "colour.h"
+#include "style.h"
 
 SDL_Window   *vng_win   = NULL;
 SDL_Renderer *vng_ren   = NULL;
@@ -68,7 +69,7 @@ static const char *const vng_fonts[] = {
  * moves all of them together. Anything holding PIXELS - the palette's swatch cell, the colour
  * discs, the wheel - is deliberately untouched by it. See ui.h.
  */
-#define VNG_FONT_SIZE 20.0f
+#define VNG_FONT_SIZE (vng_style.font_size)   /* 20 by default, font_size in config.txt */
 
 /*
  * The small face, for a label in a box that the main one would fill - the palette's COLOR
@@ -78,7 +79,7 @@ static const char *const vng_fonts[] = {
  * It is a ratio and not a second constant on purpose: two independent sizes drift, and the
  * whole point of the number above is that one knob moves the interface.
  */
-#define VNG_FONT_SMALL 14.0f
+#define VNG_FONT_SMALL (vng_style.font_small) /* 14 by default, font_small_size */
 
 char *vangopix_asset (const char *relative)
 {
@@ -121,6 +122,12 @@ bool vangopix_init (int argc, char **argv)
 		return false;
 	}
 	SDL_SetRenderVSync(vng_ren, 1);
+
+	/* HOW IT LOOKS, before the first thing is drawn and before the faces are packed - the font
+	 * sizes are two of its settings, and an atlas cannot be re-packed at a size it has already
+	 * been built at. Not fatal: no file, or one that cannot be written, leaves the built-in
+	 * look, which is the one the source describes. */
+	style_load();
 
 	/*
 	 * The font is not fatal. Nothing the editor does to an image depends on being able to draw

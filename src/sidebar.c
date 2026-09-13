@@ -6,6 +6,7 @@
 #include "core.h"
 #include "primitives.h"
 #include "glyph.h"
+#include "style.h"
 
 #define BAR_W     (ui_cell() * 32.0f)
 #define PAD       (ui_pad() * 2.0f)
@@ -184,14 +185,12 @@ static void stub_draw (void)
 
 	SDL_SetRenderDrawBlendMode(vng_ren, SDL_BLENDMODE_BLEND);
 
-	SDL_SetRenderDrawColor(vng_ren, 0x14, 0x14, 0x14, hot ? 0xF0 : 0xA0);
-	SDL_RenderFillRect(vng_ren, &r);
+	prim_fill(r, style_alpha(vng_style.panel, hot ? 0xF0 : 0xA0));
 
 	/* The same line down the right edge the open panel has, so the strip reads as that panel
 	 * with almost all of it off screen rather than as a new thing. */
 	SDL_FRect edge = { r.x + r.w - 1.0f, r.y, 1.0f, r.h };
-	SDL_SetRenderDrawColor(vng_ren, 0x30, 0x30, 0x30, 0xFF);
-	SDL_RenderFillRect(vng_ren, &edge);
+	prim_fill(edge, vng_style.win_border);
 
 	/*
 	 * The mark sits where the panel's FIRST ROW would be, not in the middle of the strip: it
@@ -749,7 +748,7 @@ void sidebar_hover_draw (void)
 	if (card.y < 0.0f) card.y = 0.0f;
 	if (card.y + card.h > (float)vng_win_h) card.y = (float)vng_win_h - card.h;
 
-	prim_fill(card, 0xF0141414u);
+	prim_fill(card, style_alpha(vng_style.panel, 0xF0));
 	prim_rect(card, 0xFF505050u);
 
 	SDL_FRect dst = { card.x + pad, card.y + pad, dw, dh };
@@ -806,8 +805,7 @@ void sidebar_draw (void)
 	float top = top_y();
 
 	SDL_FRect panel = { ox, top, BAR_W, vng_win_h - top };
-	SDL_SetRenderDrawColor(vng_ren, 0x0, 0x0, 0x0, 0xDD	);
-	SDL_RenderFillRect(vng_ren, &panel);
+	prim_fill(panel, vng_style.sidebar);
 
 	/* Over the ground and under everything else: it is a backdrop, and a backdrop that lands
 	 * on top of a file name has stopped being one. */
@@ -816,8 +814,7 @@ void sidebar_draw (void)
 	/* A line down the right edge. The panel is translucent over a checkerboard, and
 	 * without it the two greys blur into each other exactly where the edge should be. */
 	SDL_FRect edge = { ox + BAR_W - 1.0f, top, 1.0f, vng_win_h - top };
-	SDL_SetRenderDrawColor(vng_ren, 0x30, 0x30, 0x30, 0xFF);
-	SDL_RenderFillRect(vng_ren, &edge);
+	prim_fill(edge, vng_style.win_border);
 
 	if (!vng_text) return;
 
@@ -899,10 +896,11 @@ void sidebar_draw (void)
 			           0.0f, MARK_S, hot ? 0x0080ffFF : 0xFFFFFFFF);
 
 			text_print(vng_text, ox + name_x, y + 1.0f,
-			           rows[i].depth == 0 ? 0xDCDCDCFF : 0xB4B4B4FF, "%s", label);
+			           rows[i].depth == 0 ? style_rgba(vng_style.text) : 0xB4B4B4FF,
+			           "%s", label);
 		} else {
 			text_print(vng_text, ox + name_x, y + 1.0f,
-			           current ? 0xFFFFFFFF : 0x909090FF, "%s", label);
+			           current ? 0xFFFFFFFF : style_rgba(vng_style.text_dim), "%s", label);
 		}
 
 		if (rows[i].depth == 0 && hot) {
