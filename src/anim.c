@@ -61,8 +61,8 @@
 #define EDIT_H     (EDIT_TOP + EDIT_ROW * (float)FIELDS + ui_pad() + EDIT_BTN + ui_pad())
 
 /* The preview's four backgrounds, cycled by the right button. 0xRRGGBBAA there, 0xAARRGGBB
-   here - the conversion that has caught this program twice. The last is NOTHING, which is
-   what shows the sheet's own transparency through the clip. */
+   here - the conversion that has caught this program twice. The last is NOTHING: the clip is
+   drawn over whatever is behind the preview, with no board laid under it. */
 static const Uint32 BG[] = { 0xFF455212u, 0xFF000000u, 0xFFFFFFFFu, 0x00000000u };
 #define BG_LOT ((int)(sizeof BG / sizeof BG[0]))
 
@@ -640,11 +640,17 @@ static void body (SDL_FRect a, void *ctx)
 
 		win_unclip(win);
 
-		/* The chosen background, then the frame over it. The last of the four is NOTHING, so
-		 * the desk goes down first and a transparent sprite reads as transparent - which the
-		 * original could not show, having no checkerboard. */
-		if ((BG[bg] >> 24) < 0xFF) vangopix_desk_rect(dst);
-		if ((BG[bg] >> 24) > 0)    prim_fill(dst, BG[bg]);
+		/*
+		 * The chosen background, then the frame over it. The last of the four is NOTHING, and
+		 * it means nothing: no fill and no board, so the clip goes straight over whatever is
+		 * behind the preview - the drawing, or the desk.
+		 *
+		 * It used to lay the desk's checkerboard there instead. That shows WHERE a sprite is
+		 * transparent, but it is a fourth background and not the absence of one, and what the
+		 * choice is for is seeing the clip against what it will really be drawn over. The rim
+		 * below still says where the frame ends.
+		 */
+		if ((BG[bg] >> 24) > 0) prim_fill(dst, BG[bg]);
 
 		if (on_sheet) {
 			SDL_SetTextureScaleMode(t->tex, SDL_SCALEMODE_NEAREST);
