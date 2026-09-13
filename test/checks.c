@@ -1288,12 +1288,13 @@ int main (void)
 
 			SDL_zero(e);
 			e.type = SDL_EVENT_MOUSE_MOTION;
-			e.motion.x = g.x + 6.0f * 20.0f;
-			e.motion.y = g.y + 5.0f * 20.0f;
+			e.motion.x = g.x + 6.0f * VNG_PAL_CELL;
+			e.motion.y = g.y + 5.0f * VNG_PAL_CELL;
 			palette_grid_event(&e, q);
 
 			SDL_FRect big = palette_grid_area();
-			ok("and pulling it makes the grid 6 x 5", big.w == 120.0f && big.h == 100.0f);
+			ok("and pulling it makes the grid 6 x 5",
+			   big.w == 6.0f * VNG_PAL_CELL && big.h == 5.0f * VNG_PAL_CELL);
 
 			SDL_zero(e);
 			e.type = SDL_EVENT_MOUSE_BUTTON_UP;

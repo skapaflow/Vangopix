@@ -49,8 +49,10 @@
 #define BOX_H    (BTN_Y + BTN_H + ui_pad())
 #define GAP       4.0f    /* p->s.x + p->s.w + 4: from the window's OUTER edge */
 #define COUNT_H  ui_line()  /* the band "%d colors" was printed in, at g.y - 16 */
-#define CELL     20.0f    /* gd, passed as 20 at BOTH call sites - see palette.h */
-#define CHECK       5     /* DIV_NULL(gd, 4) in __generate_tile__: four squares to a cell */
+#define CELL     VNG_PAL_CELL    /* gd, passed as 20 at BOTH call sites - 24 now, see palette.h */
+#define CHECK    ((int)CELL / 4) /* DIV_NULL(gd, 4) in __generate_tile__: four squares to a cell,
+                                  * which is what keeps the board seamless across cells - see
+                                  * grid_draw. A cell that is not a multiple of four breaks it. */
 
 /*
  * AND ITS TWO TONES ARE NOT THE DESK'S, WHICH IS A CHOICE THE ORIGINAL MADE AND NOT AN
@@ -75,7 +77,8 @@
 #define TILE_A  0xFF303050u
 #define TILE_B  0xFF606080u
 
-#define COLS_MIN   3      /* 64 / 20, which is what the original's minimum snapped to */
+#define COLS_MIN   3      /* 64 / 20, which is what the original's minimum snapped to - kept
+                           * as a COUNT of cells, so it stays three however big a cell is */
 #define ROWS_MIN   3
 #define COLS_MAX  48      /* max_w in __palette_grid_draw__ */
 #define ROWS_MAX  32      /* max_h */
@@ -505,7 +508,8 @@ static void grid_draw (VNG_TAB *t, SDL_FRect g, int n, int m)
 	 * transparent - which is the original's __generate_tile__, at its own gd/4.
 	 *
 	 * One tiled call rather than the original's texture blit per cell. The phase works out
-	 * identical because a 20px cell is two whole 5px squares across, so a board drawn straight
+	 * identical because a cell is four whole squares across - two light and two dark, 24px of
+	 * 6px squares now, 20px of 5px in the original - so a board drawn straight
 	 * through the grid lands exactly where a board restarted at every cell would - and a
 	 * seam that only shows up when the numbers stop dividing is a seam worth not having.
 	 *

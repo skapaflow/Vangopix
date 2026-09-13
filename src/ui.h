@@ -32,7 +32,7 @@
  * WHAT IS *NOT* HERE IS THE POINT. Only things that HOLD TEXT derive from the face. Anything
  * that holds PIXELS keeps its number and always will:
  *
- *   - the palette's 20px swatch cell and its 5px checkerboard (which is the cell over four -
+ *   - the palette's 24px swatch cell and its 6px checkerboard (which is the cell over four -
  *     scale it fractionally and the board stops dividing);
  *   - the two colour discs at radius 20, and the wheel's proportions, which are already
  *     fractions of a radius;
