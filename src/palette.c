@@ -77,9 +77,19 @@
 #define TILE_A  0xFF303050u
 #define TILE_B  0xFF606080u
 
-#define COLS_MIN   3      /* 64 / 20, which is what the original's minimum snapped to - kept
+#define COLS_OPEN  3      /* 64 / 20, which is what the original's minimum snapped to - kept
                            * as a COUNT of cells, so it stays three however big a cell is */
-#define ROWS_MIN   3
+#define ROWS_OPEN  3
+
+/*
+ * ONE, NOT THREE. The original's minimum was the size it opened at, which is why the two were
+ * one number here too - but they answer different questions. Three by three is where a grid
+ * starts; a single column or a single row is a grid a person has CHOSEN, to lay a ramp out
+ * in the order it runs, dark to light, down the side of the drawing. A minimum of three made
+ * a strip impossible to ask for.
+ */
+#define COLS_MIN   1
+#define ROWS_MIN   1
 #define COLS_MAX  48      /* max_w in __palette_grid_draw__ */
 #define ROWS_MAX  32      /* max_h */
 
@@ -119,8 +129,8 @@
  * it was a count of cells with a rectangle written over it. It opens at 3 x 3 because
  * plt_pos opened at 64 x 64 and snapped to that.
  */
-static int cols = COLS_MIN;
-static int rows = ROWS_MIN;
+static int cols = COLS_OPEN;
+static int rows = ROWS_OPEN;
 
 /* --------------------------------------------------------------------------- the model */
 

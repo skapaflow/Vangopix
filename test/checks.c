@@ -1307,6 +1307,53 @@ int main (void)
 			SDL_SetModState(SDL_KMOD_NONE);
 		}
 
+		/*
+		 * A SINGLE COLUMN AND A SINGLE ROW, which a minimum of three made impossible to ask
+		 * for - and a strip is how a ramp is laid out in the order it runs. Pulled well past
+		 * the grid's own top left, so it is the clamp that answers and not where the hand
+		 * happened to stop. Put back to 6 x 5 afterwards, which is what the checks below were
+		 * written against.
+		 */
+		{
+			#define PULL(to_x, to_y) do {                                                    \
+				SDL_FRect pg = palette_grid_area();                                           \
+				SDL_Event pe;                                                                 \
+				SDL_zero(pe);                                                                 \
+				pe.type = SDL_EVENT_MOUSE_BUTTON_DOWN;                                        \
+				pe.button.button = SDL_BUTTON_LEFT;                                           \
+				pe.button.x = pg.x + pg.w - 1.0f;                                             \
+				pe.button.y = pg.y + pg.h - 1.0f;                                             \
+				palette_grid_event(&pe, q);                                                   \
+				SDL_zero(pe);                                                                 \
+				pe.type = SDL_EVENT_MOUSE_MOTION;                                             \
+				pe.motion.x = pg.x + (to_x);                                                  \
+				pe.motion.y = pg.y + (to_y);                                                  \
+				palette_grid_event(&pe, q);                                                   \
+				SDL_zero(pe);                                                                 \
+				pe.type = SDL_EVENT_MOUSE_BUTTON_UP;                                          \
+				pe.button.button = SDL_BUTTON_LEFT;                                           \
+				palette_grid_event(&pe, q);                                                   \
+			} while (0)
+
+			PULL(-100.0f, 5.0f * VNG_PAL_CELL);
+			SDL_FRect col = palette_grid_area();
+			ok("THE GRID NARROWS TO A SINGLE COLUMN",
+			   col.w == VNG_PAL_CELL && col.h == 5.0f * VNG_PAL_CELL);
+
+			PULL(6.0f * VNG_PAL_CELL, -100.0f);
+			SDL_FRect row = palette_grid_area();
+			ok("AND FLATTENS TO A SINGLE ROW",
+			   row.w == 6.0f * VNG_PAL_CELL && row.h == VNG_PAL_CELL);
+
+			PULL(-100.0f, -100.0f);
+			SDL_FRect one = palette_grid_area();
+			ok("and no smaller than one cell",
+			   one.w == VNG_PAL_CELL && one.h == VNG_PAL_CELL);
+
+			PULL(6.0f * VNG_PAL_CELL, 5.0f * VNG_PAL_CELL);
+			#undef PULL
+		}
+
 		/* ---- the grid under ALT ---- */
 
 		ok("no ALT, no grid", palette_quick_area().w == 0.0f);
