@@ -105,6 +105,10 @@ static CLIP box = { "UNKNOWN", 0.1f, 1, 0, 0, 32, 32 };
  * One value that says both things cannot fall out of step with itself. */
 static int  edit_at = -1;
 
+/* The list row the LAST press in the player landed on, or -1 when it landed anywhere else -
+ * half of what makes a double click; see on_event. */
+static int  last_row = -1;
+
 /* Which document's sidecar the list came from, so summoning the window on a DIFFERENT
  * drawing reads that drawing's clips instead of showing the last one's. Zero is "none yet".
  * The tab id and not the pointer: a closed tab's address can come back as another one. */
@@ -761,6 +765,11 @@ static bool on_event (SDL_FRect a, const SDL_Event *e, void *ctx)
 	 * the next press in the editor spent it on the clip that had just been selected instead. */
 	edit_take(-1);
 
+	/* Taken and cleared on every press, so only a press that lands on a row can leave one for
+	 * the next press to pair with. */
+	int row  = last_row;
+	last_row = -1;
+
 	float x = e->button.x, y = e->button.y;
 	#define HIT(r) (x >= (r).x && y >= (r).y && x < (r).x + (r).w && y < (r).y + (r).h)
 
@@ -802,10 +811,22 @@ static bool on_event (SDL_FRect a, const SDL_Event *e, void *ctx)
 		box     = list[i];
 		clock_s = 0.0f;
 
-		/* A second press on the row already playing opens it - the original wanted a double
-		 * click, which needs a timer to tell from two presses. This needs nothing. */
-		if (edit_at == i) edit_open(i);
-		else              edit_at = i;
+		/*
+		 * A DOUBLE CLICK OPENS IT, and it takes two things. `clicks` is SDL's count, measured
+		 * against the system's own double-click time - the wait a person already set for every
+		 * other program on the machine. And both presses on the SAME ROW, because SDL's radius
+		 * is 32 pixels and a row is shorter than that: a quick press on one clip and then on the
+		 * next is two choices, not a double click.
+		 *
+		 * The version before this asked only "is this the row already chosen?", so a second
+		 * press any time later, a minute later, opened the editor. Choosing a clip to watch it
+		 * play and then pressing it again to restart it are both ordinary, and neither means
+		 * "edit this".
+		 */
+		bool twice = e->button.clicks >= 2 && row == i;
+		last_row = i;
+		edit_at  = i;
+		if (twice) edit_open(i);
 
 		return true;
 	}
@@ -863,6 +884,7 @@ static void anim_follow_tab (void)
 	list_top = 0;
 	list_lot = 0;      /* another drawing's rectangles are not this one's */
 	edit_at  = -1;     /* nor is the row the editor was writing back to */
+	last_row = -1;     /* nor half a double click on a row of the other list */
 
 	anim_file(false);
 

@@ -75,13 +75,15 @@ static void hex_type (const char *t)
 	enter();
 }
 
-/* A press and its release, through the window chain - what a hand does to a widget. */
-static void press_at (float x, float y)
+/* A press and its release, through the window chain - what a hand does to a widget. `clicks`
+ * is SDL's own count, which is what says a press came quickly after the last one. */
+static void press_n (float x, float y, Uint8 clicks)
 {
 	SDL_Event e;
 	SDL_zero(e);
 	e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
 	e.button.button = SDL_BUTTON_LEFT;
+	e.button.clicks = clicks;
 	e.button.x = x;
 	e.button.y = y;
 	win_event(&e);
@@ -89,6 +91,8 @@ static void press_at (float x, float y)
 	e.type = SDL_EVENT_MOUSE_BUTTON_UP;
 	win_event(&e);
 }
+
+static void press_at (float x, float y) { press_n(x, y, 1); }
 
 /* A bare key press, the way core.c hands one to the tool. */
 static bool key (VNG_TAB *t, SDL_Keycode k, SDL_Keymod mod)
@@ -2475,6 +2479,28 @@ int main (void)
 
 			win_draw();      /* the preview, now that there is a clip with frames in it */
 			anim_draw(t);
+
+			/* A ROW OPENS THE EDITOR ON A DOUBLE CLICK, and a second press that came later is
+			 * not one. It used to open on any second press of the chosen row, however long
+			 * after - so choosing a clip and pressing it again to restart it opened the form.
+			 * The first row sits one pad under the icon strip, as anim.c stacks it. */
+			float row_y = icon_y + ui_row() + ui_pad() + ui_row() * 0.5f;
+			float row_x = a.x + a.w * 0.5f;   /* clear of the move-up and delete marks */
+
+			press_n(row_x, row_y, 1);
+			ok("one press on a clip only chooses it", win_visible(ed) == false);
+			press_n(row_x, row_y, 1);
+			ok("A SECOND PRESS THAT CAME LATER DOES NOT OPEN THE EDITOR",
+			   win_visible(ed) == false);
+			press_n(row_x, row_y, 2);
+			ok("A DOUBLE CLICK ON THE SAME CLIP OPENS IT", win_visible(ed) == true);
+
+			/* SDL counts clicks across the window, not per row, so a quick pair that began off
+			 * the list must not count either. */
+			win_show(ed, false);
+			press_n(a.x + ui_pad() + 2.0f, a.y + a.h - 2.0f, 1);
+			press_n(row_x, row_y, 2);
+			ok("and a quick pair that began OFF the row is not one", win_visible(ed) == false);
 		}
 
 		anim_toggle();
