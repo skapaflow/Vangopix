@@ -769,6 +769,173 @@ int main (void)
 		   tool_current() == T_ELLIPSE);
 	}
 
+	/* ---- CREATE PALETTE, on the selection's menu ----
+	 *
+	 * A right press on the selection opens the first Vangopix's gui_select, and its first row
+	 * REPLACES the palette with the colours inside the rectangle. The sheet is red everywhere
+	 * with a 2x2 block of blue, green, blue and a hole - so a palette that kept any red, or
+	 * spent a cell on the hole, or listed blue twice, says which rule broke.
+	 */
+	{
+		VNG_TAB *q = vng_tab_new(8, 8);
+		view_sheet_rect(q);
+		vng_tab_show(q);   /* the menu acts on the document on screen */
+
+		for (int i = 0; i < 8 * 8; i++) q->pixels[i] = 0xFFFF0000u;
+		q->pixels[1 * 8 + 1] = 0xFF0000FFu;
+		q->pixels[1 * 8 + 2] = 0xFF00FF00u;
+		q->pixels[2 * 8 + 1] = 0xFF0000FFu;
+		q->pixels[2 * 8 + 2] = 0x00000000u;
+
+		Uint32 fresh[8 * 8];
+		SDL_memcpy(fresh, q->pixels, sizeof fresh);
+
+		palette_scan(q);
+		ok("before: the palette is the whole sheet", palette_has(q, 0xFFFF0000u));
+
+		key(q, SDLK_Z, SDL_KMOD_NONE);
+		mouse(q, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 1, 1);
+		mouse(q, SDL_EVENT_MOUSE_MOTION,      0,               2, 2);
+		mouse(q, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 2, 2);
+
+		#define BLUE   0xFF0000FFu
+		#define GREEN  0xFF00FF00u
+		#define RED    0xFFFF0000u
+		#define GREY   0xFF808080u
+		#define PX(x, y) q->pixels[(y) * 8 + (x)]
+
+		/* Opens the menu on a document pixel and presses one of its rows. */
+		#define MENU_PICK(at_x, at_y, row) do {                                            \
+			mouse(q, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_RIGHT, (at_x), (at_y));       \
+			mouse(q, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_RIGHT, (at_x), (at_y));       \
+			SDL_FRect mc = win_area(win_top());                                             \
+			press_at(mc.x + ui_pad(), mc.y + ui_row() * ((float)(row) + 0.5f));             \
+		} while (0)
+
+		VNG_WIN *was = win_top();
+		mouse(q, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_RIGHT, 6, 6);
+		mouse(q, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_RIGHT, 6, 6);
+		ok("a right press OFF the selection opens nothing", win_top() == was);
+
+		mouse(q, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_RIGHT, 1, 1);
+		mouse(q, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_RIGHT, 1, 1);
+		VNG_WIN *m = win_top();
+		ok("A RIGHT PRESS ON THE SELECTION OPENS ITS MENU", m != NULL && m != was);
+
+		SDL_FRect c = win_area(m);
+		press_at(c.x + ui_pad(), c.y + ui_row() * 0.5f);
+
+		ok("CREATE PALETTE KEEPS THE SELECTED COLOURS AND NO OTHER",
+		   palette_lot(q) == 2 && palette_at(q, 0) == BLUE && palette_at(q, 1) == GREEN);
+		ok("the hole inside it is not a colour", !palette_has(q, 0x00000000u));
+		ok("the menu goes once a row is chosen", !win_visible(m));
+		ok("and the drawing is untouched", SDL_memcmp(q->pixels, fresh, sizeof fresh) == 0);
+
+		/* ADD COLOR: a palette of blue and a grey kept by hand, and the selection holds blue
+		 * and green - so green goes on the end, and blue is not listed a second time. */
+		palette_del(q, GREEN);
+		palette_add(q, GREY);
+		MENU_PICK(1, 1, 1);
+		ok("ADD COLOR PUTS THE NEW ONES ON THE END",
+		   palette_lot(q) == 3 && palette_at(q, 0) == BLUE && palette_at(q, 1) == GREY &&
+		   palette_at(q, 2) == GREEN);
+
+		/* ADDING TO A FULL PALETTE ADDS NOTHING. The scan used to ask whether the list was full
+		 * AFTER writing, which was fine while it always began empty; kept, it can be full
+		 * before the first pixel, and the write lands one past the end of the array - on the
+		 * count that says how long the list is. */
+		{
+			for (Uint32 i = 1; palette_lot(q) < VNG_PAL_MAX; i++) palette_add(q, 0xFF000000u | i);
+			Uint32 odd = 0xFF123456u;
+			palette_from(q, &odd, 1, true);
+			ok("adding to a full palette adds nothing, and writes nowhere",
+			   palette_lot(q) == VNG_PAL_MAX && !palette_has(q, odd));
+
+			MENU_PICK(1, 1, 0);   /* and back to the block's own two, for what follows */
+		}
+
+		/* A FLOAT GIVES ITS OWN PIXELS, as they are now: inverted since it was lifted, its
+		 * blue and green are yellow and magenta, and those are what the palette gets. */
+		key(q, SDLK_I, SDL_KMOD_NONE);
+		mouse(q, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_RIGHT, 1, 1);
+		mouse(q, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_RIGHT, 1, 1);
+		ok("the menu comes back for a float", win_visible(m));
+
+		c = win_area(m);
+		press_at(c.x + ui_pad(), c.y + ui_row() * 0.5f);
+		ok("A FLOAT'S PALETTE IS THE FLOAT AS IT IS NOW",
+		   palette_lot(q) == 2 &&
+		   palette_at(q, 0) == 0xFFFFFF00u && palette_at(q, 1) == 0xFFFF00FFu);
+
+		key(q, SDLK_ESCAPE, SDL_KMOD_NONE);
+		ok("and giving the float back leaves the drawing as it was",
+		   SDL_memcmp(q->pixels, fresh, sizeof fresh) == 0);
+
+		/* REMOVE UNSELECTED COLORS, with blue in hand and nothing as colour 2 - both picked
+		 * off the block itself, so nothing about the sheet is changed to set them. Inside the
+		 * rectangle the green goes and the blue stays; the red all round it is untouched. */
+		Uint32 was0 = tool_colour(0), was1 = tool_colour(1);
+		tool_pick(q, 1, 1, 0);
+		tool_pick(q, 2, 2, 1);
+		undo_mark_saved(q);
+
+		mouse(q, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 1, 1);
+		mouse(q, SDL_EVENT_MOUSE_MOTION,      0,               2, 2);
+		mouse(q, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 2, 2);
+		MENU_PICK(1, 1, 2);
+
+		ok("REMOVE KEEPS ONLY COLOUR 1 INSIDE THE SELECTION",
+		   PX(1, 1) == BLUE && PX(1, 2) == BLUE && PX(2, 1) == 0x00000000u);
+		ok("AND LEAVES COLOUR 2 WHERE THE OTHERS WERE", PX(2, 1) == tool_colour(1));
+		ok("and touches nothing outside it",
+		   PX(0, 0) == RED && PX(3, 1) == RED && PX(1, 3) == RED);
+		ok("a remove is one undo step, which puts it all back",
+		   undo_undo(q) && SDL_memcmp(q->pixels, fresh, sizeof fresh) == 0);
+		ok("and only one", undo_undo(q) == false);
+
+		/* A remove that finds nothing to remove - the column under it is all blue already -
+		 * must leave nothing behind to CTRL+Z through. */
+		key(q, SDLK_ESCAPE, SDL_KMOD_NONE);
+		mouse(q, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 1, 1);
+		mouse(q, SDL_EVENT_MOUSE_MOTION,      0,               1, 2);
+		mouse(q, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 1, 2);
+		MENU_PICK(1, 1, 2);
+		ok("A REMOVE WITH NOTHING TO REMOVE RECORDS NOTHING",
+		   undo_undo(q) == false && SDL_memcmp(q->pixels, fresh, sizeof fresh) == 0);
+
+		/* ON A FLOAT it changes the float and not the sheet, and the change lands with it.
+		 * Carried to (5,5): its green became nothing, and a float's transparent pixel leaves
+		 * what is under it - so the red there shows through where the green would have been. */
+		key(q, SDLK_ESCAPE, SDL_KMOD_NONE);
+		mouse(q, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 1, 1);
+		mouse(q, SDL_EVENT_MOUSE_MOTION,      0,               2, 2);
+		mouse(q, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 2, 2);
+		mouse(q, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 1, 1);
+		mouse(q, SDL_EVENT_MOUSE_MOTION,      0,               5, 5);
+		mouse(q, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 5, 5);
+		MENU_PICK(5, 5, 2);
+		ok("A FLOAT IS CHANGED IN ITS OWN PIXELS, NOT ON THE SHEET",
+		   SDL_memcmp(q->pixels, fresh, sizeof fresh) == 0);
+
+		select_commit(q);
+		ok("and the change lands when it is put down",
+		   PX(5, 5) == BLUE && PX(5, 6) == BLUE && PX(6, 5) == RED);
+		undo_undo(q);
+		key(q, SDLK_ESCAPE, SDL_KMOD_NONE);
+
+		/* Colours 1 and 2 back as they were, for whatever reads them next. */
+		q->pixels[0] = was0; tool_pick(q, 0, 0, 0);
+		q->pixels[0] = was1; tool_pick(q, 0, 0, 1);
+		q->pixels[0] = RED;
+
+		#undef MENU_PICK
+		#undef PX
+		#undef GREY
+		#undef RED
+		#undef GREEN
+		#undef BLUE
+	}
+
 	/* ---- the 1:1 panel, which is now a window ---- */
 	{
 		VNG_TAB *q = vng_tab_new(400, 300);

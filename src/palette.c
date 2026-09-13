@@ -133,28 +133,47 @@ struct _vng_pal_ {
  */
 #define HASH_N  4096
 
-static void scan_into (VNG_TAB *t, VNG_PAL *p)
+/* Into the set, and whether it was new. The probe stops on an empty slot or on the colour. */
+static bool seen_put (Uint32 *seen, Uint32 c)
+{
+	Uint32 k = (c * 2654435761u) & (HASH_N - 1u);
+	while (seen[k] && seen[k] != c) k = (k + 1u) & (HASH_N - 1u);
+	if (seen[k] == c) return false;
+
+	seen[k] = c;
+	return true;
+}
+
+/*
+ * `keep` is the difference between CREATE and ADD: the list is emptied first, or its colours
+ * go into the set first so a pixel that repeats one of them is not listed twice. Either way it
+ * is one pass - adding a whole photograph a colour at a time through palette_add would be a
+ * search of the list per pixel.
+ */
+static void scan_into (VNG_PAL *p, const Uint32 *px, int n, bool keep)
 {
 	Uint32 *seen = (Uint32 *) SDL_calloc(HASH_N, sizeof *seen);
 	if (!seen) return;
 
-	p->lot = 0;
+	if (!keep) p->lot = 0;
 
-	for (int i = 0, n = t->w * t->h; i < n; i++) {
-		Uint32 c = t->pixels[i];
+	/* A colour kept by hand may be transparent - the colour in hand can be nothing - and zero
+	 * is the set's empty slot. Leaving those out of the set costs nothing: the loop below
+	 * never asks about a transparent pixel. */
+	for (int i = 0; i < p->lot; i++)
+		if ((p->c[i] >> 24) != 0u) seen_put(seen, p->c[i]);
+
+	/* Full is asked BEFORE writing, not after: with the list kept, it can be full before the
+	 * first pixel, and a test after the write is one colour past the end of the array. */
+	for (int i = 0; i < n && p->lot < VNG_PAL_MAX; i++) {
+		Uint32 c = px[i];
 
 		/* NOTHING IS NOT A COLOUR. A sprite is mostly hole, and a palette whose first entry
 		 * is the hole would spend a cell on it in every drawing. The original skipped it
 		 * too. */
 		if ((c >> 24) == 0u) continue;
 
-		Uint32 k = (c * 2654435761u) & (HASH_N - 1u);
-		while (seen[k] && seen[k] != c) k = (k + 1u) & (HASH_N - 1u);
-		if (seen[k] == c) continue;
-
-		seen[k] = c;
-		p->c[p->lot++] = c;
-		if (p->lot >= VNG_PAL_MAX) break;
+		if (seen_put(seen, c)) p->c[p->lot++] = c;
 	}
 
 	SDL_free(seen);
@@ -171,7 +190,7 @@ static VNG_PAL *pal_of (VNG_TAB *t)
 	if (t->pal) return t->pal;
 
 	t->pal = (VNG_PAL *) SDL_calloc(1, sizeof *t->pal);
-	if (t->pal) scan_into(t, t->pal);
+	if (t->pal) scan_into(t->pal, t->pixels, t->w * t->h, false);
 	return t->pal;
 }
 
@@ -227,7 +246,20 @@ void palette_del (VNG_TAB *t, Uint32 argb)
 void palette_scan (VNG_TAB *t)
 {
 	VNG_PAL *p = pal_of(t);
-	if (p) scan_into(t, p);
+	if (p) scan_into(p, t->pixels, t->w * t->h, false);
+}
+
+void palette_from (VNG_TAB *t, const Uint32 *px, int n, bool keep)
+{
+	if (!t || !px || n < 1) return;
+
+	/* A palette about to be REPLACED has no business scanning the whole sheet on its way to
+	 * being thrown away, so it skips pal_of. One being ADDED TO is the one the person has been
+	 * looking at, which may be the sheet's own - and that has to exist before anything is
+	 * added to it. */
+	VNG_PAL *p = keep ? pal_of(t) : t->pal;
+	if (!p && !keep) p = t->pal = (VNG_PAL *) SDL_calloc(1, sizeof *t->pal);
+	if (p) scan_into(p, px, n, keep);
 }
 
 /* ------------------------------------------------------- the palettes of other machines */

@@ -4,6 +4,9 @@
 #include "tool.h"
 #include "undo.h"
 #include "core.h"
+#include "ui.h"
+#include "win.h"
+#include "palette.h"
 
 /* The dashes of the marching rectangle, in SCREEN pixels: it is an annotation about the
  * document, not part of it, so it stays the same size at any zoom. */
@@ -313,6 +316,184 @@ static void clear_marked (VNG_TAB *t, VNG_SEL *s)
 	vng_tab_stroke_close(t);
 }
 
+/* ------------------------------------------------------------ the menu, on the right button */
+
+/*
+ * A RIGHT PRESS ON THE SELECTION OPENS WHAT CAN BE DONE WITH ITS COLOURS - the first Vangopix's
+ * gui_select, which tool_select.c opened on `select->above && mouse_right_press`.
+ *
+ * Its three rows are its own, in its order:
+ *
+ *   CREATE PALETTE   the palette becomes the colours in the selection, and nothing else. The
+ *                    one set nothing else can say: the palette can be scanned off the whole
+ *                    sheet, filled a colour at a time, or loaded from a machine's set, but
+ *                    never told "these, the ones in this part of the drawing". A sprite sheet
+ *                    carries a character, its shadow and a background, and the character's
+ *                    own few colours are the working set.
+ *   ADD COLOR        the same colours, put on the end of the palette already there.
+ *   REMOVE UNSELECTED COLORS
+ *                    every pixel in the selection that is not colour 1 becomes colour 2.
+ *                    "Selected" is the colour in hand, not the rectangle - the rectangle only
+ *                    says where. It keeps one colour out of a mess, a line pulled off a
+ *                    scanned sketch, and it leaves colour 2 for the reason a cut does: that
+ *                    is already what the right button lays down, so it defaults to a hole.
+ *
+ * It acts on the selection of the document ON SCREEN, read at the moment a row is pressed and
+ * not remembered from when the menu came up: switching tabs puts a float down, and a menu
+ * holding on to the old tab's selection would be answering about a drawing nobody is looking
+ * at. The original locked the selection while its window was open instead, which is a mode.
+ */
+static VNG_WIN *menu = NULL;
+
+enum { M_CREATE, M_ADD, M_REMOVE };
+static const char *const MENU[] = { "Create palette", "Add color", "Remove unselected colors" };
+#define MENU_LOT  ((int)SDL_arraysize(MENU))
+#define MENU_ROW  ui_row()
+
+/* The colours of what is selected, into the palette - replacing it or added to it. A float
+ * gives its own pixels, which may have been turned or inverted since they were lifted; a
+ * marked rectangle gives what is on the sheet under it. */
+static bool sel_palette (VNG_TAB *t, bool keep)
+{
+	VNG_SEL *s = t ? t->sel : NULL;
+	if (!s || !s->on || s->w < 1 || s->h < 1) return false;
+
+	if (s->pixels) {
+		palette_from(t, s->pixels, s->w * s->h, keep);
+		return true;
+	}
+
+	Uint32 *px = grab(t, s->x, s->y, s->w, s->h);
+	if (!px) return false;
+
+	palette_from(t, px, s->w * s->h, keep);
+	SDL_free(px);
+	return true;
+}
+
+/*
+ * Everything in the selection that is not colour 1 becomes colour 2.
+ *
+ * WHERE IT WRITES FOLLOWS THE TWO STATES. A float is changed in its own buffer, since nothing
+ * is written to the document while a selection floats, and the change lands with the rest of
+ * it when it is put down. A marked rectangle is changed on the sheet, as ONE undo step.
+ *
+ * Only pixels that actually change are written - a pixel already colour 2 is left alone - so
+ * a press that finds nothing to remove records nothing, and there is no empty step to CTRL+Z
+ * through. The original wrote every pixel that was not colour 1, whatever it already held.
+ */
+static void sel_remove_others (VNG_TAB *t)
+{
+	VNG_SEL *s = t ? t->sel : NULL;
+	if (!s || !s->on) return;
+
+	Uint32 keep = tool_colour(0), back = tool_colour(1);
+
+	if (s->pixels) {
+		for (int i = 0, n = s->w * s->h; i < n; i++)
+			if (s->pixels[i] != keep) s->pixels[i] = back;
+		s->tex_stale = true;
+		return;
+	}
+
+	int x = s->x, y = s->y, w = s->w, h = s->h;
+	clamp_rect(t, &x, &y, &w, &h);
+	if (w < 1 || h < 1) return;
+
+	/* Direct, like everything else here: colour 2 may be nothing, and nothing cannot be shown
+	 * by compositing a preview over the sheet. */
+	if (!vng_tab_stroke_open(t, true)) return;
+
+	for (int j = 0; j < h; j++)
+		for (int i = 0; i < w; i++) {
+			Uint32 c = t->pixels[(size_t)(y + j) * t->w + (x + i)];
+			if (c != keep && c != back) vng_tab_put(t, x + i, y + j, back);
+		}
+
+	vng_tab_stroke_close(t);
+}
+
+static void menu_body (SDL_FRect area, void *ctx)
+{
+	(void)ctx;
+
+	SDL_SetRenderDrawColor(vng_ren, 0x0C, 0x0C, 0x0C, 0xFF);
+	SDL_RenderFillRect(vng_ren, &area);
+
+	if (!vng_text) return;
+
+	float mx, my;
+	SDL_GetMouseState(&mx, &my);
+
+	for (int i = 0; i < MENU_LOT; i++) {
+		SDL_FRect row = { area.x, area.y + (float)i * MENU_ROW, area.w, MENU_ROW };
+		bool hot = mx >= row.x && my >= row.y && mx < row.x + row.w && my < row.y + row.h;
+
+		/* The palette list's two states, which are the original's: framed and white under the
+		 * pointer, orange otherwise. The frame is what says a row is a thing to press. */
+		if (hot) {
+			SDL_SetRenderDrawColor(vng_ren, 0xFF, 0xFF, 0xFF, 0xFF);
+			SDL_RenderRect(vng_ren, &row);
+		}
+
+		float tw, th;
+		text_measure(vng_text, MENU[i], &tw, &th);
+		text_print(vng_text, row.x + ui_pad(), row.y + SDL_floorf((MENU_ROW - th) * 0.5f),
+		           hot ? 0xFFFFFFFFu : 0xFF8000FFu, "%s", MENU[i]);
+	}
+}
+
+static bool menu_event (SDL_FRect area, const SDL_Event *e, void *ctx)
+{
+	(void)ctx;
+
+	if (e->type != SDL_EVENT_MOUSE_BUTTON_DOWN || e->button.button != SDL_BUTTON_LEFT)
+		return false;
+
+	int i = (int)SDL_floorf((e->button.y - area.y) / MENU_ROW);
+	if (i < 0 || i >= MENU_LOT) return false;
+
+	switch (i) {
+	case M_CREATE: sel_palette(vng_tab, false); break;
+	case M_ADD:    sel_palette(vng_tab, true);  break;
+	case M_REMOVE: sel_remove_others(vng_tab);  break;
+	default: break;
+	}
+
+	/* Gone once a row is chosen, which is what the original did (p->shutdown = true): a menu
+	 * is a question asked once, not a panel parked beside the drawing. */
+	win_show(menu, false);
+	return true;
+}
+
+/* Comes up centred on the pointer, the rule every summoned window here follows - and a press
+ * on the selection that is already showing the menu moves it there rather than hiding it,
+ * since a gesture that means "show me" must not put the thing away. */
+static void menu_open (float x, float y)
+{
+	if (!menu) {
+		float w = 0.0f;
+		for (int i = 0; i < MENU_LOT; i++) {
+			float tw = 0.0f, th = 0.0f;
+			if (vng_text) text_measure(vng_text, MENU[i], &tw, &th);
+			if (tw > w) w = tw;
+		}
+
+		/* Sized to its rows rather than the original's 100 x 100, which was a square box for
+		 * a list of three and would be a tall one for a list of one. */
+		SDL_FRect a = { 0.0f, 0.0f, w + ui_pad() * 4.0f, MENU_ROW * (float)MENU_LOT };
+		if (a.w < ui_cell() * 12.0f) a.w = ui_cell() * 12.0f;
+
+		SDL_FPoint m = { a.w, a.h };
+		menu = win_open("selection", a, m, menu_body, menu_event, NULL);
+		if (!menu) return;
+		win_fixed(menu, true);
+	}
+
+	win_show(menu, true);
+	win_place(menu, x, y);
+}
+
 bool select_event (const SDL_Event *e, VNG_TAB *t)
 {
 	if (!t) return false;
@@ -414,12 +595,27 @@ bool select_event (const SDL_Event *e, VNG_TAB *t)
 	}
 
 	case SDL_EVENT_MOUSE_BUTTON_DOWN: {
-		if (!tool_is_select || e->button.button != SDL_BUTTON_LEFT) return false;
+		if (!tool_is_select) return false;
+		if (e->button.button != SDL_BUTTON_LEFT && e->button.button != SDL_BUTTON_RIGHT)
+			return false;
 
 		SDL_FPoint w = view_screen_to_world(t, e->button.x, e->button.y);
 		int x = (int)SDL_floorf(w.x), y = (int)SDL_floorf(w.y);
 
 		bool ctrl = (keys_mods() & SDL_KMOD_CTRL) != 0;
+
+		/*
+		 * THE RIGHT BUTTON ON THE SELECTION IS ITS MENU, and only there, and only bare. Off the
+		 * rectangle there is nothing for a menu to be about; with CTRL it is the eyedropper
+		 * into colour 2, for the same reason CTRL+left outside the rectangle is. Either way
+		 * this declines and the tool behind has it - which, with the select tool in hand,
+		 * draws nothing.
+		 */
+		if (e->button.button == SDL_BUTTON_RIGHT) {
+			if (ctrl || !inside_sel(s, x, y) || s->marking || s->moving) return false;
+			menu_open(e->button.x, e->button.y);
+			return true;
+		}
 
 		/*
 		 * A press INSIDE the rectangle takes hold of it, and CTRL makes that a COPY: the

@@ -94,6 +94,19 @@ extern bool palette_has (VNG_TAB *t, Uint32 argb);
  */
 extern void palette_scan (VNG_TAB *t);
 
+/*
+ * The same, from any run of pixels rather than the whole sheet - what the selection's menu
+ * hands it. Same rules as the scan, because it is the scan: once each, in the order met, and
+ * nothing is not a colour.
+ *
+ *   keep false   CREATE PALETTE. The list is REPLACED, as loading a machine's set replaces
+ *                it: the person is saying "these are the colours I am working in", and the
+ *                ones not in that part of the drawing are exactly the ones being left out.
+ *   keep true    ADD COLOR. The new ones go on the end, and a colour already there is not
+ *                listed twice.
+ */
+extern void palette_from (VNG_TAB *t, const Uint32 *px, int n, bool keep);
+
 /* ---------------------------------------------- the palettes of other machines, on COLOR */
 
 /*
