@@ -73,6 +73,17 @@ extern void tool_set (TOOL t);
 extern int  tool_tip_size (void);   /* of the current tool */
 
 /*
+ * What the ROUND tip of that size covers - Q W E R - as a rectangle of document pixels relative
+ * to the one it is aimed at. The even sizes sit up and to the left of it, so x and y can be
+ * negative without w and h being odd.
+ *
+ * It is what the tip's circular outline is measured from, and it is exported so a check can
+ * lay the tip down and measure what landed against it: an outline that promises one size and
+ * a tip that paints another is the thing this exists to stop.
+ */
+extern void tool_tip_reach (int size, SDL_Rect *out);
+
+/*
  * TWO COLOURS, ONE PER MOUSE BUTTON. Slot 0 is the left button's, slot 1 the right
  * button's. Anything else reads as slot 0 rather than reading out of bounds.
  *

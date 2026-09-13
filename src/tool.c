@@ -308,6 +308,42 @@ static void tip (VNG_TAB *t, int x, int y)
 	else                     tip_round (t, x, y, size[current]);
 }
 
+/* The tools that lay tip_round: every one tip() does not hand the square, and that calls it
+   at all - Q W E R. The spray scatters and change-colours has its limiter; neither lays a tip. */
+static bool round_tip (TOOL k)
+{
+	return k == T_PENCIL || k == T_LINE || k == T_RECT || k == T_ELLIPSE;
+}
+
+void tool_tip_reach (int r, SDL_Rect *out)
+{
+	int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+
+	if (r > 5) {
+		x0 = y0 = -r;
+		x1 = y1 =  r;
+	} else if (r > 1) {
+		/* READ OFF THE BITMAPS rather than restated, so a small tip redrawn by eye moves its
+		 * outline with it. Size 2 and size 4 are even, and they sit up and to the left of the
+		 * aim point - which a restated number would be the first thing to get wrong. */
+		x0 = y0 = 2;
+		x1 = y1 = -2;
+		for (int y = 0; y < 5; y++)
+			for (int x = 0; x < 5; x++) {
+				if (!tip_small[r - 2][y * 5 + x]) continue;
+				if (x - 2 < x0) x0 = x - 2;
+				if (x - 2 > x1) x1 = x - 2;
+				if (y - 2 < y0) y0 = y - 2;
+				if (y - 2 > y1) y1 = y - 2;
+			}
+	}
+
+	out->x = x0;
+	out->y = y0;
+	out->w = x1 - x0 + 1;
+	out->h = y1 - y0 + 1;
+}
+
 /* -------------------------------------------------------------------- the primitives */
 
 /*
@@ -1143,9 +1179,28 @@ static void outline (VNG_TAB *t, int px, int py)
 		return;
 	}
 
-	/* One pixel, or the square the tip covers. The eraser is odd-sized by definition, and
-	 * the round tips are measured the same way, so the box says how far each reaches. A tool
-	 * with no size of its own is always the single pixel it is aimed at. */
+	/*
+	 * AND THE ROUND TIPS ARE A CIRCLE, which is what they lay - Q W E R were outlined as a
+	 * square, which is the eraser's shape, and it was the wrong SIZE as well: half the box was
+	 * `r` either side, so the size-5 tip, five pixels across, sat in a box of eleven.
+	 *
+	 * The circle is measured off the tip itself (tool_tip_reach) and passes through the middle
+	 * of each outer edge of what the tip covers - centred on the footprint and not on the aim
+	 * point, because the even tips sit off it. A single pixel stays the pixel's box below:
+	 * that one is saying WHICH pixel, and a ring round one square is a worse way to say it.
+	 */
+	if (r > 1 && round_tip(current)) {
+		SDL_Rect f;
+		tool_tip_reach(r, &f);
+
+		float w = (float)f.w * cell, h = (float)f.h * cell;
+		ring(a.x + (float)f.x * cell + w * 0.5f, a.y + (float)f.y * cell + h * 0.5f, w * 0.5f);
+		return;
+	}
+
+	/* One pixel, or the square the eraser clears - odd-sized by definition, so there is a
+	 * centre to aim with. A tool with no size of its own is always the single pixel it is
+	 * aimed at. */
 	float half = (r <= 1 || step[current] == 0) ? 0.0f : (float)r;
 	if (current == T_ERASER) half = (float)((size[T_ERASER] | 1) / 2);
 

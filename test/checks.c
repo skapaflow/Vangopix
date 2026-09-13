@@ -2834,6 +2834,74 @@ int main (void)
 		vng_dt    = was_dt;
 	}
 
+	/* ---- THE ROUND TIP IS OUTLINED BY WHAT IT PAINTS ----
+	 *
+	 * Q W E R lay a round tip, and its outline is a circle measured off tool_tip_reach. That is
+	 * only honest if the reach IS the tip - so each size is laid down once with the pencil and
+	 * the pixels that landed are measured against it. The square this replaced was `r` either
+	 * side of the aim point: eleven across for a tip five across.
+	 */
+	{
+		VNG_TAB *q = vng_tab_new(40, 40);
+		view_sheet_rect(q);
+		key(q, SDLK_Q, SDL_KMOD_NONE);
+
+		Uint32 was0 = tool_colour(0);
+		tool_set_colour(0, 0xFFFF0000u);
+
+		SDL_Event w;
+		SDL_zero(w);
+		w.type = SDL_EVENT_MOUSE_WHEEL;
+
+		/* SHIFT+wheel is the size; all the way down first. SHIFT is let go before each dot,
+		 * because SHIFT with the pencil is the straight line from the last point. */
+		SDL_SetModState(SDL_KMOD_LSHIFT);
+		w.wheel.integer_y = -1;
+		for (int i = 0; i < 80; i++) tool_event(&w, q);
+		SDL_SetModState(SDL_KMOD_NONE);
+
+		bool all = true;
+		for (int s = 1; s <= 12; s++) {
+			if (s > 1) {
+				SDL_SetModState(SDL_KMOD_LSHIFT);
+				w.wheel.integer_y = 1;
+				tool_event(&w, q);
+				SDL_SetModState(SDL_KMOD_NONE);
+			}
+			if (tool_tip_size() != s) { all = false; SDL_Log("  size did not reach %d", s); break; }
+
+			for (int i = 0; i < 40 * 40; i++) q->pixels[i] = 0xFFFFFFFFu;
+			mouse(q, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 20, 20);
+			mouse(q, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 20, 20);
+
+			int x0 = 40, y0 = 40, x1 = -1, y1 = -1;
+			for (int y = 0; y < 40; y++)
+				for (int x = 0; x < 40; x++)
+					if (q->pixels[y * 40 + x] == 0xFFFF0000u) {
+						if (x < x0) x0 = x;
+						if (x > x1) x1 = x;
+						if (y < y0) y0 = y;
+						if (y > y1) y1 = y;
+					}
+
+			SDL_Rect r;
+			tool_tip_reach(s, &r);
+			if (x0 - 20 != r.x || y0 - 20 != r.y || x1 - x0 + 1 != r.w || y1 - y0 + 1 != r.h) {
+				SDL_Log("  size %d painted %d,%d %dx%d - the reach says %d,%d %dx%d",
+				        s, x0 - 20, y0 - 20, x1 - x0 + 1, y1 - y0 + 1, r.x, r.y, r.w, r.h);
+				all = false;
+			}
+		}
+		ok("THE ROUND TIP'S OUTLINE IS MEASURED OFF WHAT IT PAINTS, AT EVERY SIZE", all);
+
+		/* Back to where the rest of the suite found it. */
+		SDL_SetModState(SDL_KMOD_LSHIFT);
+		w.wheel.integer_y = -1;
+		for (int i = 0; i < 80; i++) tool_event(&w, q);
+		SDL_SetModState(SDL_KMOD_NONE);
+		tool_set_colour(0, was0);
+	}
+
 	/* ---- config.txt, and the one reader of a colour ----
 	 *
 	 * The file is read through the same line parser the checks call here, and written from the
