@@ -86,6 +86,15 @@ static const int step[T_LOT] = { 1, 1, 1, 1,  5, 0,  3, 3, 0 };
  */
 static int limiter = 0;
 
+/*
+ * The eraser's shape: the square, or a circle. SHIFT+TAB swaps them - the same chord that swaps
+ * the limiter above, answered by the same kind of tool: one whose tip is an area rather than a
+ * brush, where the shape of the area is the choice. The square stays the default for the
+ * reason tip_square gives; the circle is for rubbing out round a curve without biting the
+ * corner of whatever is next to it.
+ */
+static bool eraser_round = false;
+
 static bool   drawing = false;
 static Uint8  button  = 0;                  /* the one that started the stroke */
 static int    last_x = 0, last_y = 0;       /* where the previous sample landed */
@@ -301,11 +310,36 @@ static void tip_square (VNG_TAB *t, int cx, int cy, int n)
 			put(t, cx + x, cy + y);
 }
 
+/*
+ * The eraser's circle, and it is NOT tip_round. That one is the pencil's brush, hand-drawn
+ * below 6 and measured by radius; this is the eraser's square with its corners taken off, so
+ * it is measured the way the square is - odd, `n` across, a centre pixel to aim with - and a
+ * swap between the two changes the shape without changing how big it is.
+ *
+ * h*h + h is the integer form of a radius of h + 0.5: the circle that passes through the
+ * middle of each outer edge of the n-square, which is exactly n pixels across both axes.
+ */
+static void tip_disc (VNG_TAB *t, int cx, int cy, int n)
+{
+	if (n < 1) n = 1;
+	if ((n & 1) == 0) n++;
+
+	int h = n / 2;
+	for (int y = -h; y <= h; y++)
+		for (int x = -h; x <= h; x++)
+			if (x * x + y * y <= h * h + h)
+				put(t, cx + x, cy + y);
+}
+
 /* The tip of whatever tool is current. */
 static void tip (VNG_TAB *t, int x, int y)
 {
-	if (current == T_ERASER) tip_square(t, x, y, size[current]);
-	else                     tip_round (t, x, y, size[current]);
+	if (current == T_ERASER) {
+		if (eraser_round) tip_disc  (t, x, y, size[current]);
+		else              tip_square(t, x, y, size[current]);
+		return;
+	}
+	tip_round(t, x, y, size[current]);
 }
 
 /* The tools that lay tip_round: every one tip() does not hand the square, and that calls it
@@ -761,13 +795,22 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 		}
 
 		/*
-		 * SHIFT+TAB swaps the change-colours limiter between a circle and a square. The
-		 * first Vangopix used bare TAB; bare TAB raises the project sidebar here, and a
-		 * shortcut only one tool answers must not take a key the whole program can see.
+		 * SHIFT+TAB swaps the change-colours limiter between a circle and a square, and the
+		 * eraser between its square and its circle. The first Vangopix used bare TAB; bare TAB
+		 * raises the project sidebar here, and a shortcut only the tools answer must not take a
+		 * key the whole program can see.
+		 *
+		 * The eraser swaps at any size, where the limiter does not: at size 1 the limiter is
+		 * the whole sheet and has no shape to choose, but the eraser's shape is kept for when
+		 * it grows - a choice made at size 1 is still the choice at size 21.
 		 */
 		if (e->key.key == SDLK_TAB && (m & SDL_KMOD_SHIFT) && !(m & SDL_KMOD_CTRL)) {
 			if (current == T_CHANGE && size[T_CHANGE] > 1) {
 				limiter = (limiter == 1) ? 2 : 1;
+				return true;
+			}
+			if (current == T_ERASER) {
+				eraser_round = !eraser_round;
 				return true;
 			}
 			return false;
@@ -1198,11 +1241,38 @@ static void outline (VNG_TAB *t, int px, int py)
 		return;
 	}
 
-	/* One pixel, or the square the eraser clears - odd-sized by definition, so there is a
-	 * centre to aim with. A tool with no size of its own is always the single pixel it is
-	 * aimed at. */
+	/*
+	 * THE ERASER IS SHOWN SOLID, square or circle, at half opacity - eraser_fill_color in
+	 * config.txt. Every other outline is a hairline because it is saying where something WILL
+	 * be drawn, and the drawing under it is what is being aimed at. The eraser's area is the
+	 * opposite case: it is what is about to be taken away, and a wash over it says so before
+	 * the press does. Half, so what is under it can still be seen; the two-tone rim is kept
+	 * round the edge, because a wash alone disappears against art of its own colour.
+	 *
+	 * Odd-sized by definition, both shapes - n across, a centre pixel to aim with - so the
+	 * circle is the square with its corners off, and SHIFT+TAB between them does not change
+	 * how far it reaches. At size 1 it is a single pixel and gets the pixel's box below: a wash
+	 * over the one pixel being looked at would hide the colour it is asking about.
+	 */
+	if (current == T_ERASER && r > 1) {
+		int   n = size[T_ERASER] | 1;
+		float d = (float)n * cell;
+
+		if (eraser_round) {
+			float cx = a.x + cell * 0.5f, cy = a.y + cell * 0.5f;
+			prim_disc(cx, cy, d * 0.5f, vng_style.eraser_fill);
+			ring(cx, cy, d * 0.5f);
+		} else {
+			SDL_FRect in = { a.x - (float)(n / 2) * cell, a.y - (float)(n / 2) * cell, d, d };
+			prim_fill(in, vng_style.eraser_fill);
+			box(in);
+		}
+		return;
+	}
+
+	/* What is left: the change-colours SQUARE limiter, `r` either side like its circle - or one
+	 * pixel, which is every tip at size 1 and every tool with no size of its own. */
 	float half = (r <= 1 || step[current] == 0) ? 0.0f : (float)r;
-	if (current == T_ERASER) half = (float)((size[T_ERASER] | 1) / 2);
 
 	SDL_FRect in = { a.x - half * cell, a.y - half * cell,
 	                 cell * (half * 2.0f + 1.0f), cell * (half * 2.0f + 1.0f) };

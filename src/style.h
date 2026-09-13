@@ -85,6 +85,7 @@ typedef struct {
 	/* [readouts] */
 	Uint32 where;              /* position_color: (x,y) beside the pointer */
 	Uint32 span;               /* size_color: [w x h] while a drag runs */
+	Uint32 eraser_fill;        /* eraser_fill_color: the wash over what the eraser will take */
 
 	/* [animation] */
 	Uint32 anim_bg[VNG_STYLE_BG_MAX];   /* animation_backgrounds, cycled by the right button */

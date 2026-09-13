@@ -2902,6 +2902,45 @@ int main (void)
 		tool_set_colour(0, was0);
 	}
 
+	/* ---- THE ERASER, SQUARE OR ROUND, ON SHIFT+TAB ----
+	 *
+	 * Both shapes are `n` across and odd, so the swap changes the corners and nothing else: the
+	 * square takes the corner pixel, the circle leaves it, and both reach the same distance
+	 * along the axes. Measured on a red sheet, since what the eraser lays is nothing.
+	 */
+	{
+		VNG_TAB *q = vng_tab_new(40, 40);
+		view_sheet_rect(q);
+		key(q, SDLK_A, SDL_KMOD_NONE);
+		ok("A takes the eraser", tool_current() == T_ERASER);
+
+		int n = tool_tip_size() | 1, h = n / 2;
+		#define RUB() do {                                                                  \
+			for (int i = 0; i < 40 * 40; i++) q->pixels[i] = 0xFFFF0000u;                  \
+			mouse(q, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 20, 20);                 \
+			mouse(q, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 20, 20);                 \
+		} while (0)
+		#define GONE(x, y) (q->pixels[(y) * 40 + (x)] == 0x00000000u)
+
+		RUB();
+		ok("the eraser starts SQUARE, and takes its corner", GONE(20 - h, 20 - h) &&
+		   GONE(20 + h, 20 + h) && !GONE(20 - h - 1, 20));
+
+		ok("SHIFT+TAB is the eraser's to answer", key(q, SDLK_TAB, SDL_KMOD_SHIFT));
+		RUB();
+		ok("AND MAKES IT A CIRCLE, which leaves the corner", !GONE(20 - h, 20 - h));
+		ok("the same distance along the axes, both sides",
+		   GONE(20 - h, 20) && GONE(20 + h, 20) && GONE(20, 20 - h) && GONE(20, 20 + h) &&
+		   !GONE(20 - h - 1, 20) && !GONE(20 + h + 1, 20));
+
+		key(q, SDLK_TAB, SDL_KMOD_SHIFT);
+		RUB();
+		ok("and SHIFT+TAB again puts the square back", GONE(20 - h, 20 - h));
+
+		#undef GONE
+		#undef RUB
+	}
+
 	/* ---- config.txt, and the one reader of a colour ----
 	 *
 	 * The file is read through the same line parser the checks call here, and written from the
@@ -2975,7 +3014,7 @@ int main (void)
 			char *txt = (char *) SDL_LoadFile(path, NULL);
 			ok("a missing file is written", txt != NULL);
 			ok("stamped, and holding the defaults",
-			   txt && SDL_strstr(txt, "# vangopix-config 1") &&
+			   txt && SDL_strstr(txt, "# vangopix-config 2") &&
 			   SDL_strstr(txt, "background_size: 6") &&
 			   SDL_strstr(txt, "background_color: 0x252525FF,0x303030FF"));
 			SDL_free(txt);
@@ -2999,7 +3038,7 @@ int main (void)
 
 			txt = (char *) SDL_LoadFile(path, NULL);
 			ok("AND KEPT WHEN IT IS WRITTEN AGAIN",
-			   txt && SDL_strstr(txt, "# vangopix-config 1") &&
+			   txt && SDL_strstr(txt, "# vangopix-config 2") &&
 			   SDL_strstr(txt, "background_size: 12") && SDL_strstr(txt, "font_size: 18"));
 			ok("with what this build added beside them",
 			   txt && SDL_strstr(txt, "palette_size: 24"));

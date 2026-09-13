@@ -28,7 +28,7 @@
 	                                                                                        \
 	.pal_cell = 24.0f, .pal_a = 0xFF303050u, .pal_b = 0xFF606080u,                          \
 	                                                                                        \
-	.where = 0xFFFFD800u, .span = 0xFF50C0FFu,                                              \
+	.where = 0xFFFFD800u, .span = 0xFF50C0FFu, .eraser_fill = 0x80FFFFFFu,                  \
 	                                                                                        \
 	.anim_bg = { 0xFF455212u, 0xFF000000u, 0xFFFFFFFFu, 0x00000000u }, .anim_bg_lot = 4     \
 }
@@ -146,6 +146,9 @@ static const ENTRY table[] = {
 	  "(x,y) beside the pointer - where it is, whether anything is happening or not" },
 	{ NULL, "size_color", K_COLOUR, AT(span), 0, 0, 0,
 	  "[w x h] while a drag runs - how far it has gone" },
+	{ NULL, "eraser_fill_color", K_COLOUR, AT(eraser_fill), 0, 0, 0,
+	  "the wash over what the eraser is about to take, square or circle (SHIFT+TAB).\n"
+	  "Half transparent by default, so what is under it still shows" },
 
 	{ "animation", "animation_backgrounds", K_LIST, AT(anim_bg), 1, VNG_STYLE_BG_MAX, 0,
 	  "behind the animation preview, one after another on the right button.\n"
@@ -289,7 +292,7 @@ bool style_line (const char *raw)
  * change is then read for what it still names and written again with everything this build
  * has - see style_load in style.h for why that keeps the values instead of resetting them.
  */
-#define STYLE_STAMP "# vangopix-config 1"
+#define STYLE_STAMP "# vangopix-config 2"   /* 2: eraser_fill_color */
 
 static const char *const PREAMBLE =
 	STYLE_STAMP "\n"
