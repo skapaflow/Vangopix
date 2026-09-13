@@ -146,6 +146,21 @@ bool splash_event (const SDL_Event *e) {
 		showing = false;
 		return true;
 
+	/*
+	 * A FILE DROPPED ON THE WINDOW DISMISSES IT TOO, and is NOT swallowed. Dropping an image in
+	 * is the other thing a person arrives to do - it is written on the desk behind this - and
+	 * it already worked: the drop fell through and opened a tab. Under the splash. The picture
+	 * stayed up over the drawing that had just been asked for, until something was pressed to
+	 * make it go, which reads as the drop having done nothing.
+	 *
+	 * It lets the event go on rather than taking it, which is the opposite of what a press
+	 * gets, and the reason is the same: a press is a gesture meant only for the splash, and a
+	 * drop is a gesture meant for the program that the splash happened to be in front of.
+	 */
+	case SDL_EVENT_DROP_FILE:
+		showing = false;
+		return false;
+
 	/* Swallowed but not acted on: the press half of the gesture above, and anything else a
 	 * hand can do to a window it is not being invited to use yet. */
 	case SDL_EVENT_KEY_DOWN:

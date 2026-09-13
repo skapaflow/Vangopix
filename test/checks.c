@@ -24,6 +24,7 @@
 #include "view.h"
 #include "file.h"
 #include "expr.h"
+#include "splash.h"
 
 /* Text and ENTER, the way core.c hands them to whoever owns the keyboard. */
 static void typed (const char *t)
@@ -2830,6 +2831,35 @@ int main (void)
 		vng_win_w = was_w;
 		vng_win_h = was_h;
 		vng_dt    = was_dt;
+	}
+
+	/* ---- A FILE DROPPED ON THE SPLASH PUTS IT AWAY, AND STILL OPENS ----
+	 *
+	 * The drop used to fall through and open its tab UNDER the picture, which stayed up until
+	 * something was pressed - so dropping a file in, one of the two things the desk says to do,
+	 * looked like it had done nothing. The art is committed beside the checks, so the splash
+	 * comes up here with no font; the band's words are what a missing font costs.
+	 */
+	{
+		splash_open();
+		ok("the splash comes up for the check", splash_up());
+
+		SDL_Event e;
+		SDL_zero(e);
+		e.type = SDL_EVENT_DROP_FILE;
+		ok("A DROPPED FILE IS NOT THE SPLASH'S TO KEEP - it goes on to open", !splash_event(&e));
+		ok("AND THE SPLASH IS GONE FROM IN FRONT OF IT", !splash_up());
+
+		/* And the press-and-release it has always left on is still what it leaves on. */
+		splash_free();
+		splash_open();
+		SDL_zero(e);
+		e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+		ok("a press on the splash is still swallowed", splash_event(&e) && splash_up());
+		e.type = SDL_EVENT_MOUSE_BUTTON_UP;
+		ok("and its release still dismisses it", splash_event(&e) && !splash_up());
+
+		splash_free();
 	}
 
 	/* ---- A FOLDER SHOWS EVERY FILE IN IT, HOWEVER MANY ----
