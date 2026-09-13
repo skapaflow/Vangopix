@@ -702,6 +702,47 @@ int main (void)
 		   SDL_memcmp(a->pixels, fresh, sizeof fresh) == 0);
 		ok("and leaves nothing to undo", undo_undo(a) == false);
 
+		/* CTRL ON A FLOAT ALREADY IN THE AIR STAMPS IT and carries off another, so a row of
+		 * copies is one CTRL+drag after another with no trip back to the original. */
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 2, 2);
+		mouse(a, SDL_EVENT_MOUSE_MOTION,      0,               4, 4);
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 4, 4);
+		SDL_SetModState(SDL_KMOD_LCTRL);
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 3, 3);
+		mouse(a, SDL_EVENT_MOUSE_MOTION,      0,               7, 3);
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 7, 3);
+		ok("the first CTRL+drag writes nothing yet",
+		   SDL_memcmp(a->pixels, fresh, sizeof fresh) == 0);
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 7, 3);
+		mouse(a, SDL_EVENT_MOUSE_MOTION,      0,               11, 3);
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 11, 3);
+		SDL_SetModState(SDL_KMOD_NONE);
+		ok("A SECOND CTRL+DRAG STAMPS THE FIRST COPY WHERE IT WAS LEFT",
+		   a->pixels[2 * 16 + 6] == 0xFF000001u && a->pixels[4 * 16 + 8] == 0xFF000009u);
+		select_commit(a);
+		ok("and carries another, which lands where it is put down",
+		   a->pixels[2 * 16 + 10] == 0xFF000001u && a->pixels[4 * 16 + 12] == 0xFF000009u);
+		ok("with the original never emptied", a->pixels[2 * 16 + 2] == 0xFF000001u);
+		ok("each copy is its own undo step",
+		   undo_undo(a) && a->pixels[2 * 16 + 6] == 0xFF000001u && undo_undo(a) &&
+		   SDL_memcmp(a->pixels, fresh, sizeof fresh) == 0 && undo_undo(a) == false);
+		key(a, SDLK_ESCAPE, SDL_KMOD_NONE);
+
+		/* A copy pressed again where it was lifted changes nothing, and must leave no step. */
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 2, 2);
+		mouse(a, SDL_EVENT_MOUSE_MOTION,      0,               4, 4);
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 4, 4);
+		SDL_SetModState(SDL_KMOD_LCTRL);
+		for (int i = 0; i < 2; i++) {
+			mouse(a, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 3, 3);
+			mouse(a, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 3, 3);
+		}
+		SDL_SetModState(SDL_KMOD_NONE);
+		key(a, SDLK_ESCAPE, SDL_KMOD_NONE);
+		ok("A STAMP THAT CHANGES NOTHING LEAVES NOTHING TO UNDO",
+		   SDL_memcmp(a->pixels, fresh, sizeof fresh) == 0 && undo_undo(a) == false);
+		key(a, SDLK_ESCAPE, SDL_KMOD_NONE);
+
 		/* ---- ACROSS TABS, which is what broke in the first Vangopix ---- */
 		mouse(a, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 2, 2);
 		mouse(a, SDL_EVENT_MOUSE_MOTION,      0,               4, 4);

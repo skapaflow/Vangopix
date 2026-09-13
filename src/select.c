@@ -274,6 +274,46 @@ static void copy_out (VNG_TAB *t, VNG_SEL *s)
 	clip_h = s->h;
 }
 
+/* Would putting this copy down change the sheet at all? Only asked of a COPY: a cut always
+ * does, since it empties the place it came from. */
+static bool stamp_changes (VNG_TAB *t, VNG_SEL *s)
+{
+	for (int j = 0; j < s->h; j++)
+		for (int i = 0; i < s->w; i++) {
+			Uint32 c = s->pixels[j * s->w + i];
+			int px = s->x + i, py = s->y + j;
+			if ((c >> 24) == 0 || px < 0 || py < 0 || px >= t->w || py >= t->h) continue;
+			if (t->pixels[(size_t)py * t->w + px] != c) return true;
+		}
+	return false;
+}
+
+/*
+ * CTRL ON A FLOAT ALREADY IN THE AIR STAMPS IT: the float is put down where it is and a fresh
+ * copy of the same pixels comes away with the hand. Without this the second CTRL+drag only
+ * carried the copy on, and making a row of them meant going back to the original each time.
+ *
+ * The copy is the FLOAT'S OWN PIXELS, not the sheet under it once it has landed - a sprite
+ * with holes in it is duplicated with its holes, not with whatever it was stamped over, and a
+ * float that was turned or flipped stays turned. A stamp that would change nothing (a copy
+ * pressed again without moving) is not written, so it leaves no empty step to CTRL+Z through.
+ */
+static bool stamp (VNG_TAB *t, VNG_SEL *s)
+{
+	Uint32 *copy = grab_from_float(s);
+	if (!copy) return false;
+
+	if (s->cut || stamp_changes(t, s)) select_commit(t);
+	else                                float_drop(s);
+
+	s->pixels = copy;
+	s->sx  = s->x;
+	s->sy  = s->y;
+	s->cut = false;
+	s->tex_stale = true;
+	return true;
+}
+
 void select_paste (VNG_TAB *t, int x, int y)
 {
 	VNG_SEL *s = sel_of(t);
@@ -627,9 +667,12 @@ bool select_event (const SDL_Event *e, VNG_TAB *t)
 		 * this file declines the event - which is what puts the eyedropper back. It had
 		 * stopped working the moment the select tool was in hand, because this returned true
 		 * for every left press it saw.
+		 *
+		 * On a float already in the air, CTRL stamps it and carries off another - see stamp.
 		 */
 		if (inside_sel(s, x, y)) {
-			if (!lift(t, s, !ctrl)) return true;
+			bool held = (ctrl && s->pixels) ? stamp(t, s) : lift(t, s, !ctrl);
+			if (!held) return true;
 			s->moving = true;
 			s->grab_x = x - s->x;
 			s->grab_y = y - s->y;
