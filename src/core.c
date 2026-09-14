@@ -597,7 +597,13 @@ void vangopix_size_text (Uint64 bytes, char *dst, size_t cap)
 		u++;
 	}
 
-	if (u == 0) SDL_snprintf(dst, cap, "%llu B", (unsigned long long)bytes);
+	/*
+	 * %u, NOT %llu, for a Uint64: below the first unit the number is under 1024 and fits any
+	 * unsigned, and %u is the one spelling every C runtime agrees on. gcc on mingw checks a
+	 * printf format against the rules of the Microsoft runtime, and ll is not in them - a
+	 * warning at home, and a failed build under the CI's -Werror.
+	 */
+	if (u == 0) SDL_snprintf(dst, cap, "%u B", (unsigned)bytes);
 	else        SDL_snprintf(dst, cap, "%.1f %s", v, UNIT[u]);
 }
 

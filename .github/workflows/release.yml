@@ -106,9 +106,17 @@ jobs:
       # The checks first, so a package is never attached to a release that does not pass them.
       # They open a hidden window because a document owns a texture; the runner has a desktop
       # session, so SDL video comes up.
+      #
+      # THE MATCHER TURNS GCC'S OWN LINES INTO ANNOTATIONS (.github/gcc.json), pinned to the
+      # file and line on the commit or the pull request: a warning is read where it was
+      # written, not dug out of a log - which needs a login, where an annotation does not.
+      # -k keeps make going past the first object that fails, so one run names every file
+      # with something to fix, instead of one file per push.
       - name: checks
         shell: cmd
-        run: make test WERROR=1
+        run: |
+          echo ::add-matcher::.github/gcc.json
+          make -k test WERROR=1
 
       - name: package
         if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
