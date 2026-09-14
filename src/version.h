@@ -23,7 +23,7 @@
  * WHEN YOU RAISE IT, raise both lines and the git tag together. The tag is what names a
  * published archive; these two are what the program says about itself once somebody has it.
  */
-#define VNG_VERSION    "1.0"
-#define VNG_VERSION_N   1,0,0,0
+#define VNG_VERSION    "1.1"
+#define VNG_VERSION_N   1,1,0,0
 
 #endif
