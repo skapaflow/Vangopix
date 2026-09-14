@@ -554,7 +554,7 @@ int main (void)
 	/* ---- SHIFT snaps a line to the pixel-art slopes ---- */
 	{
 		int x, y;
-		#define SNAP(sx, sy) (x = (sx), y = (sy), tool_snap_iso(10, 10, &x, &y), 1)
+		#define SNAP(sx, sy) (x = (sx), y = (sy), tool_snap_iso(10, 10, &x, &y))
 
 		SNAP(40, 11);
 		ok("a near-horizontal drag flattens onto the anchor", y == 10 && x == 40);
