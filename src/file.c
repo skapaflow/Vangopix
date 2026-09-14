@@ -72,12 +72,39 @@ static void say (SDL_MessageBoxFlags kind, const char *msg)
 }
 
 /*
+ * Where a save is written before it becomes the file: beside it, with ".vngsave" put in front of
+ * the extension - "hero.vngsave.png" - because the extension, kept LAST, is what tells IMG_Save
+ * which format to write. NULL when the path names no extension to keep; the save then goes
+ * straight to the path, as it always did. Free with SDL_free.
+ */
+static char *temp_beside (const char *path)
+{
+	const char *dot = NULL;
+	for (const char *p = path; *p; p++) {
+		if (*p == '/' || *p == '\\') dot = NULL;   /* a dot in a DIRECTORY is not an extension */
+		else if (*p == '.')          dot = p;
+	}
+	if (!dot) return NULL;
+
+	char *tmp = NULL;
+	if (SDL_asprintf(&tmp, "%.*s.vngsave%s", (int)(dot - path), path, dot) < 0) return NULL;
+	return tmp;
+}
+
+/*
  * The write itself.
  *
  * SDL_CreateSurfaceFrom does not copy: the surface points straight at the document's own
  * buffer, which is what ARGB8888 was chosen for in the first place. It follows that the
  * surface must not outlive that buffer and that no resize may happen underneath it -
  * both hold here because this only ever runs on the main thread, between two events.
+ *
+ * THE FILE ON DISK IS REPLACED, NEVER REWRITTEN WHERE IT STANDS. IMG_Save opens the path and
+ * writes as it encodes, so a save that failed partway - a full disk, a stick pulled out, an
+ * encoder that gave up - left the ONLY copy of the drawing half written: the old version gone
+ * and the new one not there. It is encoded under the temporary name beside the file, and only
+ * a complete file is moved over the old one; the rename replaces it in one step on every
+ * platform SDL knows.
  */
 static bool write_file (VNG_TAB *t, const char *path)
 {
@@ -88,7 +115,20 @@ static bool write_file (VNG_TAB *t, const char *path)
 		return false;
 	}
 
-	bool ok = IMG_Save(s, path);
+	char *tmp = temp_beside(path);
+	bool  ok  = IMG_Save(s, tmp ? tmp : path);
+
+	if (tmp) {
+		if (ok) ok = SDL_RenamePath(tmp, path);
+		if (!ok) {
+			/* The message is the failure's, taken before the clean-up can overwrite it. */
+			char why[256];
+			SDL_strlcpy(why, SDL_GetError(), sizeof why);
+			SDL_RemovePath(tmp);
+			SDL_SetError("%s", why);
+		}
+		SDL_free(tmp);
+	}
 
 	/* Destroys the surface, never the pixels - those belong to the document. */
 	SDL_DestroySurface(s);
@@ -100,6 +140,12 @@ static bool write_file (VNG_TAB *t, const char *path)
 
 static bool save_to (VNG_TAB *t, const char *path)
 {
+	/* SETTLED BEFORE IT IS WRITTEN. A float in the air is on screen and not in the sheet -
+	 * nothing is written to the document while a selection floats - so saving without putting
+	 * it down wrote a file that was not the picture on screen: no float, and the place it was
+	 * lifted from still full. */
+	vng_tab_settle(t);
+
 	if (!write_file(t, path)) return false;
 
 	vng_tab_set_path(t, path);
@@ -341,6 +387,11 @@ void file_close_tab (VNG_TAB *t)
 {
 	if (!t) return;
 
+	/* Settled BEFORE the question, so work still in flight counts as work: a float in the air
+	 * had written nothing, so a sheet whose only change was one it reported clean, and it
+	 * closed without asking. */
+	vng_tab_settle(t);
+
 	if (!t->dirty) { vng_tab_close(t); return; }
 
 	char msg[256];
@@ -378,9 +429,12 @@ void file_close_tab (VNG_TAB *t)
 
 bool file_confirm_quit (void)
 {
+	/* Settled first, for the reason file_close_tab gives. */
 	int dirty = 0;
-	for (VNG_TAB *p = vng_tabs; p; p = p->next)
+	for (VNG_TAB *p = vng_tabs; p; p = p->next) {
+		vng_tab_settle(p);
 		if (p->dirty) dirty++;
+	}
 
 	if (dirty == 0) return true;
 

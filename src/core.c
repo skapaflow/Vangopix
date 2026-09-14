@@ -225,22 +225,26 @@ static void new_sheet (const char *text)
 {
 	int w = 0, h = 0;
 
-	/* Whitespace in the format skips any, and the suppressed scanset takes the
-	 * separator, so "64x64", "64 x 64", "64X64" and "64*64" all read. */
-	int n = SDL_sscanf(text, "%d %*[xX*] %d", &w, &h);
+	/* The suppressed scanset takes the separator, spaces and all, so "64x64", "64 x 64",
+	 * "64X64", "64*64", "64,64" and "64 64" all read. The last one used to come out 64 x 64
+	 * whatever the second number said: the space stopped the old format before the separator
+	 * it was waiting for, and one number read is a square. */
+	int n = SDL_sscanf(text, "%d%*[ xX*,]%d", &w, &h);
 
 	if (n == 1) h = w;    /* one number is a square, which is what one number means */
 	else if (n != 2) return;
 
 	/* Nothing is said about a refusal on purpose: the answer is on screen, so a person
 	 * who typed 0 sees no new tab and types again. An error box would be a second
-	 * window to dismiss for a mistake that costs nothing. */
-	if (w < 1 || h < 1 || w > VNG_MAX_SIDE || h > VNG_MAX_SIDE) return;
+	 * window to dismiss for a mistake that costs nothing. The ceiling is the smaller of the
+	 * two that exist - VNG_MAX_SIDE, and what this machine's renderer can show at all. */
+	int max = VNG_MAX_SIDE < vng_tab_side_limit() ? VNG_MAX_SIDE : vng_tab_side_limit();
+	if (w < 1 || h < 1 || w > max || h > max) return;
 
 	vng_tab_new(w, h);
 }
 
-static void new_sheet_ask (void)
+void vangopix_new_sheet_ask (void)
 {
 	/* No font, no field - and then CTRL+N is what it always was rather than nothing. */
 	if (!prompt_open("new sheet:  width x height", "64x64", new_sheet))
@@ -250,6 +254,18 @@ static void new_sheet_ask (void)
 void vangopix_input (void)
 {
 	SDL_Event e;
+
+	/*
+	 * A WINDOW NOBODY CAN SEE IS NOT DRAWN FOR.
+	 *
+	 * Minimised, or covered whole, a present can come back at once even with vsync on - the
+	 * swap chain reports the window occluded and does not wait for anything - so the loop spun
+	 * at full speed drawing frames that went nowhere, a core flat out behind a window on the
+	 * taskbar. It waits for the next event instead. A tenth of a second at most, which is the
+	 * clamp vng_dt already puts on a stalled frame, so nothing that runs on the clock jumps.
+	 */
+	if (SDL_GetWindowFlags(vng_win) & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_OCCLUDED | SDL_WINDOW_HIDDEN))
+		SDL_WaitEventTimeout(NULL, 100);
 
 	while (SDL_PollEvent(&e)) {
 
@@ -358,9 +374,11 @@ void vangopix_input (void)
 			SDL_PathInfo info;
 			if (SDL_GetPathInfo(e.drop.data, &info) &&
 			    info.type == SDL_PATHTYPE_DIRECTORY) {
-				if (project_add(e.drop.data) && !sidebar_visible())
-					sidebar_toggle();   /* show what just arrived, or the drop looks
-					                     * like it did nothing */
+				/* Shown whether it arrived or was already there: a folder dropped twice is
+				 * a person looking for it, and a drop that shows nothing looks like it did
+				 * nothing - which is what the second one used to do. */
+				project_add(e.drop.data);
+				if (!sidebar_visible()) sidebar_toggle();
 			} else {
 				vng_tab_open(e.drop.data);
 			}
@@ -423,17 +441,27 @@ void vangopix_input (void)
 
 			if (e.key.mod & SDL_KMOD_CTRL) {
 				switch (e.key.key) {
-				case SDLK_N: new_sheet_ask();                   break;
+				case SDLK_N: vangopix_new_sheet_ask();          break;
 				case SDLK_W: file_close_tab(vng_tab);           break;
 				case SDLK_O: file_open_ask();                   break;
 
 				/* CTRL+Z back, CTRL+SHIFT+Z or CTRL+Y forward. Both redo spellings,
-				 * because half the world learned one and half the other. */
+				 * because half the world learned one and half the other.
+				 *
+				 * SETTLED FIRST - see vng_tab_settle. A write-through stroke still under
+				 * the hand, or the pencil's SHIFT preview (and CTRL+SHIFT+Z arrives with
+				 * SHIFT held), would otherwise rewind its own pixels over what undo just
+				 * put back. A float in the air is put down, so undo takes back the move
+				 * itself, and redo gives it again. */
 				case SDLK_Z:
+					vng_tab_settle(vng_tab);
 					if (e.key.mod & SDL_KMOD_SHIFT) undo_redo(vng_tab);
 					else                            undo_undo(vng_tab);
 					break;
-				case SDLK_Y: undo_redo(vng_tab);                break;
+				case SDLK_Y:
+					vng_tab_settle(vng_tab);
+					undo_redo(vng_tab);
+					break;
 
 				/* CTRL+S writes, CTRL+SHIFT+S always asks where. The standard pair,
 				 * and the ask is the system's own dialog - see file.c. */
@@ -459,10 +487,8 @@ void vangopix_input (void)
 
 static void draw_sheet (VNG_TAB *t)
 {
-	if (t->tex_dirty) {
-		SDL_UpdateTexture(t->tex, NULL, t->pixels, t->w * (int)sizeof(Uint32));
-		t->tex_dirty = false;
-	}
+	/* What changed since the last frame, and only that - see vng_tab_touch. */
+	vng_tab_upload(t);
 
 	SDL_FRect dst = view_sheet_rect(t);
 	float     z   = t->zoom;
@@ -483,16 +509,11 @@ static void draw_sheet (VNG_TAB *t)
 	 * what lets a stroke be abandoned, and what stops a half transparent brush from
 	 * blending onto its own output - see the mask in tabs.h.
 	 *
-	 * Only the rectangle the stroke has reached goes to the GPU. The preview is
-	 * transparent everywhere else and stays that way, which is the invariant
+	 * vng_tab_upload above has already sent the part of the preview that changed. The
+	 * preview is transparent everywhere else and stays that way, which is the invariant
 	 * vng_tab_stroke_close maintains on the way out.
 	 */
 	if (t->stroke && t->tex_preview && t->sx1 > t->sx0 && t->sy1 > t->sy0) {
-		SDL_Rect r = { t->sx0, t->sy0, t->sx1 - t->sx0, t->sy1 - t->sy0 };
-		SDL_UpdateTexture(t->tex_preview, &r,
-		                  t->pixels_preview + (size_t)r.y * t->w + r.x,
-		                  t->w * (int)sizeof(Uint32));
-
 		SDL_SetTextureScaleMode(t->tex_preview, z >= 1.0f ? SDL_SCALEMODE_NEAREST
 		                                                  : SDL_SCALEMODE_LINEAR);
 		SDL_RenderTexture(vng_ren, t->tex_preview, NULL, &dst);
@@ -879,6 +900,37 @@ static void frame_clock (void)
 	if (vng_dt > DT_MAX) vng_dt = DT_MAX;
 }
 
+/*
+ * THE FRAME IS PACED BY THE DISPLAY - AND WHEN IT IS NOT, BY THE CLOCK.
+ *
+ * vsync is asked for when the renderer is made, and a renderer may say no: the software one
+ * has no refresh to wait for, and a driver can be set to ignore the request. Then
+ * SDL_RenderPresent returns at once, and the loop drew the same picture thousands of times a
+ * second - a core flat out, and a laptop's fan with it, for a sheet nobody was touching. So
+ * when the renderer says it is not synchronised, the frame waits out the rest of one refresh of
+ * the display it is on by itself.
+ */
+static void frame_pace (void)
+{
+	static int vsync = -2;   /* not asked yet */
+
+	if (vsync == -2 && !SDL_GetRenderVSync(vng_ren, &vsync)) vsync = 0;
+	if (vsync != 0) return;
+
+	static Uint64 next = 0;
+
+	const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(vng_win));
+	float  hz     = (mode && mode->refresh_rate > 1.0f) ? mode->refresh_rate : 60.0f;
+	Uint64 period = (Uint64)((double)SDL_NS_PER_SECOND / (double)hz);
+	Uint64 now    = SDL_GetTicksNS();
+
+	/* A frame that ran long starts the schedule again rather than racing to catch up. */
+	if (next == 0 || now > next + period) next = now;
+	next += period;
+
+	if (next > now) SDL_DelayPrecise(next - now);
+}
+
 void vangopix_core (void)
 {
 	frame_clock();
@@ -964,4 +1016,5 @@ void vangopix_core (void)
 	tool_cursor_apply();
 
 	SDL_RenderPresent(vng_ren);
+	frame_pace();
 }

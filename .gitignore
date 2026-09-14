@@ -1,6 +1,10 @@
-# Build output
+# Build output. The exe and the check suite have no extension on Linux and macOS, so they are
+# named as well; the .d beside every object is the compiler's own list of what it included.
 *.exe
 *.o
+*.d
+/vangopix
+/checks
 
 # Windows resource blob. Regenerated from icon/recicon.rc by the Makefile rule, so the
 # source of truth (the .rc and the .ico) is versioned and the derived COFF is not.
@@ -11,8 +15,9 @@
 # from. See README.md for where they come from and where they go.
 *.dll
 
-# Upstream packages downloaded during setup
+# Upstream packages downloaded during setup, and the archives `make dist` builds
 *.zip
+*.tar.gz
 
 # Lucida Console ships with Windows and is Bigelow & Holmes property - usable on a
 # machine that already has it, never redistributable from a public repository. It is no
@@ -28,14 +33,19 @@ shot.png
 # committing it would hand every clone a list of directories that do not exist there.
 projects.vngproj
 
-# The clip list the animation window writes with SAVE. It is a working file about whatever
-# spritesheet is in front of you, not something to ship: a clip is a rectangle on a canvas,
-# and one committed here would be four numbers pointing at pixels nobody else has.
+# The clips the animation window writes with SAVE, beside the image they belong to -
+# hero.png keeps hero.vnganime. A working file about whatever spritesheet is in front of you,
+# not something to ship: one committed here would be four numbers pointing at pixels nobody
+# else has. (It used to be one vangopix.anime beside the exe; that file is gone.)
 #
 # vangopix_palette.ini is the opposite and IS committed - it holds the palettes of other
 # machines, which are the same for everyone.
-vangopix.anime
+*.vnganime
 build/
+
+# What the check suite writes beside checks.exe and removes again. A run that stops halfway
+# leaves them behind, and they are nobody's.
+checks_*
 
 # The key list the empty desk shows. Vangopix WRITES this one from its own defaults whenever
 # it is not there, so committing it would be committing a copy that goes stale the moment the

@@ -2,6 +2,8 @@
 #include "undo.h"
 #include "select.h"
 #include "palette.h"
+#include "anim.h"
+#include "tool.h"
 
 VNG_TAB *vng_tabs = NULL;
 VNG_TAB *vng_tab  = NULL;
@@ -28,14 +30,18 @@ static Uint32 id_seq = 1;
  * THE EXTENSION STAYS. The previous Vangopix stripped it (cutpath then cutpoint),
  * which makes sense in an editor that only opens png; in a general viewer the
  * extension is half the information - knowing a file is .webp and not .png changes
- * what you are able to save. */
+ * what you are able to save.
+ *
+ * CUT ON A CHARACTER, NOT ON A BYTE. A long name is shortened to fit the field, and a
+ * plain strlcpy can stop halfway through an accented letter - which the title bar then
+ * shows as garbage. SDL_utf8strlcpy stops before the character it cannot finish. */
 static void tab_set_name (VNG_TAB *t, const char *path)
 {
 	const char *base = path;
 	for (const char *p = path; *p; p++)
 		if (*p == '/' || *p == '\\')
 			base = p + 1;
-	SDL_strlcpy(t->name, base, sizeof t->name);
+	SDL_utf8strlcpy(t->name, base, sizeof t->name);
 }
 
 static void tab_link (VNG_TAB *t)
@@ -45,6 +51,84 @@ static void tab_link (VNG_TAB *t)
 	if (tail) tail->next = t;
 	else      vng_tabs = t;
 	tail = t;
+}
+
+/* ------------------------------------------------------------- what the GPU has seen */
+
+/* Widens a half-open rectangle held as four corners to take in another. An empty one - x1 not
+   past x0 - simply becomes the other. */
+static void widen (int *x0, int *y0, int *x1, int *y1, int ax, int ay, int bx, int by)
+{
+	if (*x1 <= *x0 || *y1 <= *y0) {
+		*x0 = ax; *y0 = ay; *x1 = bx; *y1 = by;
+		return;
+	}
+	if (ax < *x0) *x0 = ax;
+	if (ay < *y0) *y0 = ay;
+	if (bx > *x1) *x1 = bx;
+	if (by > *y1) *y1 = by;
+}
+
+void vng_tab_touch (VNG_TAB *t, int x, int y, int w, int h)
+{
+	if (!t || w <= 0 || h <= 0) return;
+
+	int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
+	int x1 = x + w > t->w ? t->w : x + w;
+	int y1 = y + h > t->h ? t->h : y + h;
+	if (x1 <= x0 || y1 <= y0) return;
+
+	widen(&t->tx0, &t->ty0, &t->tx1, &t->ty1, x0, y0, x1, y1);
+}
+
+static void touch_all (VNG_TAB *t) { vng_tab_touch(t, 0, 0, t->w, t->h); }
+
+/* The same bookkeeping for the preview texture, which nothing outside this file writes. */
+static void preview_touch (VNG_TAB *t, int x0, int y0, int x1, int y1)
+{
+	if (x1 <= x0 || y1 <= y0) return;
+	widen(&t->px0, &t->py0, &t->px1, &t->py1, x0, y0, x1, y1);
+}
+
+/*
+ * Sends what changed and nothing else, from the buffer that owns it straight into the
+ * rectangle it came from - the pitch is the whole sheet's, so a sub-rectangle needs no copy
+ * of its own on the way.
+ *
+ * THE PREVIEW IS SENT WHETHER OR NOT A STROKE IS OPEN. A closed stroke leaves its rectangle
+ * transparent again in the buffer, and the texture has to hear that before the next stroke
+ * is composited over the sheet - or the last one's pixels would come back with it.
+ */
+void vng_tab_upload (VNG_TAB *t)
+{
+	if (!t) return;
+
+	if (t->tex && t->pixels && t->tx1 > t->tx0 && t->ty1 > t->ty0) {
+		SDL_Rect r = { t->tx0, t->ty0, t->tx1 - t->tx0, t->ty1 - t->ty0 };
+		SDL_UpdateTexture(t->tex, &r, t->pixels + (size_t)r.y * t->w + r.x,
+		                  t->w * (int)sizeof(Uint32));
+	}
+	t->tx0 = t->ty0 = t->tx1 = t->ty1 = 0;
+
+	if (t->tex_preview && t->pixels_preview && t->px1 > t->px0 && t->py1 > t->py0) {
+		SDL_Rect r = { t->px0, t->py0, t->px1 - t->px0, t->py1 - t->py0 };
+		SDL_UpdateTexture(t->tex_preview, &r, t->pixels_preview + (size_t)r.y * t->w + r.x,
+		                  t->w * (int)sizeof(Uint32));
+	}
+	t->px0 = t->py0 = t->px1 = t->py1 = 0;
+}
+
+int vng_tab_side_limit (void)
+{
+	static int limit = 0;
+
+	if (limit > 0) return limit;
+	if (!vng_ren)  return VNG_MAX_SIDE;   /* not asked yet, and not remembered either */
+
+	Sint64 n = SDL_GetNumberProperty(SDL_GetRendererProperties(vng_ren),
+	                                 SDL_PROP_RENDERER_MAX_TEXTURE_SIZE_NUMBER, 0);
+	limit = (n > 0 && n <= SDL_MAX_SINT32) ? (int)n : VNG_MAX_SIDE;
+	return limit;
 }
 
 /* A texture has a fixed size from creation, and opening a file changes the document's
@@ -71,7 +155,7 @@ static bool tab_make_texture (VNG_TAB *t)
 
 	if (t->tex) SDL_DestroyTexture(t->tex);
 	t->tex = tex;
-	t->tex_dirty = true;
+	touch_all(t);
 	return true;
 }
 
@@ -88,6 +172,7 @@ static void draw_buffers_free (VNG_TAB *t)
 	t->pixels_preview = NULL;
 	t->mask           = NULL;
 	t->stroke         = false;
+	t->px0 = t->py0 = t->px1 = t->py1 = 0;
 }
 
 static bool draw_buffers_make (VNG_TAB *t)
@@ -119,9 +204,33 @@ static bool draw_buffers_make (VNG_TAB *t)
 	return true;
 }
 
+/* Throws an open stroke away whole: rewound if it wrote through, wiped if it was a preview,
+ * and its undo step - empty by then - discarded on the way out. */
+static void stroke_cancel (VNG_TAB *t)
+{
+	vng_tab_stroke_reset(t);
+	vng_tab_stroke_close(t);
+}
+
 static bool stroke_begin (VNG_TAB *t, bool direct, bool clipped)
 {
-	if (!t || !draw_buffers_make(t)) return false;
+	if (!t) return false;
+
+	/*
+	 * ONE STROKE AT A TIME, AND THE FIRST IS CANCELLED RATHER THAN ORPHANED.
+	 *
+	 * This used to carry straight on: undo_open threw the first stroke's step away and the
+	 * rectangle below was reset, so a preview still sitting in the buffers was forgotten
+	 * with its mask set - and merged into the document by the next stroke whose rectangle
+	 * happened to cover it. A safety net and not the protocol: whoever changes the sheet
+	 * calls vng_tab_settle first, and then this never fires. It says so if it does.
+	 */
+	if (t->stroke) {
+		SDL_Log("stroke: opened over one still open - the first was cancelled");
+		stroke_cancel(t);
+	}
+
+	if (!draw_buffers_make(t)) return false;
 	if (!undo_open(t)) return false;
 
 	t->direct = direct;
@@ -147,7 +256,7 @@ bool vng_tab_stroke_open (VNG_TAB *t, bool direct)
 	return stroke_begin(t, direct, true);
 }
 
-/* select_commit's, and nobody else's - see tabs.h. */
+/* select.c's put_down, and nobody else's - see tabs.h. */
 bool vng_tab_stroke_open_unclipped (VNG_TAB *t, bool direct)
 {
 	return stroke_begin(t, direct, false);
@@ -184,12 +293,18 @@ void vng_tab_put (VNG_TAB *t, int x, int y, Uint32 argb)
 	if (t->direct) {
 		/* Straight into the document, carry first. There is no preview to composite and
 		 * nothing to merge later - which is the whole point, since what this stroke lays
-		 * cannot be shown by drawing it over anything. */
-		undo_carry(t, x, y, t->pixels[i], argb);
-		t->pixels[i] = argb;
-		t->tex_dirty = true;
+		 * cannot be shown by drawing it over anything.
+		 *
+		 * A pixel that already IS this colour is marked and not carried: nothing changed,
+		 * so there is nothing for undo to put back - see tabs.h. */
+		if (t->pixels[i] != argb) {
+			undo_carry(t, x, y, t->pixels[i], argb);
+			t->pixels[i] = argb;
+			vng_tab_touch(t, x, y, 1, 1);
+		}
 	} else {
 		t->pixels_preview[i] = argb;
+		preview_touch(t, x, y, x + 1, y + 1);
 	}
 
 	t->mask[i] = 1;   /* the mask does its job either way: one write per pixel per stroke */
@@ -200,9 +315,9 @@ void vng_tab_put (VNG_TAB *t, int x, int y, Uint32 argb)
 	if (y + 1 > t->sy1) t->sy1 = y + 1;
 }
 
-/* Clears the touched rectangle in both buffers and puts the same rectangle back on the GPU,
- * so the preview texture is transparent everywhere again - the invariant the partial upload
- * during a stroke depends on. */
+/* Clears the touched rectangle in both buffers, and tells the preview texture so - it is
+ * re-sent on the next upload, which is what keeps it transparent everywhere again: the
+ * invariant the partial upload during a stroke depends on. */
 static void preview_wipe (VNG_TAB *t)
 {
 	if (t->sx1 <= t->sx0 || t->sy1 <= t->sy0) return;
@@ -214,10 +329,7 @@ static void preview_wipe (VNG_TAB *t)
 		SDL_memset(t->mask + row + t->sx0, 0, (size_t)(t->sx1 - t->sx0));
 	}
 
-	SDL_Rect r = { t->sx0, t->sy0, t->sx1 - t->sx0, t->sy1 - t->sy0 };
-	SDL_UpdateTexture(t->tex_preview, &r,
-	                  t->pixels_preview + (size_t)r.y * t->w + r.x,
-	                  t->w * (int)sizeof(Uint32));
+	preview_touch(t, t->sx0, t->sy0, t->sx1, t->sy1);
 
 	t->sx0 = t->w; t->sy0 = t->h;
 	t->sx1 = 0;    t->sy1 = 0;
@@ -270,8 +382,12 @@ void vng_tab_stroke_close (VNG_TAB *t)
 			size_t i = (size_t)y * t->w + x;
 			if (!t->mask[i]) continue;
 
-			undo_carry(t, x, y, t->pixels[i], t->pixels_preview[i]);
-			t->pixels[i] = t->pixels_preview[i];
+			/* A pixel laid in the colour it already had is not a change, and is not
+			 * carried - see tabs.h. */
+			if (t->pixels[i] != t->pixels_preview[i]) {
+				undo_carry(t, x, y, t->pixels[i], t->pixels_preview[i]);
+				t->pixels[i] = t->pixels_preview[i];
+			}
 
 			/* Left clean for the next stroke, so opening one costs nothing. */
 			t->pixels_preview[i] = 0;
@@ -279,19 +395,16 @@ void vng_tab_stroke_close (VNG_TAB *t)
 		}
 	}
 
-	if (t->sx1 > t->sx0 && t->sy1 > t->sy0) {
-		/* The same rectangle, now transparent, goes back to the GPU: the preview
-		 * texture is transparent everywhere again, which is the invariant the
-		 * partial upload during a stroke depends on. */
-		SDL_Rect r = { t->sx0, t->sy0, t->sx1 - t->sx0, t->sy1 - t->sy0 };
-		SDL_UpdateTexture(t->tex_preview, &r,
-		                  t->pixels_preview + (size_t)r.y * t->w + r.x,
-		                  t->w * (int)sizeof(Uint32));
-		t->tex_dirty = true;
-	}
+	/* The same rectangle, now transparent in the preview and merged into the sheet, is owed
+	 * to both textures. */
+	preview_touch(t, t->sx0, t->sy0, t->sx1, t->sy1);
+	if (t->sx1 > t->sx0 && t->sy1 > t->sy0)
+		vng_tab_touch(t, t->sx0, t->sy0, t->sx1 - t->sx0, t->sy1 - t->sy0);
 
 	undo_close(t);
 }
+
+/* ------------------------------------------------------------------------ the documents */
 
 static VNG_TAB *tab_alloc (int w, int h)
 {
@@ -311,12 +424,28 @@ static VNG_TAB *tab_alloc (int w, int h)
 	return t;
 }
 
+/* Everything a tab owns, and the tab. One place, because closing one tab and closing all of
+ * them at the end are the same job - and two copies of a list of frees are a leak waiting for
+ * the next thing a tab grows. */
+static void tab_destroy (VNG_TAB *t)
+{
+	if (t->tex) SDL_DestroyTexture(t->tex);
+	draw_buffers_free(t);
+	undo_free(t->undo);
+	select_free(t->sel);
+	palette_free(t->pal);
+	anim_tab_free(t->anim);
+	SDL_free(t->pixels);
+	SDL_free(t->path);
+	SDL_free(t);
+}
+
 VNG_TAB *vng_tab_new (int w, int h)
 {
 	VNG_TAB *t = tab_alloc(w, h);
 	if (!t) return NULL;
 
-	for (int i = 0; i < w * h; i++)
+	for (size_t i = 0, n = (size_t)w * h; i < n; i++)
 		t->pixels[i] = 0xFFFFFFFFu;   /* the sheet is born white and opaque */
 
 	SDL_snprintf(t->name, sizeof t->name, "untitled %u", untitled_seq++);
@@ -326,6 +455,27 @@ VNG_TAB *vng_tab_new (int w, int h)
 	tab_link(t);
 	vng_tab_show(t);
 	return t;
+}
+
+/*
+ * AN OPEN THAT FAILS SAYS SO, IN A BOX.
+ *
+ * Every way into this call is a person asking for exactly this file - a drop, CTRL+O, a row
+ * of the project panel, the command line - and the program is built without a console, so the
+ * log that used to be the whole answer went to nobody. A drop that did nothing is read as the
+ * drop not having worked, and then as the program being broken.
+ */
+static void refuse (const char *path, const char *why)
+{
+	const char *base = path;
+	for (const char *p = path; *p; p++)
+		if (*p == '/' || *p == '\\') base = p + 1;
+
+	char msg[512];
+	SDL_snprintf(msg, sizeof msg, "Could not open %s.\n\n%s", base, why ? why : "");
+
+	SDL_Log("open %s: %s", path, why ? why : "");
+	SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, VNG_NAME, msg, vng_win);
 }
 
 /*
@@ -344,20 +494,48 @@ VNG_TAB *vng_tab_new (int w, int h)
  */
 VNG_TAB *vng_tab_open (const char *path)
 {
+	if (!path || !path[0]) return NULL;
+
+	/* A FILE ALREADY OPEN IS SHOWN, NOT OPENED AGAIN - see tabs.h. */
+	for (VNG_TAB *p = vng_tabs; p; p = p->next)
+		if (p->path && vangopix_path_same(p->path, path)) {
+			vng_tab_show(p);
+			return p;
+		}
+
 	SDL_Surface *raw = IMG_Load(path);
 	if (!raw) {
-		SDL_Log("IMG_Load(%s): %s", path, SDL_GetError());
+		refuse(path, SDL_GetError());
 		return NULL;
 	}
+
+	/* Asked BEFORE the conversion and the copy: a picture the GPU cannot hold as one texture
+	 * cannot be a sheet, and finding that out after two full-size copies of it is finding it
+	 * out slowly and with the machine's memory. */
+	int limit = vng_tab_side_limit();
+	if (raw->w > limit || raw->h > limit) {
+		char why[160];
+		SDL_snprintf(why, sizeof why,
+		             "It is %d x %d, and this machine can show at most %d pixels a side.",
+		             raw->w, raw->h, limit);
+		SDL_DestroySurface(raw);
+		refuse(path, why);
+		return NULL;
+	}
+
 	SDL_Surface *img = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
 	SDL_DestroySurface(raw);
 	if (!img) {
-		SDL_Log("SDL_ConvertSurface: %s", SDL_GetError());
+		refuse(path, SDL_GetError());
 		return NULL;
 	}
 
 	VNG_TAB *t = tab_alloc(img->w, img->h);
-	if (!t) { SDL_DestroySurface(img); return NULL; }
+	if (!t) {
+		SDL_DestroySurface(img);
+		refuse(path, "There is not enough memory for it.");
+		return NULL;
+	}
 
 	/* Row by row: a surface's pitch may carry padding at the end of each line, and a
 	 * single memcpy would drag that garbage into the document. */
@@ -370,8 +548,9 @@ VNG_TAB *vng_tab_open (const char *path)
 	t->path = SDL_strdup(path);
 	tab_set_name(t, path);
 
-	if (!tab_make_texture(t)) {
+	if (!t->path || !tab_make_texture(t)) {
 		SDL_free(t->path); SDL_free(t->pixels); SDL_free(t);
+		refuse(path, SDL_GetError());
 		return NULL;
 	}
 
@@ -391,26 +570,25 @@ VNG_TAB *vng_tab_open (const char *path)
  *
  * What it buys: a blank untitled sheet nobody asked for is not sitting in the way of the file
  * somebody is about to drop in, and CTRL+W means what it says.
+ *
+ * THE SHEET ON SCREEN STAYS ON SCREEN unless it is the one going. The fallback used to be
+ * taken whichever tab was closed, so the [x] on a tab BEHIND the current one - which is what
+ * that [x] is for - pulled the eye off the drawing onto the closed tab's neighbour.
  */
 void vng_tab_close (VNG_TAB *t)
 {
 	if (!t) return;
 
-	VNG_TAB *fallback = t->next ? t->next : t->prev;
+	VNG_TAB *fallback  = t->next ? t->next : t->prev;
+	bool     on_screen = (t == vng_tab);
 
 	if (t->prev) t->prev->next = t->next; else vng_tabs = t->next;
 	if (t->next) t->next->prev = t->prev; else tail     = t->prev;
 
-	if (t->tex) SDL_DestroyTexture(t->tex);
-	draw_buffers_free(t);
-	undo_free(t->undo);
-	select_free(t->sel);
-	palette_free(t->pal);
-	SDL_free(t->pixels);
-	SDL_free(t->path);
-	SDL_free(t);
+	tab_destroy(t);
 
-	vng_tab = fallback;   /* NULL when that was the last one - the desk, and the keys on it */
+	if (on_screen)
+		vng_tab = fallback;   /* NULL when that was the last one - the desk, and the keys on it */
 	vng_tab_title();
 }
 
@@ -426,12 +604,22 @@ void vng_tab_step (int dir)
 	vng_tab_show(n);
 }
 
+void vng_tab_settle (VNG_TAB *t)
+{
+	if (!t) return;
+
+	/* The tool first, so its stroke is closed before the selection opens one of its own to
+	 * put a float down - two strokes open at once on one sheet is the thing being ended. */
+	tool_settle(t);
+	select_settle(t);
+}
+
 void vng_tab_show (VNG_TAB *t)
 {
 	if (!t || t == vng_tab) return;
 
-	/* The float is put down before the sheet under it goes away. */
-	select_commit(vng_tab);
+	/* What was in flight on the outgoing sheet is finished before it stops being drawn. */
+	vng_tab_settle(vng_tab);
 
 	vng_tab = t;
 	vng_tab_title();
@@ -493,6 +681,10 @@ Uint32 *vng_tab_adopt (VNG_TAB *t, Uint32 *pixels, int w, int h)
 	SDL_Texture *tex = texture_make(w, h);
 	if (!tex) return NULL;
 
+	/* A stroke cannot survive its buffers being swapped - see stroke_begin for what an
+	 * orphaned one does. Nothing opens one across an undo or a resize; this is the net. */
+	if (t->stroke) stroke_cancel(t);
+
 	Uint32 *old = t->pixels;
 
 	if (t->tex) SDL_DestroyTexture(t->tex);
@@ -500,9 +692,13 @@ Uint32 *vng_tab_adopt (VNG_TAB *t, Uint32 *pixels, int w, int h)
 	t->pixels    = pixels;
 	t->w         = w;
 	t->h         = h;
-	t->tex_dirty = true;
 
 	draw_buffers_free(t);   /* the geometry moved out from under them */
+
+	/* A new texture has seen nothing, and the rectangle that was owed belonged to the old
+	 * geometry. */
+	t->tx0 = t->ty0 = t->tx1 = t->ty1 = 0;
+	touch_all(t);
 	return old;
 }
 
@@ -510,24 +706,37 @@ Uint32 *vng_tab_resize_raw (VNG_TAB *t, int w, int h, int dx, int dy)
 {
 	if (!t || w < 1 || h < 1) return NULL;
 
-	Uint32 *buf = (Uint32 *) SDL_malloc((size_t)w * h * sizeof(Uint32));
+	/* The wall is checked before a byte is asked for - see vng_tab_side_limit. */
+	int limit = vng_tab_side_limit();
+	if (w > limit || h > limit) return NULL;
+
+	/* Before the copy, not only in adopt: a write-through stroke's pixels are IN the buffer
+	 * being copied, and cancelling it after the copy would carry them into the new one. */
+	if (t->stroke) stroke_cancel(t);
+
+	size_t  n   = (size_t)w * h;
+	Uint32 *buf = (Uint32 *) SDL_malloc(n * sizeof(Uint32));
 	if (!buf) return NULL;
 
-	for (int i = 0; i < w * h; i++)
+	for (size_t i = 0; i < n; i++)
 		buf[i] = 0xFFFFFFFFu;
 
 	/* The overlap of the old rectangle placed at (dx, dy) with the new one. Computed
 	 * once instead of testing every pixel: a 4000x4000 canvas is sixteen million
-	 * bounds checks otherwise, and the loop is a memcpy per row without them. */
+	 * bounds checks otherwise, and the loop is a memcpy per row without them.
+	 *
+	 * There may be NO overlap - a canvas moved wholly off its own pixels - and then there is
+	 * nothing to copy: a negative width handed to memcpy is a very large one. */
 	int x0 = dx > 0 ? dx : 0;
 	int y0 = dy > 0 ? dy : 0;
 	int x1 = dx + t->w < w ? dx + t->w : w;
 	int y1 = dy + t->h < h ? dy + t->h : h;
 
-	for (int y = y0; y < y1; y++)
-		SDL_memcpy(buf + (size_t)y * w + x0,
-		           t->pixels + (size_t)(y - dy) * t->w + (x0 - dx),
-		           (size_t)(x1 - x0) * sizeof(Uint32));
+	if (x1 > x0)
+		for (int y = y0; y < y1; y++)
+			SDL_memcpy(buf + (size_t)y * w + x0,
+			           t->pixels + (size_t)(y - dy) * t->w + (x0 - dx),
+			           (size_t)(x1 - x0) * sizeof(Uint32));
 
 	/* Hands the old buffer out instead of freeing it - which is what makes recording a
 	 * resize for undo cost nothing at all. A caller that does not want it frees it. */
@@ -538,6 +747,8 @@ Uint32 *vng_tab_resize_raw (VNG_TAB *t, int w, int h, int dx, int dy)
 
 bool vng_tab_resize (VNG_TAB *t, int w, int h, int dx, int dy)
 {
+	if (!t) return false;
+
 	int was_w = t->w, was_h = t->h;
 
 	Uint32 *was = vng_tab_resize_raw(t, w, h, dx, dy);
@@ -545,6 +756,11 @@ bool vng_tab_resize (VNG_TAB *t, int w, int h, int dx, int dy)
 
 	t->dirty = true;
 	vng_tab_title();
+
+	/* THE MARKED RECTANGLE IS A RECTANGLE OF THIS DRAWING, so it moves with the drawing: a
+	 * canvas grown to the left put the old pixel 0 at dx, and a selection left where it was
+	 * would now be holding every tool to pixels nobody chose. Undo moves it back. */
+	select_shift(t, dx, dy);
 
 	/* THE BUFFER IS NOT FREED - it becomes the undo record, and the record is therefore
 	 * free. Recomputing it would be impossible anyway: shrinking a canvas destroys the
@@ -625,14 +841,7 @@ void vng_tabs_free (void)
 	VNG_TAB *p = vng_tabs;
 	while (p) {
 		VNG_TAB *n = p->next;
-		if (p->tex) SDL_DestroyTexture(p->tex);
-		draw_buffers_free(p);
-		undo_free(p->undo);
-		select_free(p->sel);
-		palette_free(p->pal);
-		SDL_free(p->pixels);
-		SDL_free(p->path);
-		SDL_free(p);
+		tab_destroy(p);
 		p = n;
 	}
 	vng_tabs = tail = vng_tab = NULL;

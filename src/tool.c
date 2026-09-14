@@ -11,6 +11,8 @@
 #include "sidebar.h"
 #include "select.h"
 #include "colour.h"
+#include "win.h"
+#include "palette.h"
 
 /*
  * The two colours a fresh program starts with. 0xAARRGGBB, matching the ARGB8888 the
@@ -72,12 +74,30 @@ static TOOL current = T_PENCIL;
 
 /* Sizes and steps, both the first Vangopix's: vng_tool.tool_size in its tool_core.c, and the
  * scale_step it sets per case in the same switch. */
-static int size[T_LOT] = { 1, 1, 1, 1, 20, 1, 20, 1, 1 };
+static int size[] = { 1, 1, 1, 1, 20, 1, 20, 1, 1 };
 
 /* A step of ZERO means the tool has no size, and the wheel says so by doing nothing. The
  * bucket fills a region: there is no tip to make bigger, and letting SHIFT+wheel give it a
  * number produced an outline that grew on screen and changed nothing at all. */
-static const int step[T_LOT] = { 1, 1, 1, 1,  5, 0,  3, 3, 0 };
+static const int step[] = { 1, 1, 1, 1,  5, 0,  3, 3, 0 };
+
+/* Unsized and counted, so a tool added without its size and step is a build that stops, not a
+   tool that silently starts at zero - which the tip code reads as one and the wheel as none. */
+SDL_COMPILE_TIME_ASSERT(tool_sizes_per_tool, SDL_arraysize(size) == T_LOT);
+SDL_COMPILE_TIME_ASSERT(tool_steps_per_tool, SDL_arraysize(step) == T_LOT);
+
+/*
+ * THREE LISTS KEEP THE TOOLS IN ONE ORDER, and nothing but the order joins them: TOOL indexes
+ * its own glyph (glyph.h) and its own key action (keymap.h) by arithmetic, with no table in
+ * between. Each header says so in a comment; these say it where a compiler reads. A tool slotted
+ * into the middle of one list and not the others would draw the wrong glyph and answer the
+ * wrong key, and nothing at run time would look wrong enough to notice.
+ */
+SDL_COMPILE_TIME_ASSERT(tool_glyphs_follow_the_tools,
+                        GLYPH_PENCIL == (int)T_PENCIL && GLYPH_SELECT == (int)T_SELECT &&
+                        GLYPH_PICK == (int)T_LOT);
+SDL_COMPILE_TIME_ASSERT(tool_keys_follow_the_tools,
+                        VNG_ACT_TOOL_SELECT - VNG_ACT_TOOL_FIRST == (int)T_SELECT);
 
 /*
  * The change-colours limiter: 0 the whole sheet, 1 a circle, 2 a square. SHIFT+TAB swaps
@@ -112,6 +132,59 @@ static int    anchor_x = 0, anchor_y = 0;   /* where a shape was begun */
  * a drag - no button is down.
  */
 static bool hinting = false;
+
+/*
+ * WHICH SHEET THE OPEN STROKE BELONGS TO - the drag or the preview above, whichever is open.
+ *
+ * `drawing` and `hinting` are the tool's, and the tool is one for the whole program; the
+ * stroke they describe is one sheet's. Everything used to assume those were the same sheet,
+ * and they stopped being the moment a tab could be switched with a stroke still open: the next
+ * motion drew into the new sheet, which had no stroke, while the old one kept its preview for
+ * good. The id is what lets the tool notice it is being asked about a different sheet, and
+ * settle the one it actually has open - see follow.
+ */
+static Uint32 owner = 0;
+
+/*
+ * WHAT A PREVIEW WAS LAST BUILT FROM, so an unchanged one is not built again.
+ *
+ * A held shape and the SHIFT line are rebuilt every frame because more than the pointer
+ * decides them (see tool_frame_at) - but rebuilding one nothing has changed wipes its whole
+ * rectangle and sends it to the GPU again, sixty times a second, for a hand that is holding
+ * still. The signature is every input the build reads; equal means the result would be too.
+ */
+typedef struct { bool valid; int ax, ay, bx, by, size, shift; } SIG;
+
+static SIG shape_sig = { false, 0, 0, 0, 0, 0, 0 };
+static SIG hint_sig  = { false, 0, 0, 0, 0, 0, 0 };
+
+static bool sig_same (const SIG *a, const SIG *b)
+{
+	return a->valid && b->valid &&
+	       a->ax == b->ax && a->ay == b->ay && a->bx == b->bx && a->by == b->by &&
+	       a->size == b->size && a->shift == b->shift;
+}
+
+/* The inputs of a dragged shape: where the pointer is, how big the tip is, and SHIFT - which
+   snaps a line. The anchor and the colour are fixed for the whole drag. */
+static SIG sig_shape (void)
+{
+	SIG s = { true, last_x, last_y, anchor_x, anchor_y, size[current],
+	          (keys_mods() & SDL_KMOD_SHIFT) ? 1 : 0 };
+	return s;
+}
+
+/* The spray's clock: where its last frame's paint ended, and the fraction of a dab it still
+   owes - so a frame too short for one whole dab carries it to the next rather than losing it.
+   SPRAY_HZ is the rate the old per-frame amount was tuned at. */
+#define SPRAY_HZ  60.0f
+static int   spray_x = 0, spray_y = 0;
+static float spray_owed = 0.0f;
+
+/* The colours change-colours has already replaced in this stroke, at size one - see plot_change. */
+#define CHANGED_MAX 16
+static Uint32 changed[CHANGED_MAX];
+static int    changed_lot = 0;
 
 /* True while a CTRL press is being dragged across the sheet, absorbing as it goes. */
 static bool   picking = false;
@@ -277,6 +350,37 @@ static const Uint8 tip_small[4][25] = {
 	{ 0,1,1,1,0,  1,1,1,1,1,  1,1,1,1,1,  1,1,1,1,1,  0,1,1,1,0 },   /* 5: a round 5  */
 };
 
+/*
+ * ONE ROW OF A TIP, from x0 to x1 inclusive, cut to where the stroke may write.
+ *
+ * The big tips were a square of tests - every pixel of the (2r+1)^2 box asked whether it was in
+ * the circle and then whether it was on the sheet, 263 thousand questions per stamp at the
+ * largest size, and a stamp per pixel of every line. A tip is rows, and a row is a run: its
+ * ends are worked out once, and a row or a run outside the clip is never walked at all - which
+ * is most of a big tip dragged along the edge of a selection.
+ */
+static void tip_row (VNG_TAB *t, int y, int x0, int x1)
+{
+	if (!t->stroke || y < t->clip.y || y >= t->clip.y + t->clip.h) return;
+
+	if (x0 < t->clip.x)                 x0 = t->clip.x;
+	if (x1 > t->clip.x + t->clip.w - 1) x1 = t->clip.x + t->clip.w - 1;
+
+	for (int x = x0; x <= x1; x++) put(t, x, y);
+}
+
+/* The largest h with h*h <= v - EXACT, where a float square root rounded either way would move
+   a pixel of the circle's edge and the tip would stop matching the outline measured from it. */
+static int isqrt (int v)
+{
+	if (v <= 0) return 0;
+
+	int h = (int)SDL_sqrtf((float)v);
+	while (h > 0 && h * h > v)        h--;
+	while ((h + 1) * (h + 1) <= v)    h++;
+	return h;
+}
+
 /* The round tip: pencil, line, rect, ellipse. */
 static void tip_round (VNG_TAB *t, int cx, int cy, int r)
 {
@@ -290,10 +394,11 @@ static void tip_round (VNG_TAB *t, int cx, int cy, int r)
 		return;
 	}
 
-	for (int y = -r; y <= r; y++)
-		for (int x = -r; x <= r; x++)
-			if (x * x + y * y <= r * r)
-				put(t, cx + x, cy + y);
+	/* The rows of x*x + y*y <= r*r, the circle it always was - see tip_row. */
+	for (int y = -r; y <= r; y++) {
+		int h = isqrt(r * r - y * y);
+		tip_row(t, cy + y, cx - h, cx + h);
+	}
 }
 
 /* The eraser is a SQUARE, and deliberately not the round tip: rubbing out is about clearing
@@ -306,8 +411,7 @@ static void tip_square (VNG_TAB *t, int cx, int cy, int n)
 
 	int h = n / 2;
 	for (int y = -h; y <= h; y++)
-		for (int x = -h; x <= h; x++)
-			put(t, cx + x, cy + y);
+		tip_row(t, cy + y, cx - h, cx + h);
 }
 
 /*
@@ -325,10 +429,10 @@ static void tip_disc (VNG_TAB *t, int cx, int cy, int n)
 	if ((n & 1) == 0) n++;
 
 	int h = n / 2;
-	for (int y = -h; y <= h; y++)
-		for (int x = -h; x <= h; x++)
-			if (x * x + y * y <= h * h + h)
-				put(t, cx + x, cy + y);
+	for (int y = -h; y <= h; y++) {
+		int s = isqrt(h * h + h - y * y);   /* never past h: (h+1)^2 > h*h + h */
+		tip_row(t, cy + y, cx - s, cx + s);
+	}
 }
 
 /* The tip of whatever tool is current. */
@@ -560,14 +664,25 @@ static void plot_flood (VNG_TAB *t, int sx, int sy, bool barrier)
 	 */
 	if (!barrier && target == laying) return;   /* a no-op with a cost */
 
-	/* Two ints per span start. One entry per row is the worst case, and a few rows of slack
-	 * cost nothing beside the buffers a document already carries. */
+	/*
+	 * Two ints per span start, AND THE STACK GROWS.
+	 *
+	 * It was a fixed `clip.h * 4 + 64`, on the belief that one pending start per row was the
+	 * worst case, and a push that found it full was simply dropped. The belief is wrong: one
+	 * wide span pushes a start for EVERY run on the rows beside it, so a comb, a fence, a field
+	 * of grass blades - or any short, wide selection, where the cap is smallest - queues far
+	 * more than one per row. The starts that did not fit were never walked, and the fill came
+	 * out with teeth missing and no sign anything had gone wrong. Doubling costs nothing on the
+	 * fills that never needed it; running out of memory ends the fill where it stands, which
+	 * leaves a stroke that closes normally rather than a promise that was quietly broken.
+	 */
 	int  cap   = t->clip.h * 4 + 64;
 	int *stack = (int *) SDL_malloc((size_t)cap * 2 * sizeof(int));
 	if (!stack) return;
 
 	int top = 0;
 	stack[0] = sx; stack[1] = sy; top = 1;
+	bool starved = false;
 
 	while (top > 0) {
 		top--;
@@ -593,7 +708,7 @@ static void plot_flood (VNG_TAB *t, int sx, int sy, bool barrier)
 			vng_tab_put(t, i, y, laying);
 
 		/* One push per RUN on each neighbouring row, not one per pixel. */
-		for (int dy = -1; dy <= 1; dy += 2) {
+		for (int dy = -1; dy <= 1 && !starved; dy += 2) {
 			int ny = y + dy;
 			if (ny < by0 || ny > by1) continue;
 
@@ -602,13 +717,23 @@ static void plot_flood (VNG_TAB *t, int sx, int sy, bool barrier)
 
 			for (int i = x0; i <= x1; i++) {
 				bool match = MATCH(nrow, i);
-				if (match && !run && top < cap) {
+				if (match && !run) {
+					if (top == cap) {
+						int *more = (cap < SDL_MAX_SINT32 / 4)
+						          ? (int *) SDL_realloc(stack, (size_t)cap * 4 * sizeof(int))
+						          : NULL;
+						if (!more) { starved = true; break; }
+						stack = more;
+						cap  *= 2;
+					}
 					stack[top * 2] = i; stack[top * 2 + 1] = ny; top++;
 				}
 				run = match;
 			}
 		}
 		#undef MATCH
+
+		if (starved) break;
 	}
 
 	SDL_free(stack);
@@ -621,18 +746,39 @@ static void plot_flood (VNG_TAB *t, int sx, int sy, bool barrier)
  */
 #define SPRAY_GRAIN 5
 
-static void plot_spray (VNG_TAB *t, int cx, int cy, int r)
+/* `dabs` random draws, each kept only if it falls inside the circle - the original's r x r
+   loop, which is where one frame's worth has always been r*r. */
+static void plot_spray (VNG_TAB *t, int cx, int cy, int r, int dabs)
 {
 	if (r < 1) r = 1;
 
-	for (int i = 0; i < r; i++) {
-		for (int j = 0; j < r; j++) {
-			int dx = SDL_rand(SPRAY_GRAIN * r + 1) - r;
-			int dy = SDL_rand(SPRAY_GRAIN * r + 1) - r;
+	for (int k = 0; k < dabs; k++) {
+		int dx = SDL_rand(SPRAY_GRAIN * r + 1) - r;
+		int dy = SDL_rand(SPRAY_GRAIN * r + 1) - r;
 
-			if (dx * dx + dy * dy < r * r)
-				put(t, cx + dx, cy + dy);
-		}
+		if (dx * dx + dy * dy < r * r)
+			put(t, cx + dx, cy + dy);
+	}
+}
+
+/* The same number of dabs spread along a path - a stop every half radius, each taking its
+   share - so the paint a frame owes lands where the can went and not only where it ended up. */
+static void spray_along (VNG_TAB *t, int x0, int y0, int x1, int y1, int r, int dabs)
+{
+	if (dabs <= 0) return;
+
+	int   dx = x1 - x0, dy = y1 - y0;
+	float len  = SDL_sqrtf((float)(dx * dx + dy * dy));
+	int   step = r / 2 > 1 ? r / 2 : 1;
+	int   stops = (int)(len / (float)step) + 1;
+
+	if (stops > dabs) stops = dabs;   /* never a stop with nothing to lay */
+
+	for (int k = 0; k < stops; k++) {
+		int share = dabs / stops + (k < dabs % stops ? 1 : 0);
+		int cx = stops > 1 ? x0 + dx * k / (stops - 1) : x1;
+		int cy = stops > 1 ? y0 + dy * k / (stops - 1) : y1;
+		plot_spray(t, cx, cy, r, share);
 	}
 }
 
@@ -655,6 +801,21 @@ static void plot_change (VNG_TAB *t, int cx, int cy)
 
 	Uint32 target = t->pixels[(size_t)cy * t->w + cx];
 	if (target == laying) return;
+
+	/*
+	 * AT SIZE ONE A COLOUR IS REPLACED ONCE PER STROKE, and the walk says so.
+	 *
+	 * The whole sheet is replaced in one pass, so a second pass for the same colour can only
+	 * find pixels this stroke has already marked. It used to make that pass anyway, on every
+	 * motion event of a slide - a full sweep of a photograph per event to change nothing. The
+	 * document is read, never the preview, so the colour under the hand stays the old one for
+	 * the whole stroke; remembering which ones are done is the only way to know.
+	 */
+	if (limiter == 0) {
+		for (int i = 0; i < changed_lot; i++)
+			if (changed[i] == target) return;
+		if (changed_lot < CHANGED_MAX) changed[changed_lot++] = target;
+	}
 
 	int r = size[T_CHANGE];
 
@@ -696,7 +857,8 @@ static void apply (VNG_TAB *t, int x, int y)
 	switch (current) {
 	case T_PENCIL:
 	case T_ERASER:  plot_line(t, last_x, last_y, x, y);        break;
-	case T_SPRAY:   plot_spray(t, x, y, size[T_SPRAY]);        break;
+	case T_SPRAY:   plot_spray(t, x, y, size[T_SPRAY],         /* the press: one frame's */
+	                           size[T_SPRAY] * size[T_SPRAY]);   break;
 	case T_LINE:
 		/* SHIFT snaps the far end to the pixel-art slopes before anything is drawn, so the
 		 * preview and the committed line are the same line. */
@@ -729,10 +891,71 @@ static void apply (VNG_TAB *t, int x, int y)
  *
  * The grips sit diagonally OUTSIDE the sheet's corners, so they never overlap the artwork -
  * nothing that can be drawn on is being refused here.
+ *
+ * AND SO ARE THE FLOATING WINDOWS AND THE PALETTE'S TWO GRIDS, which were not. A window
+ * parked over the sheet takes the press, and the pointer over it went on showing the
+ * crosshair, the tip's outline and - with SHIFT and the pencil - a line preview drawn under
+ * the window, all promising a stroke the next press would not make.
  */
 static bool over_panel (VNG_TAB *t, float mx, float my)
 {
-	return my < tabbar_height() || mx < sidebar_edge() || resize_hot(t);
+	return my < tabbar_height() || mx < sidebar_edge() || resize_hot_at(t, mx, my) ||
+	       win_hit(mx, my) ||
+	       ui_hit(palette_grid_area(), mx, my) || palette_grid_cursor(mx, my) != VNG_CUR_ARROW ||
+	       ui_hit(palette_quick_area(), mx, my);
+}
+
+/* Throws the hint away. Its undo step carried something, so it is rewound rather than
+ * closed - a preview must leave nothing behind, not even one step to press CTRL+Z on. */
+static void hint_drop (VNG_TAB *t)
+{
+	if (!hinting) return;
+
+	hinting = false;
+	owner   = 0;
+	vng_tab_stroke_reset(t);
+	vng_tab_stroke_close(t);   /* the step is empty now, so it is discarded */
+}
+
+void tool_settle (VNG_TAB *t)
+{
+	if (!t || !owner || t->id != owner) return;
+
+	if (hinting) hint_drop(t);
+
+	if (drawing) {
+		drawing = false;
+		vng_tab_stroke_close(t);
+	}
+	owner = 0;
+}
+
+/*
+ * THE TOOL IS BEING ASKED ABOUT `t` - IS WHAT IT HAS OPEN SOMEWHERE ELSE?
+ *
+ * Every way of changing sheets settles the old one first, so this should find nothing. It is
+ * here because the day something switches sheets without asking, the failure it prevents is
+ * silent: a stroke left open in a sheet nobody is looking at, merged into it later. So the
+ * sheet that owns the stroke is settled now - or, when it has been closed, the flags that
+ * described it are simply let go.
+ *
+ * And a stroke that was closed UNDER the tool - cancelled by a second one opening on the same
+ * sheet, or by its buffers being swapped - leaves the flags with nothing behind them. The hint
+ * reopens on the next frame by itself; a drag has lost its stroke and simply ends.
+ */
+static void follow (VNG_TAB *t)
+{
+	if (owner && (!t || t->id != owner)) {
+		VNG_TAB *o = vng_tab_by_id(owner);
+		if (o) tool_settle(o);
+		drawing = hinting = false;
+		owner   = 0;
+	}
+
+	if (t && (drawing || hinting) && !t->stroke) {
+		drawing = hinting = false;
+		owner   = 0;
+	}
 }
 
 /*
@@ -760,6 +983,8 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 {
 	if (!t) return false;
 
+	follow(t);
+
 	switch (e->type) {
 
 	case SDL_EVENT_KEY_DOWN: {
@@ -775,8 +1000,16 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 		TOOL want;
 		if (tool_key(e, &want)) {
 			/* A float is put down before the hand moves to another tool. Leaving one in the
-			 * air while a pencil draws under it is a document with two futures. */
-			if (want != current) select_commit(t);
+			 * air while a pencil draws under it is a document with two futures.
+			 *
+			 * And a stroke in progress is finished as the tool it was begun as: switching to
+			 * the line mid-drag used to go on with the SAME stroke under the new tool, which
+			 * wiped the pencil's pixels on the next motion and drew a line from where the
+			 * pencil had started. */
+			if (want != current) {
+				tool_settle(t);
+				select_commit(t);
+			}
 			current = want;
 			return true;
 		}
@@ -837,7 +1070,17 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 		 * is the camera's, and view.c hands this one over rather than zooming. */
 		if (!(keys_mods() & SDL_KMOD_SHIFT)) return false;
 
-		size[current] += e->wheel.integer_y * step[current];
+		/*
+		 * THE WHEEL'S DIRECTION IS THE CAMERA'S: a "natural" scrolling setting flips it, and
+		 * the zoom already turned it back - the tip size turned the other way from the zoom
+		 * on the same wheel. And macOS hands a SHIFTED vertical wheel to the program as a
+		 * HORIZONTAL one, so the notches arrive in x; a tip that never grew there was the
+		 * platform, not the hand.
+		 */
+		int notches = e->wheel.integer_y ? e->wheel.integer_y : e->wheel.integer_x;
+		if (e->wheel.direction == SDL_MOUSEWHEEL_FLIPPED) notches = -notches;
+
+		size[current] += notches * step[current];
 		if (size[current] < 1)       size[current] = 1;
 		if (size[current] > TIP_MAX) size[current] = TIP_MAX;
 
@@ -920,6 +1163,7 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 				plot_line(t, last_x, last_y, x, y);
 			}
 			hinting = false;
+			owner   = 0;
 			vng_tab_stroke_close(t);
 
 			last_x = anchor_x = x;
@@ -936,6 +1180,7 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 		 * those pixels were drawn and the person watched them appear. */
 		if (drawing) {
 			drawing = false;
+			owner   = 0;
 			vng_tab_stroke_close(t);
 		}
 
@@ -948,11 +1193,21 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 			return true;                       /* no memory for it; still ours */
 
 		drawing  = true;
+		owner    = t->id;
 		last_x   = anchor_x = x;
 		last_y   = anchor_y = y;
 
+		/* The spray's own clock starts here, and the press lays one frame's worth at once -
+		 * a click with the spray has to leave paint, however short it was. */
+		spray_x    = x;
+		spray_y    = y;
+		spray_owed = 0.0f;
+		changed_lot = 0;
+
 		if (current == T_PENCIL || current == T_ERASER) tip(t, x, y);
 		else                                            apply(t, x, y);
+
+		if (anchored(current)) shape_sig = sig_shape();
 
 		return true;
 	}
@@ -973,6 +1228,14 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 		int x, y;
 		pixel_of(t, e->motion.x, e->motion.y, &x, &y);
 
+		/* THE SPRAY IS LAID BY THE CLOCK, NOT BY THE EVENTS - see tool_frame_at. A motion only
+		 * says where the can has got to. */
+		if (current == T_SPRAY) {
+			last_x = x;
+			last_y = y;
+			return true;
+		}
+
 		/* A SHAPE IS REDRAWN, NOT ACCUMULATED. The line being dragged is the line from the
 		 * anchor to here, and the one from the previous motion event never existed. Throwing
 		 * the preview away first is what makes that true - and the undo step stays open
@@ -984,6 +1247,8 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 
 		last_x = x;
 		last_y = y;
+
+		if (anchored(current)) shape_sig = sig_shape();
 		return true;
 	}
 
@@ -998,6 +1263,7 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 		if (!drawing || e->button.button != button) return false;
 
 		drawing = false;
+		owner   = 0;
 		vng_tab_stroke_close(t);
 		return true;
 	}
@@ -1007,26 +1273,40 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 	}
 }
 
-/* Throws the hint away. Its undo step carried something, so it is rewound rather than
- * closed - a preview must leave nothing behind, not even one step to press CTRL+Z on. */
-static void hint_drop (VNG_TAB *t)
+void tool_frame (VNG_TAB *t)
 {
-	if (!hinting) return;
-
-	hinting = false;
-	vng_tab_stroke_reset(t);
-	vng_tab_stroke_close(t);   /* the step is empty now, so it is discarded */
+	float mx, my;
+	SDL_GetMouseState(&mx, &my);
+	tool_frame_at(t, mx, my);
 }
 
-void tool_frame (VNG_TAB *t)
+void tool_frame_at (VNG_TAB *t, float mx, float my)
 {
 	if (!t) return;
 
+	follow(t);
+
 	if (drawing) {
-		/* The spray is measured in time rather than in events: held still, it goes on
-		 * building up, which is what a spray can does. */
+		/*
+		 * THE SPRAY IS MEASURED IN TIME, AND NOW IT REALLY IS.
+		 *
+		 * It laid a fixed handful every FRAME and another every MOTION EVENT, so the same
+		 * second of spraying came out twice as dense on a 120Hz monitor as on a 60Hz one, and
+		 * denser again under a mouse that reports a thousand times a second. The quantity is a
+		 * rate now - one frame's worth at 60Hz for every sixtieth of a second, whatever the
+		 * frame actually was - and it is spread along the path the can travelled since the
+		 * last frame, so a quick stroke stays a stroke instead of becoming a row of blots.
+		 */
 		if (current == T_SPRAY) {
-			plot_spray(t, last_x, last_y, size[T_SPRAY]);
+			int r = size[T_SPRAY];
+
+			spray_owed += (float)(r * r) * vng_dt * SPRAY_HZ;
+			int n = (int)spray_owed;
+			spray_owed -= (float)n;
+
+			spray_along(t, spray_x, spray_y, last_x, last_y, r, n);
+			spray_x = last_x;
+			spray_y = last_y;
 			return;
 		}
 
@@ -1040,21 +1320,24 @@ void tool_frame (VNG_TAB *t)
 		 * what the modifiers had already done.
 		 *
 		 * The shape depends on more than where the pointer is, so it is rebuilt from all of
-		 * it, every frame. last_x/last_y hold the RAW pointer position - the snap is applied
-		 * to a copy inside apply - so re-running it here re-decides the snap rather than
-		 * baking in the old one.
+		 * it - WHEN ANY OF IT CHANGED. Rebuilding an unchanged shape sixty times a second wiped
+		 * and re-sent its whole rectangle each time; a rectangle dragged across a photograph
+		 * was megabytes a frame for a hand holding still. last_x/last_y hold the RAW pointer
+		 * position - the snap is applied to a copy inside apply - so re-running it here
+		 * re-decides the snap rather than baking in the old one.
 		 */
 		if (anchored(current)) {
-			vng_tab_stroke_reset(t);
-			apply(t, last_x, last_y);
+			SIG now = sig_shape();
+			if (!sig_same(&now, &shape_sig)) {
+				vng_tab_stroke_reset(t);
+				apply(t, last_x, last_y);
+				shape_sig = now;
+			}
 		}
 		return;
 	}
 
 	if (picking) return;
-
-	float mx, my;
-	SDL_GetMouseState(&mx, &my);
 
 	int x, y;
 	pixel_of(t, mx, my, &x, &y);
@@ -1068,10 +1351,16 @@ void tool_frame (VNG_TAB *t)
 		laying = colour[0];
 		if (!vng_tab_stroke_open(t, writes_through(laying))) return;
 		hinting = true;
+		owner   = t->id;
+		hint_sig.valid = false;
 	}
 
-	/* Redrawn from scratch every frame, exactly as a dragged shape is: the line is the one
-	 * from the last point to HERE, and the one from the previous frame never existed. */
+	/* Redrawn from scratch whenever it moved, exactly as a dragged shape is: the line is the
+	 * one from the last point to HERE, and the one from the previous frame never existed. */
+	SIG now = { true, x, y, last_x, last_y, size[T_PENCIL], 0 };
+	if (sig_same(&now, &hint_sig)) return;
+	hint_sig = now;
+
 	vng_tab_stroke_reset(t);
 	plot_line(t, last_x, last_y, x, y);
 }
@@ -1302,13 +1591,13 @@ static void outline (VNG_TAB *t, int px, int py)
  */
 
 /*
- * The swatch itself: two tones behind it, then the colour over them at its REAL alpha - the
- * desk's own trick. It is what makes "nothing" look like nothing instead of looking like
- * black, and a rect filled at alpha zero would simply not be there.
+ * The swatch itself: the desk's checkerboard behind it, then the colour over it at its REAL
+ * alpha - the desk's own trick. It is what makes "nothing" look like nothing instead of
+ * looking like black, and a rect filled at alpha zero would simply not be there.
  *
- * TWO HALVES AND NOT A CHECKERBOARD, because a swatch here is a RECTANGLE and a split down
- * the middle of one reads as the convention it is. The round version is
- * vangopix_desk_disc, and it uses the checkerboard for the reason recorded there.
+ * (This note used to say "two halves and not a checkerboard" over a body that lays the
+ * checkerboard - the reasoning below is the one that won, and a comment arguing for the loser
+ * is a comment the next reader believes.)
  */
 static void swatch (SDL_FRect r, Uint32 argb)
 {

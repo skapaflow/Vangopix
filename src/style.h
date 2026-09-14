@@ -103,10 +103,10 @@ extern VNG_STYLE vng_style;
 /*
  * Reads config.txt beside the executable, writing it first when it is not there.
  *
- * A FILE FROM AN OLDER BUILD IS READ AND THEN WRITTEN AGAIN, which is where this parts company
- * with keyboard.txt: that one is rewritten from the defaults and an edited key goes back to
- * where it was. Here every value the file still names is kept and the new settings join it,
- * so a person who spent an evening on their colours does not lose them to an upgrade.
+ * A FILE FROM AN OLDER BUILD IS READ AND THEN WRITTEN AGAIN: every value the file still names
+ * is kept and the new settings join it, so a person who spent an evening on their colours does
+ * not lose them to an upgrade. keyboard.txt used to part company with this and go back to its
+ * defaults; it keeps its keys the same way now.
  */
 extern void style_load (void);
 

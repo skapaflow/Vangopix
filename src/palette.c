@@ -426,16 +426,11 @@ bool palette_load (VNG_TAB *t, const char *name)
 
 static int clampi (int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
-static bool in_rect (SDL_FRect r, float x, float y)
-{
-	return x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h;
-}
-
 /* Which cell a point is in. False outside the grid ENTIRELY - which is the test the original
    meant to make and did not: it asked about its first cell only. */
 static bool cell_of (SDL_FRect g, int n, float x, float y, int *out)
 {
-	if (!in_rect(g, x, y)) return false;
+	if (!ui_hit(g, x, y)) return false;
 
 	int cx = (int)((x - g.x) / CELL);
 	int cy = (int)((y - g.y) / CELL);
@@ -586,7 +581,7 @@ static void box_body (SDL_FRect area, void *ctx)
 	text_print(vng_text_small,
 	           b.x + SDL_floorf((b.w - tw) * 0.5f),
 	           b.y + SDL_floorf((b.h - th) * 0.5f),
-	           in_rect(b, mx, my) ? 0xFF0000FFu : 0xFFFFFFFFu, BTN_TEXT);
+	           ui_hit(b, mx, my) ? 0xFF0000FFu : 0xFFFFFFFFu, BTN_TEXT);
 }
 
 static bool box_event (SDL_FRect area, const SDL_Event *e, void *ctx)
@@ -607,12 +602,12 @@ static bool box_event (SDL_FRect area, const SDL_Event *e, void *ctx)
 	if (e->type == SDL_EVENT_MOUSE_BUTTON_UP) {
 		if (!btn_armed) return false;
 		btn_armed = false;
-		if (in_rect(b, x, y)) list_open();
+		if (ui_hit(b, x, y)) list_open();
 		return true;
 	}
 	if (e->type == SDL_EVENT_MOUSE_MOTION) return btn_armed;
 
-	if (e->button.button == SDL_BUTTON_LEFT && in_rect(b, x, y)) {
+	if (e->button.button == SDL_BUTTON_LEFT && ui_hit(b, x, y)) {
 		btn_armed = true;
 		return true;
 	}
@@ -651,6 +646,17 @@ static void bands (SDL_FRect g, SDL_FRect *e, SDL_FRect *s, SDL_FRect *c)
 static bool grip_x = false, grip_y = false;
 
 /*
+ * THE BUTTON WHOSE PRESS THE GRID TOOK, so it takes that release and no other.
+ *
+ * The release used to be claimed whenever it landed on the grid. A drag that began on the
+ * SHEET and was let go over the swatches - a pencil stroke, a pan, a selection being pulled
+ * out, a corner grip - never heard its own button come up: the pencil went on drawing with no
+ * button held, the pan followed the pointer about, and a grip held that way resized the
+ * canvas on whatever click came next. A layer only ever ends the gestures it began.
+ */
+static Uint8 grid_took = 0;
+
+/*
  * THE POINTER IS THE ONLY THING THAT SAYS THE BANDS ARE THERE. They are eight pixels of
  * nothing lying over the last column and the last row, so without the cursor changing shape
  * there is no way to find out they exist except by dragging and seeing what happens - and a
@@ -672,9 +678,9 @@ VNG_CURSOR palette_grid_cursor (float x, float y)
 	SDL_FRect edge, side, corner;
 	bands(palette_grid_area(), &edge, &side, &corner);
 
-	if (in_rect(corner, x, y)) return VNG_CUR_NWSE;
-	if (in_rect(edge,   x, y)) return VNG_CUR_WE;
-	if (in_rect(side,   x, y)) return VNG_CUR_NS;
+	if (ui_hit(corner, x, y)) return VNG_CUR_NWSE;
+	if (ui_hit(edge,   x, y)) return VNG_CUR_WE;
+	if (ui_hit(side,   x, y)) return VNG_CUR_NS;
 
 	return VNG_CUR_ARROW;
 }
@@ -705,8 +711,14 @@ bool palette_grid_event (const SDL_Event *e, VNG_TAB *t)
 	bands(g, &edge, &side, &corner);
 
 	if (e->type == SDL_EVENT_MOUSE_BUTTON_UP) {
-		if (!grip_x && !grip_y) return in_rect(g, x, y);
-		grip_x = grip_y = false;
+		if (grip_x || grip_y) {
+			grip_x = grip_y = false;
+			grid_took = 0;
+			return true;
+		}
+		/* Only the release of a press this grid took - see grid_took. */
+		if (!grid_took || e->button.button != grid_took) return false;
+		grid_took = 0;
 		return true;
 	}
 
@@ -727,13 +739,15 @@ bool palette_grid_event (const SDL_Event *e, VNG_TAB *t)
 	/* A press, and the bands answer before the cells: they lie over the last column and the
 	 * last row, and a hand at the edge of a grid means to pull it. */
 	if (e->button.button == SDL_BUTTON_LEFT) {
-		if (in_rect(corner, x, y)) { grip_x = grip_y = true; return true; }
-		if (in_rect(edge,   x, y)) { grip_x = true;          return true; }
-		if (in_rect(side,   x, y)) { grip_y = true;          return true; }
+		if (ui_hit(corner, x, y)) { grip_x = grip_y = true; return true; }
+		if (ui_hit(edge,   x, y)) { grip_x = true;          return true; }
+		if (ui_hit(side,   x, y)) { grip_y = true;          return true; }
 	}
 
 	int i;
 	if (!cell_of(g, cols, x, y, &i)) return false;
+
+	grid_took = e->button.button;
 
 	bool ctrl  = (keys_mods() & SDL_KMOD_CTRL) != 0;
 	bool right = (e->button.button == SDL_BUTTON_RIGHT);
@@ -842,7 +856,7 @@ static void list_body (SDL_FRect area, void *ctx)
 		float y = area.y + (float)j * ROW;
 
 		SDL_FRect row = { area.x, y, area.w, ROW };
-		bool hot = in_rect(row, mx, my);
+		bool hot = ui_hit(row, mx, my);
 
 		/* Hovered: framed in white with white text; otherwise orange. The original's own two
 		 * states, and the frame is what says a row is a thing that can be pressed. */
@@ -906,6 +920,20 @@ static void list_open (void)
 bool palette_list_visible (void) { return win_visible(list); }
 
 /*
+ * THE BOX GOING AWAY TAKES WHAT BELONGS TO IT: the list it opened, and whatever the grid beside
+ * it was in the middle of. It used to happen on P and not on the box's own close dot, which is
+ * win.c's - so closing the box that way left the list parked on its own, belonging to nothing.
+ */
+static void box_hidden (void *ctx)
+{
+	(void)ctx;
+	if (list) win_show(list, false);
+	grip_x = grip_y = false;
+	grid_took = 0;
+	btn_armed = false;
+}
+
+/*
  * IT COMES UP UNDER THE POINTER, centred on it - the first Vangopix's behaviour for every
  * summoned window, and the same reason as the 1:1 panel and the colour wheel.
  */
@@ -917,8 +945,7 @@ void palette_toggle (void) {
 	if (box) {
 		bool on = !win_visible(box);
 		if (on) win_place(box, mx, my);
-		else if (list) win_show(list, false);   /* the list belongs to the box */
-		win_show(box, on);
+		win_show(box, on);   /* the list goes with it - see box_hidden */
 		return;
 	}
 
@@ -927,6 +954,7 @@ void palette_toggle (void) {
 
 	box = win_open("palette", a, m, box_body, box_event, NULL);
 	win_fixed(box, true);
+	win_on_hide(box, box_hidden);
 	win_place(box, mx, my);
 }
 
@@ -937,6 +965,7 @@ bool palette_visible (void) {return win_visible(box);}
 static bool       quick_on = false;
 static SDL_FPoint anchor   = {0.0f, 0.0f};
 static Uint32     keep     = 0u;
+static Uint8      quick_took = 0;   /* the press it took, for the reason grid_took gives */
 
 /*
  * POLLED THROUGH keys_mods AND NOT READ OFF THE EVENT, which is the contract keys.h states:
@@ -953,7 +982,7 @@ static void quick_check (void) {
 	if (on == quick_on) return;
 
 	quick_on = on;
-	if (!on) return;
+	if (!on) { quick_took = 0; return; }   /* gone with the grid, whatever it had taken */
 
 	SDL_GetMouseState(&anchor.x, &anchor.y);
 	keep = tool_colour(0);
@@ -1019,10 +1048,21 @@ bool palette_quick_event (const SDL_Event *e, VNG_TAB *t) {
 		return false;
 	}
 
+	/* A release is this grid's only when the press was - see grid_took. Asked before where it
+	 * landed: the press may have come up anywhere, and a drag that started on the sheet and
+	 * ends over the swatches is not the grid's to end. */
+	if (e->type == SDL_EVENT_MOUSE_BUTTON_UP) {
+		if (!quick_took || e->button.button != quick_took) return false;
+		quick_took = 0;
+		return true;
+	}
+
 	int i;
 	if (!cell_of(palette_quick_area(), cols, x, y, &i)) return false;
 
-	if (e->type != SDL_EVENT_MOUSE_BUTTON_DOWN) return true;
+	if (e->type != SDL_EVENT_MOUSE_BUTTON_DOWN) return true;   /* the wheel, over the grid */
+
+	quick_took = e->button.button;
 	if (i >= palette_lot(t)) return true;
 
 	Uint32 c = palette_at(t, i);

@@ -35,7 +35,8 @@
  * are dropped first, and the step being stood on is never dropped.
  */
 
-typedef struct _vng_undo_ VNG_UNDO;
+/* VNG_UNDO is declared in tabs.h, which holds one per tab; a second typedef of it here would not
+   be legal C99. undo.c owns the struct. */
 
 /* Frees the whole stack, including every buffer a resize step is holding. */
 extern void undo_free (VNG_UNDO *u);
@@ -69,5 +70,10 @@ extern bool undo_redo (VNG_TAB *t);
 /* Remembers the step the document was saved at, so undoing back to it clears the dirty
    mark instead of leaving a star on a file that matches its disk copy exactly. */
 extern void undo_mark_saved (VNG_TAB *t);
+
+/* The ceiling on what one document's history may hold, in bytes; 0 puts back the built-in
+   one. There for the checks, which need to watch the oldest step fall off without first
+   drawing a hundred and twenty-eight megabytes of strokes. */
+extern void undo_budget (size_t bytes);
 
 #endif

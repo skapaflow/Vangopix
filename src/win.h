@@ -76,6 +76,18 @@ extern void win_clip   (VNG_WIN *w);
 extern void win_show    (VNG_WIN *w, bool on);
 
 /*
+ * TOLD WHEN THE WINDOW GOES AWAY, however it goes - its own close dot included.
+ *
+ * The close dot is this file's, and its owner never heard about it. The colour window put its
+ * hex box away when C hid it, and not when the dot did: the box went on holding the keyboard
+ * with no caret anywhere on screen, and every bare shortcut in the program was dead until
+ * somebody guessed at ESC. The palette's list outlived the box it belongs to the same way, and
+ * the clip editor outlived its player. One hook, called on the way from shown to hidden.
+ */
+typedef void (*WIN_HIDE) (void *ctx);
+extern void win_on_hide (VNG_WIN *w, WIN_HIDE fn);
+
+/*
  * Puts the WHOLE window - head bar included - centred on a point, and keeps it reachable.
  *
  * What summoning a window calls with the pointer's position, which is the first Vangopix's
@@ -95,6 +107,11 @@ extern VNG_WIN *win_top (void);
    outside its own draw, like where on the sheet it is looking. */
 extern SDL_FRect win_area  (VNG_WIN *w);
 extern bool      win_hover (VNG_WIN *w);
+
+/* Is any window showing at that point - which is to say, would a press there be a window's.
+   What the tool asks before it offers a crosshair, an outline or a line preview: a pointer
+   must not promise a stroke that the next press will not make. */
+extern bool      win_hit   (float x, float y);
 
 /*
  * The WHOLE window, head bar and border included.

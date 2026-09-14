@@ -301,7 +301,7 @@ bool field_press (VNG_FIELD *f, SDL_FRect r, float x, float y, const char *show)
 {
 	if (!f) return false;
 
-	if (x < r.x || y < r.y || x >= r.x + r.w || y >= r.y + r.h) return false;
+	if (!ui_hit(r, x, y)) return false;
 
 	/* IT OPENS HOLDING WHAT IT WAS SHOWING, and not its own buffer. The two are the same only
 	 * after somebody has typed into this box once; before that the buffer is empty, so a box

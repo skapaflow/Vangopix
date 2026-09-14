@@ -75,6 +75,20 @@ extern float ui_close (void);
 extern float ui_grip (void);
 
 /*
+ * IS (x, y) INSIDE r - HALF OPEN: the left and top edges are in, the right and bottom are not.
+ *
+ * Five files carried their own copy of this line, as an `in_rect`, as a HOT() and a HIT()
+ * macro, and written out inline. One place, because the half-open rule is what makes two
+ * rectangles laid edge to edge - two list rows, two cells - share no pixel, and a copy that
+ * slipped to <= would give the pixel on the seam to both. SDL_PointInRectFloat is not this:
+ * it counts the far edge in.
+ */
+static inline bool ui_hit (SDL_FRect r, float x, float y)
+{
+	return x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h;
+}
+
+/*
  * THE MARK THAT CLOSES A THING, DRAWN IN ONE PLACE BECAUSE IT IS IN FOUR.
  *
  * A window's head bar, a tab, a project folder in the sidebar and a clip in the animation

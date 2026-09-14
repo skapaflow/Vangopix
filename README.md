@@ -66,7 +66,8 @@ art. It is linked because Vangopix is meant to open anything.
 Everything on one key with no modifier can be moved: `keyboard.txt` sits beside the
 executable, holds `action = KEY`, and is written again from the defaults whenever it is
 deleted. It cannot reword what a key does, only move it — so the list on screen and the
-program cannot disagree.
+program cannot disagree. Swapping two keys is two lines, and a file written by an older
+version keeps the keys it moved.
 
 | | |
 | --- | --- |

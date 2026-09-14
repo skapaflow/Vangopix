@@ -10,6 +10,10 @@ extern void vangopix_input (void);   /* drain the event queue */
 extern void vangopix_core  (void);   /* draw and present      */
 extern void vangopix_core_free (void); /* the frame's own textures */
 
+/* A new sheet, at a size the person is asked for - CTRL+N, and the [+] at the end of the row
+   of sheets, which is the same gesture made with the hand already on the bar. */
+extern void vangopix_new_sheet_ask (void);
+
 /* Tiles the desk into a rectangle. What anything that has to show NOTHING over the sheet
    needs - the selection's hole, so far. Exposed rather than copied because two checkerboards
    in one program would drift apart the first time one of the greys was tuned. */

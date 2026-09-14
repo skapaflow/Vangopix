@@ -1,9 +1,14 @@
 #include "undo.h"
+#include "select.h"
 
 /* Enough for a long afternoon of strokes, small enough that a runaway fill cannot take
  * the machine with it. A pencil stroke is kilobytes; the ceiling exists for the bucket
  * on a large canvas and for the resize step, which holds a whole buffer. */
 #define BUDGET  (128u * 1024u * 1024u)
+
+static size_t budget = BUDGET;
+
+void undo_budget (size_t bytes) { budget = bytes ? bytes : BUDGET; }
 
 typedef enum { STEP_PIXELS, STEP_RESIZE } STEP_KIND;
 
@@ -95,17 +100,33 @@ static void drop_redo (VNG_UNDO *u)
 
 /* Oldest first, and never the step being stood on - the one thing a person is about to
  * press CTRL+Z on. A single step larger than the whole budget is kept: one huge undo is
- * still better than none. */
+ * still better than none.
+ *
+ * WHAT IT DOES TO THE SAVED MARK IS THE PART THAT HAS TO BE EXACT, because the star is the
+ * only thing that stops CTRL+W closing a changed file without asking.
+ *
+ * `saved == NULL` means "saved with everything undone" - the state BEFORE the oldest step.
+ * Dropping that step makes that state unreachable: undoing everything now stops one step
+ * short of it. It used to go on answering NULL == NULL once everything was undone, and a
+ * document still carrying the dropped change reported itself clean - so it closed without a
+ * question, and the change went with it. Now it is lost, and the star stays.
+ *
+ * The other way round is merely conservative: the saved mark ON the dropped step means the
+ * state after it, and after it is exactly the new "everything undone". So the mark moves to
+ * NULL instead of being lost, and undoing back there clears the star as it should. */
 static void trim (VNG_UNDO *u)
 {
-	while (u->bytes > BUDGET && u->head && u->head != u->top) {
+	while (u->bytes > budget && u->head && u->head != u->top) {
 		STEP *s = u->head;
 
 		u->head = s->next;
 		if (u->head) u->head->prev = NULL; else u->tail = NULL;
 
 		u->bytes -= s->bytes;
-		if (s == u->saved) u->saved_lost = true;
+
+		if      (u->saved == NULL) u->saved_lost = true;
+		else if (u->saved == s)    u->saved = NULL;
+
 		step_free(s);
 	}
 }
@@ -126,6 +147,25 @@ static void push (VNG_TAB *t, VNG_UNDO *u, STEP *s)
 }
 
 /* ------------------------------------------------------------------ pixel steps */
+
+/* The rectangle a step's carries span, handed to the texture - so an undo re-sends what it
+ * changed and not the sheet. Measured in its own pass rather than inside the loops that write:
+ * those have to stay in the order that makes a pixel written twice come out right, and this is
+ * the same answer in any order. */
+static void touch_carries (VNG_TAB *t, const STEP *s)
+{
+	if (s->lot <= 0) return;
+
+	int x0 = s->carry[0].x, y0 = s->carry[0].y, x1 = x0, y1 = y0;
+	for (int i = 1; i < s->lot; i++) {
+		const CARRY *c = &s->carry[i];
+		if (c->x < x0) x0 = c->x;
+		if (c->y < y0) y0 = c->y;
+		if (c->x > x1) x1 = c->x;
+		if (c->y > y1) y1 = c->y;
+	}
+	vng_tab_touch(t, x0, y0, x1 - x0 + 1, y1 - y0 + 1);
+}
 
 bool undo_open (VNG_TAB *t)
 {
@@ -183,8 +223,8 @@ void undo_rewind (VNG_TAB *t)
 		t->pixels[(size_t)c->y * t->w + c->x] = c->was;
 	}
 
+	touch_carries(t, s);
 	s->lot = 0;             /* the allocation is kept: the next pass will refill it */
-	t->tex_dirty = true;
 }
 
 void undo_close (VNG_TAB *t)
@@ -238,7 +278,7 @@ static void apply_pixels (VNG_TAB *t, STEP *s, bool forward)
 
 		t->pixels[(size_t)c->y * t->w + c->x] = forward ? c->now : c->was;
 	}
-	t->tex_dirty = true;
+	touch_carries(t, s);
 }
 
 bool undo_undo (VNG_TAB *t)
@@ -260,10 +300,12 @@ bool undo_undo (VNG_TAB *t)
 		SDL_free(now);
 		s->was = NULL;               /* the document owns it again */
 
-		/* The resize shifted the camera so the drawing would not jump. Undoing it has
-		 * to shift back, for exactly the same reason. */
+		/* The resize shifted the camera so the drawing would not jump, and the marked
+		 * rectangle so it would stay on the same pixels. Undoing it has to shift both
+		 * back, for exactly the same reasons. */
 		t->off_x -= s->dx;
 		t->off_y -= s->dy;
+		select_shift(t, -s->dx, -s->dy);
 	}
 
 	u->top = s->prev;
@@ -293,6 +335,7 @@ bool undo_redo (VNG_TAB *t)
 
 		t->off_x += s->dx;
 		t->off_y += s->dy;
+		select_shift(t, s->dx, s->dy);
 	}
 
 	u->top = s;

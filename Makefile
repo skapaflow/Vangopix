@@ -16,7 +16,10 @@ ifeq ($(OS),Windows_NT)
     RMBUILD    = if exist $(OBJDIR) rmdir /S /Q $(OBJDIR)
     SDL3      ?= C:/SDL3
     SDL3IMG   ?= C:/SDL3_image
-    SDL_CFLAGS = -I$(SDL3)/include -I$(SDL3IMG)/include
+    # -isystem and not -I: SDL's headers are not this program's, so a warning inside one is
+    # not a warning about this code - and the compiler leaves them out of the dependency files
+    # below, which keeps drive letters out of make's view of the tree.
+    SDL_CFLAGS = -isystem $(SDL3)/include -isystem $(SDL3IMG)/include
     SDL_LIBS   = -L$(SDL3)/lib -L$(SDL3IMG)/lib -lSDL3 -lSDL3_image
     # Windows resource: the exe/window icon plus VERSIONINFO. It joins the LINK as if it
     # were an object file - not a header, not a library, a COFF blob the linker appends.
@@ -41,8 +44,22 @@ endif
 ifeq ($(origin CC),default)
     CC = gcc
 endif
-CFLAGS  = -Wall -Wextra -O2 -Isrc $(SDL_CFLAGS)
+
+# -std=c99 because C99 is what this program says it is written in, and a compiler left to its
+# own default accepts C11 without a word: a second typedef of the same name, for one, which
+# undo.h and select.h both had and which C99 does not allow.
+#
+# -MMD -MP write a .d beside every object naming the headers it actually included - see the
+# note at the object rule.
+CFLAGS  = -std=c99 -Wall -Wextra -O2 -Isrc $(SDL_CFLAGS) -MMD -MP
 LFLAGS  = $(SDL_LIBS)
+
+# `make WERROR=1` - what the CI builds with. Not the default: a warning a newer compiler
+# invents should not stop somebody building the program on their own machine; it should stop
+# a change from going in.
+ifdef WERROR
+    CFLAGS += -Werror
+endif
 
 # One file per RESPONSIBILITY, never per size.
 #   main.c     the pipeline, and nothing else
@@ -76,7 +93,6 @@ LFLAGS  = $(SDL_LIBS)
 #   text.c     glyphs packed into one atlas by stb_truetype
 OBJDIR = build
 SRC = src/main.c src/vangopix.c src/core.c src/keys.c src/tabs.c src/tabbar.c src/view.c src/resize.c src/project.c src/sidebar.c src/prompt.c src/file.c src/undo.c src/tool.c src/select.c src/thumb.c src/win.c src/colour.c src/palette.c src/primitives.c src/ui.c src/field.c src/expr.c src/keymap.c src/style.c src/splash.c src/anim.c src/glyph.c src/text.c
-DEP = $(wildcard src/*.h)
 OBJ = $(SRC:src/%.c=$(OBJDIR)/%.o)
 
 all: $(OUT) run
@@ -89,17 +105,20 @@ all: $(OUT) run
 # They go in build/ rather than beside the sources: src/ holds what was written, and a
 # directory that mixes the two makes `ls` useless and one stray *.o in a commit likely.
 # `make clean` throws the whole directory away, which is also the only honest way to force
-# a full rebuild.
+# a full rebuild - after a change to CFLAGS, say, which make does not track.
 #
-# $(DEP) - every header - is on EVERY object rather than the real per-file dependency. It
-# is coarse: touching one header rebuilds all twenty, exactly as before. But the failure it
-# prevents is the one worth being crude about - two translation units holding different
-# views of the same struct, which is silent corruption surfacing far from its cause. The
-# precise answer is the compiler's own -MMD depfiles, and that is a change to make when
-# the header set is big enough to feel it.
+# EACH OBJECT DEPENDS ON THE HEADERS IT ACTUALLY INCLUDES, as the compiler reports them in the
+# .d written beside it (-MMD), with an empty rule per header (-MP) so deleting one is not an
+# error. Every object used to depend on EVERY header, on purpose: coarse, but it made two
+# translation units holding different views of one struct impossible. The depfiles give the
+# same guarantee exactly - a header changed rebuilds every object that read it - and at thirty
+# headers the crude version had become a full rebuild for any edit to any of them.
 #
-$(OBJDIR)/%.o: src/%.c $(DEP) | $(OBJDIR)
+$(OBJDIR)/%.o: src/%.c | $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
+
+# Not there on a first build, and then the objects are being made from nothing anyway.
+-include $(OBJ:.o=.d) $(OBJDIR)/checks.d
 
 $(OBJDIR):
 	@$(MKBUILD)
@@ -122,7 +141,7 @@ run: $(OUT)
 # nothing. main.o is the only one left out: two mains do not link.
 TEST_OBJ = $(filter-out $(OBJDIR)/main.o,$(OBJ))
 
-$(OBJDIR)/checks.o: test/checks.c $(DEP) | $(OBJDIR)
+$(OBJDIR)/checks.o: test/checks.c | $(OBJDIR)
 	$(CC) $(CFLAGS) -c test/checks.c -o $@
 
 #
@@ -195,7 +214,12 @@ ifeq ($(OS),Windows_NT)
 # runs. It is gone, and this is where it went - a second copy of a build command is a
 # command that goes stale silently, because the copy nobody runs is the copy nobody
 # notices is wrong.
-$(RES): icon/recicon.rc icon/vangopix.ico
+#
+# src/version.h is a source of it too: the .rc includes it for FILEVERSION and the version
+# strings. Left off this line, raising the version rebuilt the program and not the resource,
+# and the exe went on telling Windows's Properties dialog the old number - the drift version.h
+# was written to make impossible.
+$(RES): icon/recicon.rc icon/vangopix.ico src/version.h
 	windres -i icon/recicon.rc --input-format=rc --target=pe-x86-64 -o $(RES) -O coff
 
 # `make icon` - the resource on its own, without waiting for a link.

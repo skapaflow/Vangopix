@@ -99,6 +99,22 @@
 #define VNG_ANIM_MAX   64
 #define VNG_ANIM_NAME  32
 
+/*
+ * AND WHAT A CLIP MAY SAY, because every number in one reaches a loop.
+ *
+ * The frame count is how many rectangles the sheet grid draws every frame, and a count typed
+ * as two billion drew two billion - the program stopped. The speed divides the clock, and one
+ * typed as 0.0000000001 made the playhead's wrap subtract a number too small to change a float,
+ * for ever. Out of range is PULLED IN, the way config.txt treats a font of sixty: somebody who
+ * types a huge count wants a long clip, and the longest one there is answers that.
+ */
+#define VNG_ANIM_FRAMES_MAX  1024
+#define VNG_ANIM_SPEED_MIN   0.001f   /* a thousand frames a second is past any screen */
+#define VNG_ANIM_SPEED_MAX   60.0f    /* a minute on one frame is a still */
+
+/* The clips of ONE drawing - see tabs.h on why they are per tab. What vng_tab_close frees. */
+extern void anim_tab_free (VNG_ANIM *a);
+
 extern void anim_toggle  (void);
 extern bool anim_visible (void);
 
@@ -126,7 +142,8 @@ extern void anim_tick (void);
 extern int anim_frame_at (float t, int frames, float speed);
 
 /*
- * Reads a .anime into the clip list and returns how many came in.
+ * Reads a .anime into the clip list of the sheet ON SCREEN and returns how many came in - 0,
+ * and nothing read, when there is no sheet to hold them.
  *
  * It REPLACES the list on success and LEAVES IT ALONE on failure - losing the clips in hand
  * because a path was mistyped is the worse of the two answers, and the original did neither
@@ -141,9 +158,13 @@ extern int anim_frame_at (float t, int frames, float speed);
  * the end of three separate things.
  */
 extern int anim_load (const char *path);
-extern int anim_lot  (void);
+extern int anim_lot  (void);   /* of the sheet on screen */
 
-/* Name of clip i, or "" - never off the end. */
+/* Name of clip i of the sheet on screen, or "" - never off the end. */
 extern const char *anim_name (int i);
+
+/* The frame count of the clip in hand on the sheet on screen - what a check reads to see that
+   an absurd count typed into the editor came out as one that can be drawn. */
+extern int anim_frames (void);
 
 #endif

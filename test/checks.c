@@ -26,6 +26,8 @@
 #include "expr.h"
 #include "splash.h"
 #include "style.h"
+#include "keymap.h"
+#include "prompt.h"
 
 /* Text and ENTER, the way core.c hands them to whoever owns the keyboard. */
 static void typed (const char *t)
@@ -544,8 +546,9 @@ int main (void)
 		/* Bare R is the ellipse and SHIFT+R is a colour - the bare test keeps them apart. */
 		key(k, SDLK_R, SDL_KMOD_NONE);
 		ok("bare R is still the ellipse", tool_current() == T_ELLIPSE);
-		key(k, SDLK_M, SDL_KMOD_CTRL);
-		ok("CTRL+M is not the mix", true);   /* it simply is not claimed */
+		Uint32 before_mix = tool_colour(0);
+		ok("CTRL+M is not the mix - it is not claimed, and the colour stays",
+		   !key(k, SDLK_M, SDL_KMOD_CTRL) && tool_colour(0) == before_mix);
 	}
 
 	/* ---- SHIFT snaps a line to the pixel-art slopes ---- */
@@ -927,10 +930,18 @@ int main (void)
 		ok("a rect drawn round the outside of it changes nothing",
 		   SDL_memcmp(m->pixels, blank, sizeof blank) == 0 && undo_undo(m) == false);
 
-		/* The spray is random, and the claim is not: wherever it lands, it lands inside. */
+		/* The spray is random, and the claim is not: wherever it lands, it lands inside.
+		 *
+		 * The frames run on a clock, because the spray is measured in time now - a frame lays
+		 * what a sixtieth of a second owes, and the suite's own clock stands at zero. */
 		key(m, SDLK_D, SDL_KMOD_NONE);
 		mouse(m, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 6, 6);
-		for (int i = 0; i < 8; i++) tool_frame(m);
+		{
+			float was_dt = vng_dt;
+			vng_dt = 1.0f / 60.0f;
+			for (int i = 0; i < 8; i++) tool_frame(m);
+			vng_dt = was_dt;
+		}
 		mouse(m, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 6, 6);
 		TALLY(in, out);
 		ok("THE SPRAY LANDS ONLY INSIDE", in > 0 && out == 0);
@@ -2347,7 +2358,7 @@ int main (void)
 	{
 		/* A colour on the sheet that nothing else in this file uses. */
 		t->pixels[0] = 0xFF3C7A1Eu;
-		t->tex_dirty = true;
+		vng_tab_touch(t, 0, 0, 1, 1);
 
 		if (colour_visible()) colour_toggle();
 		ok("the wheel starts down", colour_visible() == false);
@@ -2634,9 +2645,9 @@ int main (void)
 			VNG_WIN *ed = win_top();
 			ok("NEW opens the editor over the player", ed != NULL && win_area(ed).h > a.h);
 
-			/* Counted rather than assumed: putting the window up reads whatever .anime sits
-			 * beside the exe, and on a machine that has one this list is not empty. What is
-			 * checked is the clip THIS gesture made, wherever it lands. */
+			/* Counted rather than assumed: the list is whatever the sheet on screen already
+			 * holds - read from the .vnganime beside its image, or loaded above - and it need
+			 * not be empty. What is checked is the clip THIS gesture made, wherever it lands. */
 			int held = anim_lot();
 
 			SDL_FRect b = win_area(ed);
@@ -3457,6 +3468,804 @@ int main (void)
 
 		#undef SUBS
 		#undef FILES
+	}
+
+	/* ==== WHAT CROSSED A BOUNDARY IT SHOULD NOT HAVE ====
+	 *
+	 * Every block below is one fault found by reading the program end to end, driven the way the
+	 * gesture drives it, and failing without its fix. Most of them live between two modules -
+	 * state in flight between events, met by an operation that did not know it was there.
+	 */
+
+	/* ---- A SHEET LEFT WITH THE SHIFT PREVIEW UP KEEPS NOTHING OF IT ----
+	 *
+	 * The pencil's SHIFT line is a real stroke, open between frames, and CTRL+SHIFT+TAB arrives
+	 * with SHIFT held - so it switched sheets with that stroke still open in the old one. The
+	 * next stroke drawn there merged the forgotten preview in; in a colour with alpha the
+	 * preview had been written straight into the sheet, with no step to undo it.
+	 */
+	{
+		VNG_TAB *a = vng_tab_new(16, 16);
+		VNG_TAB *b = vng_tab_new(16, 16);
+		view_sheet_rect(a);
+		view_sheet_rect(b);
+		vng_tab_show(a);
+
+		Uint32 was0 = tool_colour(0);
+		tool_set_colour(0, 0xFF102030u);
+		tool_set(T_PENCIL);
+
+		/* The last point, which is where the preview runs from. */
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 2, 2);
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 2, 2);
+
+		Uint32 before[16 * 16];
+		SDL_memcpy(before, a->pixels, sizeof before);
+
+		SDL_SetModState(SDL_KMOD_LSHIFT);
+		SDL_FPoint s = view_world_to_screen(a, 12.5f, 2.5f);
+		tool_frame_at(a, s.x, s.y);
+		ok("the SHIFT preview is a stroke, open on the sheet", a->stroke);
+
+		vng_tab_show(b);                         /* what CTRL+SHIFT+TAB comes down to */
+		SDL_SetModState(SDL_KMOD_NONE);
+		ok("SWITCHING SHEETS ENDS THE PREVIEW IN THE ONE BEING LEFT", !a->stroke);
+		ok("and leaves the sheet as it was", SDL_memcmp(a->pixels, before, sizeof before) == 0);
+
+		/* A stroke whose rectangle covers the whole of the old preview - before, it merged the
+		 * preview's pixels in with its own. Row 2 of this line is near x = 10; the preview
+		 * ran along row 2 from x = 2. */
+		vng_tab_show(a);
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 15, 0);
+		mouse(a, SDL_EVENT_MOUSE_MOTION,      0,               0,  6);
+		mouse(a, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 0,  6);
+		ok("AND NO LATER STROKE MERGES WHAT IT LEFT",
+		   a->pixels[2 * 16 + 5] == before[2 * 16 + 5] &&
+		   a->pixels[2 * 16 + 7] == before[2 * 16 + 7]);
+		undo_undo(a);
+
+		/* The same in a colour with alpha, whose preview is written THROUGH as it is shown. */
+		tool_set_colour(0, 0x80FF0000u);
+		SDL_memcpy(before, a->pixels, sizeof before);
+
+		SDL_SetModState(SDL_KMOD_LSHIFT);
+		tool_frame_at(a, s.x, s.y);
+		ok("a preview with alpha is written through, so it can be seen",
+		   SDL_memcmp(a->pixels, before, sizeof before) != 0);
+
+		vng_tab_show(b);
+		SDL_SetModState(SDL_KMOD_NONE);
+		ok("AND IT IS TAKEN BACK OUT WHEN THE SHEET IS LEFT",
+		   SDL_memcmp(a->pixels, before, sizeof before) == 0);
+
+		tool_set_colour(0, was0);
+	}
+
+	/* ---- CTRL+Z IN THE MIDDLE OF A RUB-OUT ----
+	 *
+	 * The eraser writes through, carrying as it goes. Undo pressed mid-stroke found the stroke
+	 * still open - nothing to undo on a fresh sheet - and on a sheet with history undid a step
+	 * underneath it, which the stroke's own rewind then overwrote a frame later. The stroke is
+	 * finished first now, so CTRL+Z takes back exactly it.
+	 */
+	{
+		VNG_TAB *g = vng_tab_new(20, 20);
+		view_sheet_rect(g);
+
+		Uint32 blank[20 * 20];
+		SDL_memcpy(blank, g->pixels, sizeof blank);
+
+		key(g, SDLK_A, SDL_KMOD_NONE);
+		mouse(g, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 5,  5);
+		mouse(g, SDL_EVENT_MOUSE_MOTION,      0,               12, 5);
+
+		vng_tab_settle(g);                      /* what CTRL+Z does first, in core.c */
+		ok("CTRL+Z MID-STROKE TAKES THAT STROKE BACK, EXACTLY",
+		   undo_undo(g) && SDL_memcmp(g->pixels, blank, sizeof blank) == 0);
+
+		mouse(g, SDL_EVENT_MOUSE_MOTION,      0,               14, 5);
+		mouse(g, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 14, 5);
+		ok("and the rest of the gesture writes nothing",
+		   SDL_memcmp(g->pixels, blank, sizeof blank) == 0);
+		ok("and redo gives the rub-out back", undo_redo(g) && g->pixels[5 * 20 + 8] == 0u);
+		key(g, SDLK_Q, SDL_KMOD_NONE);
+	}
+
+	/* ---- THE [x] ON A SHEET BEHIND THE CURRENT ONE ----
+	 *
+	 * Closing any sheet handed the screen to that sheet's neighbour, so closing one you were
+	 * not looking at took the drawing you were looking at away.
+	 */
+	{
+		VNG_TAB *x1 = vng_tab_new(4, 4);
+		VNG_TAB *x2 = vng_tab_new(4, 4);
+		VNG_TAB *x3 = vng_tab_new(4, 4);
+		ok("the newest sheet is on screen", vng_tab == x3);
+
+		vng_tab_close(x1);
+		ok("CLOSING A SHEET BEHIND THE ONE ON SCREEN LEAVES IT ON SCREEN", vng_tab == x3);
+		vng_tab_close(x3);
+		ok("closing the one on screen hands the screen to its neighbour", vng_tab == x2);
+		vng_tab_close(x2);
+	}
+
+	/* ---- A CHANGE THAT FELL OFF THE HISTORY IS STILL A CHANGE ----
+	 *
+	 * Saved with nothing done, then drawn on until the oldest step dropped out of the budget:
+	 * undoing everything left NULL == NULL, the star went, and CTRL+W closed a changed file
+	 * without asking. Sixteen bytes is one carry, so a budget of sixty-four holds four
+	 * one-pixel steps.
+	 */
+	{
+		undo_budget(64);
+
+		VNG_TAB *u = vng_tab_new(8, 8);
+		undo_mark_saved(u);
+
+		for (int i = 0; i < 6; i++) {
+			vng_tab_stroke_open(u, false);
+			vng_tab_put(u, i, 0, 0xFF000000u);
+			vng_tab_stroke_close(u);
+		}
+		while (undo_undo(u)) {}
+
+		ok("A SHEET WHOSE OLDEST CHANGE FELL OFF THE HISTORY IS STILL DIRTY", u->dirty);
+		ok("because it does still carry that change", u->pixels[0] == 0xFF000000u);
+
+		/* The other way round: saved ON the step that falls off, which then becomes the state
+		 * with everything undone - so undoing back to it is clean. */
+		VNG_TAB *v = vng_tab_new(8, 8);
+		vng_tab_stroke_open(v, false);
+		vng_tab_put(v, 0, 0, 0xFF000000u);
+		vng_tab_stroke_close(v);
+		undo_mark_saved(v);
+
+		Uint32 saved[8 * 8];
+		SDL_memcpy(saved, v->pixels, sizeof saved);
+
+		for (int i = 1; i < 5; i++) {           /* the fifth step pushes out the first, only */
+			vng_tab_stroke_open(v, false);
+			vng_tab_put(v, i, 0, 0xFF000000u);
+			vng_tab_stroke_close(v);
+		}
+		while (undo_undo(v)) {}
+		ok("a saved step that falls off becomes the base, and undoing to it is clean",
+		   !v->dirty && SDL_memcmp(v->pixels, saved, sizeof saved) == 0);
+
+		undo_budget(0);
+	}
+
+	/* ---- A TURNED SELECTION, AND A FLOAT CUT OR DELETED ----
+	 *
+	 * The hole a float leaves was written at the float's own size, which a quarter turn swaps:
+	 * a 6 x 2 block turned and put down left four of its columns behind and wiped four rows
+	 * under it that were never selected. And CTRL+X on a float COMMITTED it, while DELETE on a
+	 * moved one brought it back where it had been lifted from.
+	 */
+	{
+		VNG_TAB *r = vng_tab_new(16, 16);
+		view_sheet_rect(r);
+
+		for (int j = 0; j < 2; j++)
+			for (int i = 0; i < 6; i++)
+				r->pixels[(2 + j) * 16 + (2 + i)] = 0xFF000000u | (Uint32)(0x100 + j * 6 + i);
+
+		Uint32 fresh[16 * 16];
+		SDL_memcpy(fresh, r->pixels, sizeof fresh);
+
+		Uint32 was1 = tool_colour(1);
+		tool_set_colour(1, 0x00000000u);
+
+		#define MARK_BLOCK() do {                                                        \
+			mouse(r, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 2, 2);                \
+			mouse(r, SDL_EVENT_MOUSE_MOTION,      0,               7, 3);                \
+			mouse(r, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 7, 3);                \
+		} while (0)
+
+		/* How many pixels of the block's place still hold something. */
+		#define LEFT_IN_PLACE(n) do {                                                    \
+			(n) = 0;                                                                     \
+			for (int jj = 0; jj < 2; jj++)                                               \
+				for (int ii = 0; ii < 6; ii++)                                           \
+					if (r->pixels[(2 + jj) * 16 + (2 + ii)] != 0u) (n)++;                \
+		} while (0)
+
+		key(r, SDLK_Z, SDL_KMOD_NONE);
+		MARK_BLOCK();
+		key(r, SDLK_R, SDL_KMOD_NONE);           /* a quarter turn, lifted as a cut */
+		select_commit(r);
+
+		/* Turned about its centre, the 2 x 6 float lands on columns 4-5, rows 0-5: every
+		 * other pixel of the block's place is the hole. */
+		ok("A TURNED SELECTION EMPTIES THE WHOLE PLACE IT WAS LIFTED FROM",
+		   r->pixels[2 * 16 + 2] == 0u && r->pixels[2 * 16 + 7] == 0u &&
+		   r->pixels[3 * 16 + 3] == 0u && r->pixels[3 * 16 + 6] == 0u);
+		ok("AND NOTHING UNDER IT THAT WAS NEVER SELECTED",
+		   r->pixels[5 * 16 + 2] == fresh[5 * 16 + 2] && r->pixels[7 * 16 + 3] == fresh[7 * 16 + 3]);
+		undo_undo(r);
+		key(r, SDLK_ESCAPE, SDL_KMOD_NONE);
+		ok("and it undoes to the block it was", SDL_memcmp(r->pixels, fresh, sizeof fresh) == 0);
+
+		/* CTRL+X on a flipped float. */
+		int n = 0;
+		MARK_BLOCK();
+		key(r, SDLK_H, SDL_KMOD_NONE);
+		key(r, SDLK_X, SDL_KMOD_CTRL);
+		LEFT_IN_PLACE(n);
+		ok("CTRL+X ON A FLOAT CUTS IT - the flipped block does not land", n == 0);
+
+		select_paste(r, 12, 12);                /* the float at (9, 11), six by two */
+		select_commit(r);
+		ok("and what went to the clipboard is the block as it was flipped",
+		   r->pixels[11 * 16 + 9] == fresh[2 * 16 + 7] && r->pixels[12 * 16 + 14] == fresh[3 * 16 + 2]);
+		undo_undo(r);
+		undo_undo(r);
+		key(r, SDLK_ESCAPE, SDL_KMOD_NONE);
+		ok("two steps, and both undo", SDL_memcmp(r->pixels, fresh, sizeof fresh) == 0);
+
+		/* DELETE on a float carried somewhere else. */
+		MARK_BLOCK();
+		mouse(r, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 3, 2);
+		mouse(r, SDL_EVENT_MOUSE_MOTION,      0,               3, 9);
+		mouse(r, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 3, 9);
+		key(r, SDLK_DELETE, SDL_KMOD_NONE);
+		LEFT_IN_PLACE(n);
+		ok("DELETE ON A MOVED FLOAT EMPTIES THE PLACE IT CAME FROM", n == 0);
+		ok("and puts nothing where it had been carried", r->pixels[9 * 16 + 3] == fresh[9 * 16 + 3]);
+		ok("in one step", undo_undo(r) && SDL_memcmp(r->pixels, fresh, sizeof fresh) == 0);
+
+		#undef LEFT_IN_PLACE
+		#undef MARK_BLOCK
+
+		tool_set_colour(1, was1);
+		key(r, SDLK_Q, SDL_KMOD_NONE);
+	}
+
+	/* ---- THE MARKED RECTANGLE MOVES WITH THE PIXELS WHEN THE SHEET GROWS ---- */
+	{
+		VNG_TAB *m = vng_tab_new(16, 16);
+		view_sheet_rect(m);
+
+		key(m, SDLK_Z, SDL_KMOD_NONE);
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 2, 2);
+		mouse(m, SDL_EVENT_MOUSE_MOTION,      0,               4, 4);
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 4, 4);
+
+		SDL_Rect r;
+		vng_tab_resize(m, 20, 16, 4, 0);       /* grown four to the left */
+		ok("A SHEET GROWN LEFT CARRIES ITS SELECTION WITH ITS PIXELS",
+		   select_area(m, &r) && r.x == 6 && r.y == 2 && r.w == 3);
+		undo_undo(m);
+		ok("and the undo carries it back", select_area(m, &r) && r.x == 2);
+
+		ok("A SIDE PAST WHAT THIS MACHINE CAN SHOW IS REFUSED, AND NOTHING CHANGES",
+		   !vng_tab_resize(m, vng_tab_side_limit() + 1, 16, 0, 0) && m->w == 16 && m->h == 16);
+
+		key(m, SDLK_ESCAPE, SDL_KMOD_NONE);
+		key(m, SDLK_Q, SDL_KMOD_NONE);
+	}
+
+	/* ---- ONE STROKE AT A TIME, AND A STROKE THAT CHANGES NOTHING IS NOT A STEP ---- */
+	{
+		VNG_TAB *q = vng_tab_new(8, 8);
+
+		vng_tab_stroke_open(q, false);
+		vng_tab_put(q, 1, 1, 0xFFFF0000u);
+		vng_tab_stroke_open(q, false);          /* over it: the first is cancelled, not orphaned */
+		vng_tab_put(q, 0, 0, 0xFF0000FFu);
+		vng_tab_put(q, 3, 3, 0xFF0000FFu);
+		vng_tab_stroke_close(q);
+		ok("A STROKE OPENED OVER ANOTHER CANCELS THE FIRST - nothing of it is merged",
+		   q->pixels[1 * 8 + 1] == 0xFFFFFFFFu && q->pixels[0] == 0xFF0000FFu);
+
+		VNG_TAB *z = vng_tab_new(8, 8);
+		vng_tab_stroke_open(z, false);
+		vng_tab_put(z, 2, 2, 0xFFFFFFFFu);      /* white on white */
+		vng_tab_stroke_close(z);
+		ok("A STROKE THAT CHANGES NOTHING LEAVES NOTHING TO UNDO, AND NO STAR",
+		   !undo_undo(z) && !z->dirty);
+
+		vng_tab_stroke_open(z, true);
+		vng_tab_put(z, 2, 2, 0xFFFFFFFFu);
+		vng_tab_stroke_close(z);
+		ok("and neither does one written through", !undo_undo(z) && !z->dirty);
+	}
+
+	/* ---- THE TEXTURE SEES WHAT AN UNDO PUT BACK, AND ONLY THAT IS SENT ----
+	 *
+	 * The sheet goes to the GPU a rectangle at a time now, so a write that forgets to say
+	 * where it wrote is a picture that stops matching its document. Undo is the path most
+	 * easily forgotten, since it writes nowhere near a stroke.
+	 */
+	{
+		VNG_TAB *d = vng_tab_new(8, 8);
+		vng_tab_upload(d);                       /* the first frame: everything */
+
+		vng_tab_stroke_open(d, false);
+		vng_tab_put(d, 3, 4, 0xFF00FF00u);
+		vng_tab_stroke_close(d);
+		vng_tab_upload(d);                       /* the green goes up */
+		undo_undo(d);
+		vng_tab_upload(d);                       /* and the white has to follow it */
+
+		Uint32 seen = 0u, beside = 0u;
+		SDL_Texture *target = SDL_CreateTexture(vng_ren, SDL_PIXELFORMAT_ARGB8888,
+		                                        SDL_TEXTUREACCESS_TARGET, 8, 8);
+		if (target) {
+			SDL_SetRenderTarget(vng_ren, target);
+			SDL_SetRenderDrawBlendMode(vng_ren, SDL_BLENDMODE_NONE);
+			SDL_SetRenderDrawColor(vng_ren, 0x00, 0x00, 0x00, 0x00);
+			SDL_RenderClear(vng_ren);
+
+			SDL_FRect all = { 0.0f, 0.0f, 8.0f, 8.0f };
+			SDL_SetTextureScaleMode(d->tex, SDL_SCALEMODE_NEAREST);
+			SDL_RenderTexture(vng_ren, d->tex, NULL, &all);
+
+			SDL_Surface *raw = SDL_RenderReadPixels(vng_ren, NULL);
+			SDL_Surface *cv  = raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888) : NULL;
+			if (cv) {
+				seen   = ((Uint32 *)((Uint8 *)cv->pixels + 4 * cv->pitch))[3];
+				beside = ((Uint32 *)((Uint8 *)cv->pixels + 4 * cv->pitch))[4];
+				SDL_DestroySurface(cv);
+			}
+			if (raw) SDL_DestroySurface(raw);
+
+			SDL_SetRenderTarget(vng_ren, NULL);
+			SDL_SetRenderDrawBlendMode(vng_ren, SDL_BLENDMODE_BLEND);
+			SDL_DestroyTexture(target);
+		}
+		ok("THE TEXTURE SEES WHAT AN UNDO PUT BACK", seen == 0xFFFFFFFFu && beside == 0xFFFFFFFFu);
+	}
+
+	/* ---- THE ANIMATION'S CLIPS BELONG TO THE SHEET THEY WERE MADE FOR ----
+	 *
+	 * One list for the program, read when the window came up: left open while the sheet under
+	 * it changed, it went on showing the old sheet's clips - and SAVE wrote them beside the new
+	 * one, over its own .vnganime.
+	 */
+	{
+		char *path = vangopix_asset("checks_follow.anime");
+		if (path) {
+			SDL_IOStream *io = SDL_IOFromFile(path, "w");
+			if (io) {
+				const char *two = "\"Run\"[0.1,4,0,0,8,8]\n\"Walk\"[0.1,4,0,8,8,8]\n";
+				SDL_WriteIO(io, two, SDL_strlen(two));
+				SDL_CloseIO(io);
+			}
+
+			VNG_TAB *p1 = vng_tab_new(32, 16);
+			VNG_TAB *p2 = vng_tab_new(32, 16);
+			vng_tab_show(p1);
+			ok("clips load into the sheet on screen", anim_load(path) == 2 && anim_lot() == 2);
+			vng_tab_show(p2);
+			ok("ANOTHER SHEET HAS ITS OWN CLIPS - none, here", anim_lot() == 0);
+			vng_tab_show(p1);
+			ok("AND THE FIRST ONE STILL HAS ITS TWO",
+			   anim_lot() == 2 && SDL_strcmp(anim_name(1), "Walk") == 0);
+
+			SDL_RemovePath(path);
+			SDL_free(path);
+		}
+	}
+
+	/* ---- A NUMBER TYPED INTO THE CLIP EDITOR CANNOT STOP THE PROGRAM ----
+	 *
+	 * The frame count is how many cells the sheet grid draws every frame, and two billion drew
+	 * two billion; a speed of 1e-10 made the playhead's wrap subtract a number too small to
+	 * change a float, for ever. Reaching the checks after the tick below is half the claim.
+	 */
+	{
+		anim_toggle();
+		ok("the player is up again", anim_visible());
+
+		win_place(win_top(), 320.0f, 320.0f);
+		SDL_FRect a = win_area(win_top());
+		float icon_y = a.y + ui_pad() + ui_row() + ui_pad();
+		press_at(a.x + ui_pad() + 2.0f, icon_y + 2.0f);          /* NEW */
+
+		VNG_WIN  *ed = win_top();
+		SDL_FRect b  = win_area(ed);
+
+		#define BOX_AT(i) (SDL_FRect){ b.x + ui_pad(), b.y + ui_pad() + ui_row() * (float)(i), \
+		                               b.w - ui_pad() * 2.0f, ui_row() }
+		SDL_FRect f = BOX_AT(2);
+		press_at(f.x + f.w - 4.0f, f.y + f.h * 0.5f);
+		wipe();
+		typed("999999999");
+		ok("AN ABSURD FRAME COUNT IS PULLED IN TO ONE THAT CAN BE DRAWN",
+		   anim_frames() == VNG_ANIM_FRAMES_MAX);
+
+		SDL_FRect sp = BOX_AT(1);
+		press_at(sp.x + sp.w - 4.0f, sp.y + sp.h * 0.5f);
+		wipe();
+		typed("0.0000000001");
+		#undef BOX_AT
+
+		float was_dt = vng_dt;
+		vng_dt = 0.05f;
+		anim_draw(vng_tab);
+		anim_tick();
+		vng_dt = was_dt;
+		ok("AND A SPEED TOO SMALL TO MEASURE COMES BACK FROM THE PLAYHEAD'S WRAP",
+		   anim_frames() == VNG_ANIM_FRAMES_MAX);
+
+		win_show(ed, false);
+		anim_toggle();
+		anim_tick();
+		ok("and the keyboard is handed back", keys_owned() == false);
+	}
+
+	/* ---- SAVING PUTS A FLOAT DOWN FIRST ----
+	 *
+	 * Nothing is written to the document while a selection floats, so the file used to be the
+	 * sheet without the float - and without its hole - while the screen showed both.
+	 */
+	{
+		char *png = vangopix_asset("checks_save.png");
+		if (png) {
+			VNG_TAB *sv = vng_tab_new(8, 8);
+			view_sheet_rect(sv);
+			vng_tab_set_path(sv, png);
+
+			/* The clipboard holds the block cut above; a copy of it goes in the air. */
+			select_paste(sv, 4, 4);
+			file_save(sv);
+
+			ok("SAVING PUTS THE FLOAT DOWN - the sheet holds it now",
+			   sv->pixels[3 * 8 + 1] != 0xFFFFFFFFu && !sv->dirty);
+
+			SDL_Surface *raw  = IMG_Load(png);
+			SDL_Surface *back = raw ? SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888) : NULL;
+			ok("AND THE FILE IS THE PICTURE THAT WAS ON SCREEN",
+			   back && ((Uint32 *)((Uint8 *)back->pixels + 3 * back->pitch))[1] ==
+			           sv->pixels[3 * 8 + 1]);
+			if (back) SDL_DestroySurface(back);
+			if (raw)  SDL_DestroySurface(raw);
+
+			/* Written beside it under another name and moved over it whole - see write_file -
+			 * so nothing of the temporary may be left behind by a save that worked. */
+			char *tmp = vangopix_asset("checks_save.vngsave.png");
+			SDL_PathInfo pi;
+			ok("A SAVE REPLACES THE FILE WHOLE, AND LEAVES NOTHING BESIDE IT",
+			   tmp && !SDL_GetPathInfo(tmp, &pi));
+			SDL_free(tmp);
+
+			/* THE SECOND SAVE IS THE ONE THAT MATTERS: every CTRL+S after the first moves the
+			 * finished file over one that is already there. Asked of SDL_RenamePath directly
+			 * first, because a save that failed would stop the suite behind a message box. */
+			char *ra = vangopix_asset("checks_rename_a.txt");
+			char *rb = vangopix_asset("checks_rename_b.txt");
+			bool  replaces = false;
+			if (ra && rb) {
+				SDL_IOStream *w1 = SDL_IOFromFile(ra, "w");
+				if (w1) { SDL_WriteIO(w1, "new", 3); SDL_CloseIO(w1); }
+				SDL_IOStream *w2 = SDL_IOFromFile(rb, "w");
+				if (w2) { SDL_WriteIO(w2, "old", 3); SDL_CloseIO(w2); }
+
+				size_t n = 0;
+				char  *got = NULL;
+				if (SDL_RenamePath(ra, rb)) got = (char *) SDL_LoadFile(rb, &n);
+				replaces = got && n == 3 && SDL_memcmp(got, "new", 3) == 0 &&
+				           !SDL_GetPathInfo(ra, &pi);
+				SDL_free(got);
+				SDL_RemovePath(ra);
+				SDL_RemovePath(rb);
+			}
+			SDL_free(ra);
+			SDL_free(rb);
+			ok("A RENAME REPLACES A FILE THAT IS ALREADY THERE", replaces);
+
+			if (replaces) {
+				sv->pixels[0] = 0xFF0000FFu;
+				vng_tab_touch(sv, 0, 0, 1, 1);
+				file_save(sv);
+
+				SDL_Surface *raw2  = IMG_Load(png);
+				SDL_Surface *back2 = raw2 ? SDL_ConvertSurface(raw2, SDL_PIXELFORMAT_ARGB8888) : NULL;
+				ok("AND SO A SECOND SAVE OVER THE FIRST WRITES THE NEW PICTURE",
+				   back2 && ((Uint32 *)back2->pixels)[0] == 0xFF0000FFu);
+				if (back2) SDL_DestroySurface(back2);
+				if (raw2)  SDL_DestroySurface(raw2);
+			}
+
+			/* OPENING A FILE THAT IS ALREADY OPEN SHOWS ITS TAB - two tabs on one file are two
+			 * futures for it, and the one saved second throws the first away. Spelled with the
+			 * other separator too, the way the project panel and the command line differ. */
+			VNG_TAB *other = vng_tab_new(4, 4);
+			int      lot   = vng_tab_count();
+			ok("A FILE ALREADY OPEN IS SHOWN, NOT OPENED AGAIN",
+			   vng_tab_open(png) == sv && vng_tab == sv && vng_tab_count() == lot);
+
+			char *slashed = SDL_strdup(png);
+			for (char *p = slashed; p && *p; p++) if (*p == '\\') *p = '/';
+			vng_tab_show(other);
+			ok("and so it is when the separators are spelled the other way",
+			   slashed && vng_tab_open(slashed) == sv && vng_tab_count() == lot);
+			SDL_free(slashed);
+
+			key(sv, SDLK_ESCAPE, SDL_KMOD_NONE);
+			key(sv, SDLK_Q, SDL_KMOD_NONE);
+			SDL_RemovePath(png);
+			SDL_free(png);
+		}
+	}
+
+	/* ---- A RELEASE IS ENDED BY WHOEVER TOOK ITS PRESS, AND NOBODY ELSE ----
+	 *
+	 * The swatch grid claimed every release that landed on it. A stroke begun on the sheet and
+	 * let go over the swatches never heard its button come up: the pencil drew on with no button
+	 * held, the pan followed the pointer about, and a corner grip resized the canvas on the next
+	 * click. The grid under ALT did the same.
+	 */
+	{
+		VNG_TAB *pt = vng_tab;
+		Uint32 was0 = tool_colour(0), was1 = tool_colour(1);
+
+		if (!palette_visible()) palette_toggle();
+		SDL_FRect g = palette_grid_area();
+
+		SDL_Event e;
+		SDL_zero(e);
+		e.type          = SDL_EVENT_MOUSE_BUTTON_UP;
+		e.button.button = SDL_BUTTON_LEFT;
+		e.button.x      = g.x + 2.0f;
+		e.button.y      = g.y + 2.0f;
+		ok("A RELEASE OVER THE SWATCHES WHOSE PRESS BEGAN ELSEWHERE IS NOT THE GRID'S",
+		   !palette_grid_event(&e, pt));
+
+		e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+		bool took = palette_grid_event(&e, pt);
+		e.type = SDL_EVENT_MOUSE_BUTTON_UP;
+		ok("while the release of a press it took is", took && palette_grid_event(&e, pt));
+
+		palette_toggle();
+
+		SDL_SetModState(SDL_KMOD_LALT);
+		SDL_FRect q = palette_quick_area();
+		e.button.x = q.x + 2.0f;
+		e.button.y = q.y + 2.0f;
+		ok("and the grid under ALT lets a stranger's release go by too",
+		   q.w > 0.0f && !palette_quick_event(&e, pt));
+		SDL_SetModState(SDL_KMOD_NONE);
+		palette_quick_area();   /* ALT up, seen - the grid goes */
+
+		tool_set_colour(0, was0);
+		tool_set_colour(1, was1);
+	}
+
+	/* ---- A BUCKET IN A COMB FILLS EVERY TOOTH ----
+	 *
+	 * The fill's stack of pending spans was a fixed size, clip.h * 4 + 64, on the belief that
+	 * one per row was the worst case - and a push that found it full was dropped. One wide
+	 * span pushes a start for every run beside it: a bar with a hundred and twenty-nine teeth
+	 * on a sheet four rows high queued far more than eighty, and the teeth that did not fit
+	 * were never filled.
+	 */
+	{
+		const int W = 257, H = 4;
+		const Uint32 A = 0xFF112233u, B = 0xFF445566u, C = 0xFF778899u;
+
+		VNG_TAB *f = vng_tab_new(W, H);
+		for (int x = 0; x < W; x++) f->pixels[x] = A;
+		for (int y = 1; y < H; y++)
+			for (int x = 0; x < W; x++)
+				f->pixels[y * W + x] = (x % 2 == 0) ? A : B;
+
+		Uint32 was0 = tool_colour(0);
+		tool_set_colour(0, C);
+		tool_fill(f, 0, 0, 0, false);
+
+		int missed = 0;
+		for (int y = 1; y < H; y++)
+			for (int x = 0; x < W; x += 2)
+				if (f->pixels[y * W + x] != C) missed++;
+
+		ok("A BUCKET IN A COMB FILLS EVERY TOOTH", missed == 0);
+		if (missed) SDL_Log("  %d pixels of teeth left unfilled", missed);
+		ok("and not the gaps between them", f->pixels[1 * W + 1] == B);
+
+		tool_set_colour(0, was0);
+	}
+
+	/* ---- A WINDOW CLOSED BY ITS OWN DOT TAKES WHAT IS ITS OWN WITH IT ----
+	 *
+	 * The dot is win.c's, and until now only win.c heard it. The colour window's hex box went
+	 * on holding the keyboard with no caret on screen - every shortcut in the program dead - and
+	 * the palette's list and the clip editor were left parked, belonging to nothing.
+	 */
+	{
+		#define CLOSE_DOT(which) press_at(win_outer(which).x + win_outer(which).w -        \
+		                                  ui_close() * 0.5f - ui_pad() * 0.5f,             \
+		                                  win_outer(which).y + ui_head() * 0.5f)
+
+		if (colour_visible()) colour_toggle();
+		colour_open();
+		VNG_WIN  *cw = win_top();
+		SDL_FRect c  = win_area(cw);
+		press_at(c.x + 100.0f, c.y + c.h - 28.0f);         /* into the hex box */
+		ok("the hex box has the keyboard", keys_owned());
+		CLOSE_DOT(cw);
+		ok("THE COLOUR WINDOW CLOSED BY ITS DOT HANDS THE KEYBOARD BACK",
+		   !colour_visible() && !keys_owned());
+
+		if (palette_visible()) palette_toggle();
+		palette_toggle();
+		VNG_WIN *pb = win_top();
+		win_place(pb, 60.0f, 60.0f);                        /* clear of where the list opens */
+		SDL_FRect pa = win_area(pb);
+		press_at(pa.x + 17.0f, pa.y + 56.0f);                /* COLOR */
+		ok("COLOR opens the list", palette_list_visible());
+		CLOSE_DOT(pb);
+		ok("THE PALETTE CLOSED BY ITS DOT TAKES ITS LIST WITH IT",
+		   !palette_visible() && !palette_list_visible());
+
+		if (anim_visible()) anim_toggle();
+		anim_toggle();
+		VNG_WIN  *pl = win_top();
+		SDL_FRect a  = win_area(pl);
+		press_at(a.x + ui_pad() + 2.0f, a.y + ui_pad() + ui_row() + ui_pad() + 2.0f);   /* NEW */
+		VNG_WIN  *ed = win_top();
+		SDL_FRect b  = win_area(ed);
+		press_at(b.x + b.w - ui_pad() - 4.0f, b.y + ui_pad() + ui_row() * 0.5f);        /* n: */
+		ok("the editor has the keyboard", win_visible(ed) && keys_owned());
+		win_show(pl, false);                                  /* what the player's dot does */
+		ok("THE PLAYER PUT AWAY TAKES ITS EDITOR, AND THE EDITOR THE KEYBOARD",
+		   !win_visible(ed) && !keys_owned());
+
+		#undef CLOSE_DOT
+	}
+
+	/* ---- keyboard.txt: A SWAP IS TWO LINES, AND AN OLDER FILE KEEPS ITS KEYS ----
+	 *
+	 * Every line was checked against the map as it stood, defaults and all, so a swap refused
+	 * both of its halves in whichever order they came. And a file from an older build was
+	 * written over from the defaults, undoing every key anybody had moved.
+	 */
+	{
+		char *kp = vangopix_asset("checks_keys.txt");
+		if (kp) {
+			SDL_IOStream *io = SDL_IOFromFile(kp, "w");
+			if (io) {
+				const char *swap = "# vangopix-keys 3\n"
+				                   "tool-pencil  = W\n"
+				                   "tool-line    = Q\n"
+				                   "panel-colour = Z\n";
+				SDL_WriteIO(io, swap, SDL_strlen(swap));
+				SDL_CloseIO(io);
+			}
+			keymap_load_from(kp);
+
+			SDL_Event e;
+			SDL_zero(e);
+			e.type = SDL_EVENT_KEY_DOWN;
+
+			e.key.key = SDLK_W;  bool pencil_w = keymap_hit(VNG_ACT_TOOL_PENCIL, &e);
+			e.key.key = SDLK_Q;  bool line_q   = keymap_hit(VNG_ACT_TOOL_LINE, &e);
+			ok("TWO KEYS SWAPPED IN keyboard.txt ARE BOTH TAKEN", pencil_w && line_q);
+
+			e.key.key = SDLK_Z;
+			ok("A KEY WRITTEN ON PURPOSE BEATS ONE HELD BY DEFAULT",
+			   keymap_hit(VNG_ACT_PANEL_COLOUR, &e) && !keymap_hit(VNG_ACT_TOOL_SELECT, &e));
+
+			io = SDL_IOFromFile(kp, "w");
+			if (io) {
+				const char *old = "# vangopix-keys 1\n"
+				                  "tool-pencil = G\n";
+				SDL_WriteIO(io, old, SDL_strlen(old));
+				SDL_CloseIO(io);
+			}
+			keymap_load_from(kp);
+
+			e.key.key = SDLK_G;
+			ok("AN OLDER keyboard.txt KEEPS THE KEYS IT MOVED", keymap_hit(VNG_ACT_TOOL_PENCIL, &e));
+
+			char *txt = (char *) SDL_LoadFile(kp, NULL);
+			ok("and is written again, stamped and holding them",
+			   txt && SDL_strstr(txt, "# vangopix-keys 3") && SDL_strstr(txt, "tool-pencil     = G") &&
+			   SDL_strstr(txt, "tool-line       = W"));
+			SDL_free(txt);
+
+			SDL_RemovePath(kp);
+			SDL_free(kp);
+			keymap_load_from(NULL);   /* the defaults, for whatever runs after this */
+		}
+	}
+
+	/* ---- THE QUESTION CTRL+N ASKS IS A BOX LIKE ANY OTHER ----
+	 *
+	 * It was its own keyboard owner, invisible to the rule that closes a box when another opens:
+	 * a window's box clicked while it was up took the keyboard, and the question stayed drawn in
+	 * the middle of the window for good. It needs a face to open at all, so one is loaded here.
+	 */
+	{
+		char       *fp   = vangopix_asset("font/DejaVuSansMono.ttf");
+		TextSystem *face = fp ? text_init(vng_ren, fp, 20.0f) : NULL;
+		SDL_free(fp);
+
+		if (!face) {
+			SDL_Log("SKIP the question - no font beside the executable");
+		} else {
+			TextSystem *kb = vng_text, *ks = vng_text_small;
+			vng_text = vng_text_small = face;
+
+			vangopix_new_sheet_ask();
+			ok("CTRL+N's question opens", prompt_up() && keys_owned());
+			wipe();
+			typed("40 20");
+			enter();
+			ok("TWO NUMBERS WITH A SPACE BETWEEN THEM ARE A WIDTH AND A HEIGHT",
+			   !prompt_up() && vng_tab && vng_tab->w == 40 && vng_tab->h == 20);
+
+			vangopix_new_sheet_ask();
+			if (!colour_visible()) colour_open();
+			SDL_FRect c = win_area(win_top());
+			press_at(c.x + 100.0f, c.y + c.h - 28.0f);     /* a window's box */
+			ok("A BOX CLICKED WHILE THE QUESTION IS UP CLOSES IT rather than stranding it",
+			   !prompt_up() && keys_owned());
+
+			SDL_Event esc;
+			SDL_zero(esc);
+			esc.type    = SDL_EVENT_KEY_DOWN;
+			esc.key.key = SDLK_ESCAPE;
+			keys_event(&esc);
+			colour_toggle();
+
+			vng_text       = kb;
+			vng_text_small = ks;
+			text_free(face);
+		}
+	}
+
+	/* ---- A NAME WITH AN ACCENT IS THE WHOLE NAME ----
+	 *
+	 * The atlas held ASCII and the strings were walked a byte at a time, so every byte past 127
+	 * was dropped: "Área de Trabalho", the Desktop of a Portuguese Windows, was "rea de
+	 * Trabalho" in the project panel - a name that looked whole and was not. Measured at the
+	 * largest size config.txt allows, which is where the atlas is tightest.
+	 */
+	{
+		char       *fp = vangopix_asset("font/DejaVuSansMono.ttf");
+		TextSystem *ts = fp ? text_init(vng_ren, fp, 32.0f) : NULL;
+		SDL_free(fp);
+
+		if (!ts) {
+			SDL_Log("SKIP the accents - no font beside the executable");
+		} else {
+			float m = 0.0f, area = 0.0f, last = 0.0f, past = 0.0f;
+			text_measure(ts, "M", &m, NULL);
+			text_measure(ts, "\xC3\x81rea", &area, NULL);    /* "Área" */
+			text_measure(ts, "\xC3\xBF", &last, NULL);       /* y-diaeresis, Latin-1's last */
+			text_measure(ts, "\xE4\xB8\xAD", &past, NULL);   /* a letter past Latin-1 */
+
+			ok("THE ATLAS HOLDS LATIN-1 TO ITS LAST LETTER, AT THE LARGEST SIZE", last > 0.0f);
+			ok("A NAME WITH AN ACCENT MEASURES ONE CELL A LETTER - NOTHING DROPPED",
+			   SDL_fabsf(area - 4.0f * m) < 0.5f);
+			ok("and a letter the atlas does not hold is a question mark, not a hole",
+			   SDL_fabsf(past - m) < 0.5f);
+
+			/* Five a-acutes into three cells: cut a CHARACTER at a time, never inside one. */
+			char cut[16];
+			text_fit(ts, cut, sizeof cut, "\xC3\xA1\xC3\xA1\xC3\xA1\xC3\xA1\xC3\xA1", m * 3.0f);
+			ok("A NAME CUT TO FIT IS CUT BETWEEN LETTERS, WITH THE TILDE",
+			   SDL_strcmp(cut, "\xC3\xA1\xC3\xA1~") == 0);
+
+			text_free(ts);
+		}
+
+		/* The tab's own name, cut to its field, stops before a letter it cannot finish: sixty-two
+		 * digits put the field's last byte in the middle of the first a-acute. */
+		char *longname = NULL;
+		SDL_asprintf(&longname, "%s%s", "01234567890123456789012345678901234567890123456789012345678901",
+		             "\xC3\xA1\xC3\xA1.png");
+		if (longname) {
+			VNG_TAB *nt = vng_tab_new(4, 4);
+			vng_tab_set_path(nt, longname);
+			const char *s = nt->name;
+			bool whole = true;
+			while (*s) if (SDL_StepUTF8(&s, NULL) == SDL_INVALID_UNICODE_CODEPOINT) whole = false;
+			ok("A TAB'S NAME CUT TO ITS FIELD IS STILL WHOLE LETTERS", whole);
+			SDL_free(longname);
+		}
 	}
 
 	vng_tabs_free();

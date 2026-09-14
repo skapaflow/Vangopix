@@ -20,7 +20,18 @@
 struct _vng_sel_ {
 	bool    on;             /* a rectangle is marked at all */
 	int     x, y, w, h;     /* where it is NOW, in document pixels */
-	int     sx, sy;         /* where the float was lifted from */
+
+	/*
+	 * WHERE THE FLOAT WAS LIFTED FROM, AND HOW BIG THAT PLACE WAS - which is not how big the
+	 * float is once it has been turned.
+	 *
+	 * The hole used to be written as (sx, sy, w, h), with the float's own w and h. A quarter
+	 * turn swaps those, so a 6 x 2 selection turned and put down emptied a 2 x 6 hole at its
+	 * old corner: four columns of the original were left behind, and four rows BELOW it that
+	 * were never selected were wiped. A square block turned four times, which is what the
+	 * check used, cannot show it.
+	 */
+	int     sx, sy, sw, sh;
 	bool    cut;            /* whether that place is to be left empty */
 
 	Uint32 *pixels;         /* NULL while merely marked; the lifted pixels while floating */
@@ -123,23 +134,27 @@ static bool lift (VNG_TAB *t, VNG_SEL *s, bool cut)
 
 	s->sx  = s->x;
 	s->sy  = s->y;
+	s->sw  = s->w;
+	s->sh  = s->h;
 	s->cut = cut;
 	s->tex_stale = true;
 	return true;
 }
 
 /*
- * Puts the float into the document as ONE undo step: the source rectangle emptied, then the
- * pixels written where they now are.
+ * Ends a float as ONE undo step: the place it was lifted from emptied if it was a cut, and
+ * then - when it is `landing` - its pixels written where they now are. Landing is putting it
+ * down; not landing is a cut float being thrown away, whose pixels are to be gone from the
+ * sheet rather than put back.
  *
  * The two rectangles may overlap, and that is the case worth naming - a selection nudged by
  * one pixel. Both writes happen, both carries are recorded, and undo walks them backwards,
  * so the overlap comes out right without anything having to reason about it.
  */
-void select_commit (VNG_TAB *t)
+static void put_down (VNG_TAB *t, VNG_SEL *s, bool landing)
 {
-	VNG_SEL *s = t ? t->sel : NULL;
-	if (!s || !s->pixels) return;
+	/* Nothing of the tool's may still be open on this sheet - see vng_tab_settle. */
+	tool_settle(t);
 
 	/* Direct, always: what a cut leaves may be transparent, and transparency cannot be shown
 	 * by compositing a preview over the sheet - see tabs.h. Everything a selection does is
@@ -154,33 +169,89 @@ void select_commit (VNG_TAB *t)
 	/* WHAT A CUT LEAVES BEHIND IS COLOUR 2, not a hole and not white. The second colour is
 	 * already "what the right button lays down" - the background of the moment - so cutting
 	 * leaving it is the same idea said once more. It defaults to nothing, so the default
-	 * behaviour is still a hole; load it with white and a cut leaves paper. */
+	 * behaviour is still a hole; load it with white and a cut leaves paper.
+	 *
+	 * The size of the PLACE, sw x sh, and not of the float - see the struct. */
 	if (s->cut) {
 		Uint32 back = tool_colour(1);
-		for (int j = 0; j < s->h; j++)
-			for (int i = 0; i < s->w; i++)
+		for (int j = 0; j < s->sh; j++)
+			for (int i = 0; i < s->sw; i++)
 				vng_tab_put(t, s->sx + i, s->sy + j, back);
 	}
 
-	for (int j = 0; j < s->h; j++)
-		for (int i = 0; i < s->w; i++) {
-			Uint32 c = s->pixels[j * s->w + i];
-			if ((c >> 24) != 0)   /* a transparent pixel of the float leaves what is under it */
-				vng_tab_put(t, s->x + i, s->y + j, c);
-		}
+	if (landing)
+		for (int j = 0; j < s->h; j++)
+			for (int i = 0; i < s->w; i++) {
+				Uint32 c = s->pixels[j * s->w + i];
+				if ((c >> 24) != 0)   /* a transparent pixel of the float leaves what is under it */
+					vng_tab_put(t, s->x + i, s->y + j, c);
+			}
 
 	vng_tab_stroke_close(t);
 	float_drop(s);
 }
 
-/* Throws the float away and puts the rectangle back where it was lifted from. Nothing was
- * written, so there is nothing to undo - which is the point of not writing. */
+void select_commit (VNG_TAB *t)
+{
+	VNG_SEL *s = t ? t->sel : NULL;
+	if (!s || !s->pixels) return;
+
+	put_down(t, s, true);
+}
+
+/*
+ * A FLOAT DELETED OR CUT IS GONE FROM THE SHEET - which, for one that was LIFTED, means the
+ * place it came from is emptied, because until now nothing had been written there.
+ *
+ * Both used to simply drop the float. Right for a paste, which has no source in this sheet,
+ * and for a CTRL copy, whose original is meant to stay. Wrong for everything else: a block
+ * dragged across the sheet and DELETEd reappeared where it had been dragged from, and CTRL+X
+ * went the other way - it marked the float as a cut and COMMITTED it, so the pixels were
+ * copied, and then landed, and a flipped block cut with CTRL+X stayed flipped on the sheet.
+ */
+static void float_discard (VNG_TAB *t, VNG_SEL *s)
+{
+	if (!s->pixels) return;
+
+	if (s->cut) put_down(t, s, false);
+	else        float_drop(s);
+}
+
+void select_settle (VNG_TAB *t)
+{
+	VNG_SEL *s = t ? t->sel : NULL;
+	if (!s) return;
+
+	select_commit(t);
+
+	/* A drag let go of with no release to end it - the gesture's pixels are already where
+	 * they belong, and a rectangle that followed the pointer about afterwards would be a
+	 * drag nobody is doing. */
+	s->marking = s->moving = false;
+}
+
+void select_shift (VNG_TAB *t, int dx, int dy)
+{
+	VNG_SEL *s = t ? t->sel : NULL;
+	if (!s || !s->on) return;
+
+	s->x  += dx;
+	s->y  += dy;
+	s->sx += dx;
+	s->sy += dy;
+}
+
+/* Throws the float away and puts the rectangle back where it was lifted from, the size it was
+ * lifted at. Nothing was written, so there is nothing to undo - which is the point of not
+ * writing. */
 static void cancel (VNG_SEL *s)
 {
 	if (!s->pixels) { s->on = false; return; }
 
 	s->x = s->sx;
 	s->y = s->sy;
+	s->w = s->sw;
+	s->h = s->sh;
 	float_drop(s);
 }
 
@@ -330,6 +401,8 @@ static bool stamp (VNG_TAB *t, VNG_SEL *s)
 	s->pixels = copy;
 	s->sx  = s->x;
 	s->sy  = s->y;
+	s->sw  = s->w;
+	s->sh  = s->h;
 	s->cut = false;
 	s->tex_stale = true;
 	return true;
@@ -347,8 +420,8 @@ void select_paste (VNG_TAB *t, int x, int y)
 
 	SDL_memcpy(s->pixels, clip, (size_t)clip_w * clip_h * sizeof(Uint32));
 
-	s->w = clip_w;
-	s->h = clip_h;
+	s->w = s->sw = clip_w;
+	s->h = s->sh = clip_h;
 	s->x = s->sx = x - clip_w / 2;
 	s->y = s->sy = y - clip_h / 2;
 	s->on  = true;
@@ -369,7 +442,11 @@ static void clear_marked (VNG_TAB *t, VNG_SEL *s)
 	/* Direct, like everything else here: colour 2 may be nothing, and nothing cannot be shown
 	 * by compositing a preview over the sheet. CLIPPED, like a tool's, although it only ever
 	 * writes inside the rectangle - held to the rule rather than trusted with it; only
-	 * select_commit is let out. */
+	 * put_down is let out.
+	 *
+	 * The tool is settled first: CTRL+SHIFT+X arrives with SHIFT held, and SHIFT with the
+	 * pencil in hand is a line preview that is an open stroke on this very sheet. */
+	tool_settle(t);
 	if (!vng_tab_stroke_open(t, true)) return;
 
 	Uint32 back = tool_colour(1);
@@ -465,7 +542,9 @@ static void sel_remove_others (VNG_TAB *t)
 	if (w < 1 || h < 1) return;
 
 	/* Direct, like everything else here: colour 2 may be nothing, and nothing cannot be shown
-	 * by compositing a preview over the sheet. */
+	 * by compositing a preview over the sheet. Settled first, for the reason clear_marked
+	 * gives. */
+	tool_settle(t);
 	if (!vng_tab_stroke_open(t, true)) return;
 
 	for (int j = 0; j < h; j++)
@@ -491,7 +570,7 @@ static void menu_body (SDL_FRect area, void *ctx)
 
 	for (int i = 0; i < MENU_LOT; i++) {
 		SDL_FRect row = { area.x, area.y + (float)i * MENU_ROW, area.w, MENU_ROW };
-		bool hot = mx >= row.x && my >= row.y && mx < row.x + row.w && my < row.y + row.h;
+		bool hot = ui_hit(row, mx, my);
 
 		/* The palette list's two states, which are the original's: framed and white under the
 		 * pointer, orange otherwise. The frame is what says a row is a thing to press. */
@@ -596,7 +675,7 @@ bool select_event (const SDL_Event *e, VNG_TAB *t)
 			case SDLK_X:
 				if (!s->on) return false;
 				copy_out(t, s);
-				if (s->pixels) { s->cut = true; select_commit(t); }
+				if (s->pixels) float_discard(t, s);   /* see float_discard - not a commit */
 				else           clear_marked(t, s);
 				s->on = false;
 				return true;
@@ -624,7 +703,7 @@ bool select_event (const SDL_Event *e, VNG_TAB *t)
 		}
 
 		if (e->key.key == SDLK_DELETE && s->on && tool_is_select) {
-			if (s->pixels) { float_drop(s); }   /* a float deleted is simply not put down */
+			if (s->pixels) float_discard(t, s);   /* gone, and so is the place it came from */
 			else           clear_marked(t, s);
 			s->on = false;
 			return true;
@@ -831,7 +910,7 @@ void select_draw (VNG_TAB *t)
 	 * if the program is closed with one in the air.
 	 */
 	if (s->pixels && s->cut) {
-		SDL_FRect hole = on_screen(t, s->sx, s->sy, s->w, s->h);
+		SDL_FRect hole = on_screen(t, s->sx, s->sy, s->sw, s->sh);   /* the PLACE's size */
 		Uint32    back = tool_colour(1);
 
 		/* THE HOLE SHOWS WHAT WILL ACTUALLY BE LEFT THERE, which is colour 2 - so the desk

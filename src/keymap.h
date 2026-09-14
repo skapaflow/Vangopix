@@ -47,8 +47,17 @@
  *
  * THE FILE IS WRITTEN WHEN IT IS NOT THERE, so deleting keyboard.txt is how a person gets the
  * defaults back - nothing to reinstall and nothing to remember. Its first line is a version;
- * a file stamped by an older Vangopix is written again, because a keymap naming actions that
- * no longer exist is a keymap that silently stops binding half of itself.
+ * a file stamped by an older Vangopix is READ FIRST and then written again - keeping every key
+ * it moved, the way config.txt keeps its colours - because a keymap naming actions that no
+ * longer exist is a keymap that silently stops binding half of itself, and one written over
+ * from the defaults is an upgrade that silently undoes somebody's keyboard.
+ *
+ * TWO ACTIONS ON ONE KEY: the line further down loses, and that action keeps its default if
+ * nothing else holds it. Swapping two keys is two lines and works - the file is settled all at
+ * once, after it is read, and not a line at a time against the defaults, which made every swap
+ * refuse both of its halves. A key written on purpose beats one held by default: the action
+ * that only had it by default is left without one, and says so in the log and as "?" on the
+ * desk.
  *
  * A LINE IT CANNOT READ IS SKIPPED AND THAT ACTION KEEPS ITS DEFAULT - the rule the .anime
  * parser follows, for the same reason: this is a text file a person is invited to edit, so it
@@ -110,11 +119,15 @@ typedef enum {
 extern bool keymap_hit (VNG_ACT a, const SDL_Event *e);
 
 /*
- * Reads the file beside the executable, writing it first from the defaults when it is not
- * there or when it was written by an older build. It always leaves a usable map: a file that
- * cannot be read or cannot be written costs the file and nothing else.
+ * Reads the file beside the executable - writing it from the defaults when it is not there,
+ * and again, keeping what it said, when an older build wrote it. It always leaves a usable map:
+ * a file that cannot be read or cannot be written costs the file and nothing else.
  */
 extern void keymap_load (void);
+
+/* The same, on any path - what lets the checks exercise the file without touching the one
+   beside the executable, where checks.exe also lives. */
+extern void keymap_load_from (const char *path);
 
 /* ------------------------------------------------------------- what the desk is shown */
 

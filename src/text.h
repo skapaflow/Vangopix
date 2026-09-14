@@ -7,7 +7,7 @@
 /*
  * Text rendering, adapted from the text module of the Skyonara engine (SKNE_CORE).
  *
- * The glyphs of a TrueType face are packed once into a 512x512 atlas with stb_truetype
+ * The glyphs of a TrueType face are packed once into a 1024x1024 atlas with stb_truetype
  * and uploaded as a single texture; drawing a string is then one SDL_RenderTexture per
  * character out of that atlas. No per-string texture, no per-frame rasterising.
  *
@@ -15,16 +15,27 @@
  * and it rasterises to a surface per string, which then has to become a texture. Here
  * the only cost after startup is drawing quads, and stb_truetype is a header - it
  * crosses to Linux and macOS with the source, not with a package manager.
+ *
+ * STRINGS ARE UTF-8, AND THE ATLAS HOLDS ASCII AND LATIN-1. File and folder names arrive from
+ * the disk in UTF-8, and a face that knew only ASCII walked them a byte at a time and dropped
+ * every byte past 127 - so "Área de Trabalho", the Desktop of every Portuguese Windows, came
+ * out as "rea de Trabalho", a name that looked whole and was not. The accented letters of the
+ * languages that write with Latin letters are in the atlas now; anything past them is drawn as
+ * a question mark, which at least says a letter was there.
  */
 
-typedef struct SDL_Renderer SDL_Renderer;
+/* SDL's own renderer, named by its struct tag rather than typedef'd again: a second typedef
+   of a name SDL.h has already defined is legal in C11 and not in C99, which is the language
+   this program is written in. */
+struct SDL_Renderer;
 typedef struct TextSystem   TextSystem;
 
-/* Loads the face at font_path, packs the printable ASCII range into the atlas and
-   uploads it. Returns NULL on failure, having logged the reason. */
-TextSystem *text_init (SDL_Renderer *renderer, const char *font_path, float font_size);
+/* Loads the face at font_path, packs ASCII and Latin-1 into the atlas and uploads it.
+   Returns NULL on failure, having logged the reason - a file that is not a readable face
+   included. */
+TextSystem *text_init (struct SDL_Renderer *renderer, const char *font_path, float font_size);
 
-/* Draws text at (x, y), the top-left of the first line. Handles '\n'.
+/* Draws UTF-8 text at (x, y), the top-left of the first line. Handles '\n'.
    color is 0xRRGGBBAA. */
 void text_draw (TextSystem *ts, const char *text, float x, float y, uint32_t color);
 
@@ -69,7 +80,7 @@ void text_print_center_shadow (TextSystem *ts, float x, float y, uint32_t color,
 void text_measure (TextSystem *ts, const char *text, float *out_w, float *out_h);
 
 /* Copies src into dst, shortened until it fits max_w, with the last column turned into
- * a tilde.
+ * a tilde. Shortened a CHARACTER at a time, never through the middle of one.
  *
  * A TILDE AND NOT AN ELLIPSIS. It came from VagrantUI, and it outlived the decision to use
  * VagrantUI at all: two truncation marks in one program read as two different kinds of
@@ -83,8 +94,9 @@ void text_fit (TextSystem *ts, char *dst, size_t cap, const char *src, float max
  *
  * ONLY MEANINGFUL FOR A MONOSPACED FACE. Anything laying content out in columns needs one
  * fixed char_w/char_h; give it the cell of a proportional face and every column drifts. The
- * face Vangopix ships is monospaced (DejaVu Sans Mono), so this is true by default - but the
- * fallback in vangopix.c is not, and whoever lays out columns should know which one loaded. */
+ * face Vangopix ships is monospaced (DejaVu Sans Mono) and it is the only one vangopix.c asks
+ * for - the proportional fallback that used to sit behind it is gone, for this reason among
+ * others (CLAUDE.md, section 5). */
 void text_cell (TextSystem *ts, float *out_w, float *out_h);
 
 /* Distance between the baselines of two consecutive lines. */

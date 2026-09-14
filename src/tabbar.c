@@ -1,5 +1,6 @@
 #include "tabbar.h"
 #include "ui.h"
+#include "core.h"
 #include "file.h"
 #include "tabs.h"
 #include "style.h"
@@ -98,8 +99,10 @@ bool tabbar_event (const SDL_Event *e)
 
 		float x = e->button.x, y = e->button.y;
 
+		/* The same question CTRL+N asks. The [+] said it did the same thing, and made a sheet
+		 * of a fixed size without asking - two ways to one gesture that disagreed. */
 		if (on_plus(x, y)) {
-			vng_tab_new(VNG_NEW_W, VNG_NEW_H);
+			vangopix_new_sheet_ask();
 			return true;
 		}
 

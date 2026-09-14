@@ -1,9 +1,15 @@
-# Builds the Windows package and attaches it to a GitHub Release.
+# Builds the Windows package and attaches it to a GitHub Release - and, on every push to main
+# and every pull request, builds and runs the checks and stops there.
 #
 # Publishing becomes two commands:
 #
 #     git tag v1.0
 #     git push --tags
+#
+# THE CHECKS RAN ONLY WHEN A TAG WAS PUSHED, which is the one moment it is too late to hear
+# about them: a change that broke the suite went unnoticed until the release that carried it.
+# They run on every push now, with warnings as errors (make WERROR=1) - a warning is cheapest
+# to deal with the day it arrives. Packaging stays on tags, and on a manual run.
 #
 # WHAT THIS DELIBERATELY DOES NOT DO is describe the package. It calls `make dist`, which is
 # the same command used by hand - so the list of what a person downloads lives in exactly one
@@ -18,7 +24,9 @@ name: release
 
 on:
   push:
+    branches: [main]
     tags: ['v*']
+  pull_request:
   workflow_dispatch:      # so the packaging can be exercised without cutting a release
 
 permissions:
@@ -100,9 +108,10 @@ jobs:
       # session, so SDL video comes up.
       - name: checks
         shell: cmd
-        run: make test
+        run: make test WERROR=1
 
       - name: package
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         shell: cmd
         run: make dist
 
@@ -111,6 +120,7 @@ jobs:
       # a constant somebody forgot to raise is worse than one named after the tag that
       # actually produced it.
       - name: name the archive after the tag
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         shell: pwsh
         run: Rename-Item vangopix-win64.zip "vangopix-$env:GITHUB_REF_NAME-win64.zip"
 

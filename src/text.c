@@ -1,30 +1,62 @@
 /*
- * Adapted from SKNE_CORE/src/text/text.c. Two things changed on the way in:
+ * Adapted from SKNE_CORE/src/text/text.c. Three things changed on the way in:
  *
  *   - the font bytes come from SDL_LoadFile instead of the engine's asset pack, so this
  *     module depends on SDL and stb_truetype and on nothing else;
  *   - allocation goes through SDL_malloc / SDL_free rather than the libc pair, which
  *     keeps every allocation in this program on one allocator across the three
- *     platforms.
+ *     platforms - stb_truetype's own included, which is why SDL comes in first and the
+ *     STBTT_ macros are set before the implementation is: without them it quietly called
+ *     malloc, free, assert and libm behind the promise this line makes;
+ *   - the atlas holds LATIN-1 as well as ASCII, and strings are read as UTF-8 - see
+ *     text.h. A folder called "Área de Trabalho" came out as "rea de Trabalho".
  */
-
-#define STB_TRUETYPE_IMPLEMENTATION
-#include "stb_truetype.h"
 
 #include <SDL3/SDL.h>
 #include <stdarg.h>
 
+#define STBTT_malloc(x, u)  ((void)(u), SDL_malloc(x))
+#define STBTT_free(x, u)    ((void)(u), SDL_free(x))
+#define STBTT_assert(x)     SDL_assert(x)
+#define STBTT_ifloor(x)     ((int) SDL_floor(x))
+#define STBTT_iceil(x)      ((int) SDL_ceil(x))
+#define STBTT_sqrt(x)       SDL_sqrt(x)
+#define STBTT_pow(x, y)     SDL_pow(x, y)
+#define STBTT_fmod(x, y)    SDL_fmod(x, y)
+#define STBTT_cos(x)        SDL_cos(x)
+#define STBTT_acos(x)       SDL_acos(x)
+#define STBTT_fabs(x)       SDL_fabs(x)
+#define STBTT_strlen(x)     SDL_strlen(x)
+#define STBTT_memcpy        SDL_memcpy
+#define STBTT_memset        SDL_memset
+
+#define STB_TRUETYPE_IMPLEMENTATION
+#include "stb_truetype.h"
+
 #include "text.h"
 
-#define ATLAS_W    512
-#define ATLAS_H    512
-#define FIRST_CHAR 32
-#define NUM_CHARS  96
+/*
+ * 1024 SQUARE, AND IT WAS 512 UNTIL THE ATLAS HELD MORE THAN ASCII.
+ *
+ * Two ranges of ninety-six glyphs, oversampled twice each way, at the largest size config.txt
+ * allows (32) need more room than a 512 atlas has; 1024 holds both with rows to spare. It is a
+ * texture of four megabytes per face, made once.
+ */
+#define ATLAS_W     1024
+#define ATLAS_H     1024
+
+/* The printable ASCII range, and the top half of Latin-1: the accented letters of Portuguese,
+   Spanish, French and German, and the few signs beside them (NBSP to y-diaeresis). */
+#define ASCII_FIRST 32
+#define ASCII_LOT   96
+#define LATIN_FIRST 0xA0
+#define LATIN_LOT   96
 
 struct TextSystem {
-	SDL_Renderer     *renderer;
+	SDL_Renderer     *renderer;   /* SDL.h's typedef of the struct text.h names by its tag */
 	SDL_Texture      *atlas;
-	stbtt_packedchar  chars[NUM_CHARS];
+	stbtt_packedchar  ascii[ASCII_LOT];
+	stbtt_packedchar  latin[LATIN_LOT];
 	float             font_size;
 	float             line_height;
 	float             ascent;
@@ -40,28 +72,56 @@ TextSystem *text_init (SDL_Renderer *renderer, const char *font_path, float font
 		return NULL;
 	}
 
+	/*
+	 * THE FILE IS ASKED WHETHER IT IS A FONT BEFORE ANYTHING READS IT AS ONE.
+	 *
+	 * stb_truetype takes the bytes on trust: handed a truncated or corrupt file, the packer
+	 * went ahead - it does not check its own InitFont - and read tables at whatever offsets the
+	 * garbage named, and then the metrics below did the same. A face that will not initialise is
+	 * a face that failed to load, which is a supported state: text_draw on NULL draws nothing.
+	 * Twelve bytes is the smallest header there is.
+	 */
+	stbtt_fontinfo info;
+	int offset = font_len >= 12 ? stbtt_GetFontOffsetForIndex(font_data, 0) : -1;
+
+	if (offset < 0 || !stbtt_InitFont(&info, font_data, offset)) {
+		SDL_Log("text_init: '%s' is not a face this can read", font_path);
+		SDL_free(font_data);
+		return NULL;
+	}
+
 	TextSystem *ts = (TextSystem *) SDL_calloc(1, sizeof *ts);
 	if (!ts) { SDL_free(font_data); return NULL; }
 	ts->renderer  = renderer;
 	ts->font_size = font_size;
 
-	unsigned char *bitmap = (unsigned char *) SDL_calloc(ATLAS_W * ATLAS_H, 1);
+	unsigned char *bitmap = (unsigned char *) SDL_calloc((size_t)ATLAS_W * ATLAS_H, 1);
 	if (!bitmap) { SDL_free(font_data); SDL_free(ts); return NULL; }
+
+	stbtt_pack_range ranges[2];
+	SDL_zeroa(ranges);
+	ranges[0].font_size                        = font_size;
+	ranges[0].first_unicode_codepoint_in_range = ASCII_FIRST;
+	ranges[0].num_chars                        = ASCII_LOT;
+	ranges[0].chardata_for_range               = ts->ascii;
+	ranges[1].font_size                        = font_size;
+	ranges[1].first_unicode_codepoint_in_range = LATIN_FIRST;
+	ranges[1].num_chars                        = LATIN_LOT;
+	ranges[1].chardata_for_range               = ts->latin;
 
 	stbtt_pack_context pc;
 	stbtt_PackBegin(&pc, bitmap, ATLAS_W, ATLAS_H, 0, 1, NULL);
 	/* Oversampling 2x2: stb rasterises at twice the resolution and downsamples, which
 	 * is what keeps small sizes from turning into mush. Costs atlas area, not frames. */
 	stbtt_PackSetOversampling(&pc, 2, 2);
-	int ok = stbtt_PackFontRange(&pc, font_data, 0, font_size,
-	                             FIRST_CHAR, NUM_CHARS, ts->chars);
+	int ok = stbtt_PackFontRanges(&pc, font_data, 0, ranges, 2);
 	stbtt_PackEnd(&pc);
 
+	/* A glyph that did not fit is left with no size and draws as nothing; the rest are good.
+	 * Worth a line, since it only happens at a size past what the atlas was made for. */
 	if (!ok)
 		SDL_Log("text_init: atlas too small for the face at %.0fpx", font_size);
 
-	stbtt_fontinfo info;
-	stbtt_InitFont(&info, font_data, 0);
 	int ascent, descent, line_gap;
 	stbtt_GetFontVMetrics(&info, &ascent, &descent, &line_gap);
 	float scale = stbtt_ScaleForPixelHeight(&info, font_size);
@@ -73,7 +133,7 @@ TextSystem *text_init (SDL_Renderer *renderer, const char *font_path, float font
 	 * one atlas serves every colour the program will ever use. */
 	unsigned char *rgba = (unsigned char *) SDL_malloc((size_t)ATLAS_W * ATLAS_H * 4);
 	if (!rgba) { SDL_free(bitmap); SDL_free(font_data); SDL_free(ts); return NULL; }
-	for (int i = 0; i < ATLAS_W * ATLAS_H; i++) {
+	for (size_t i = 0; i < (size_t)ATLAS_W * ATLAS_H; i++) {
 		rgba[i * 4 + 0] = 255;
 		rgba[i * 4 + 1] = 255;
 		rgba[i * 4 + 2] = 255;
@@ -96,6 +156,27 @@ TextSystem *text_init (SDL_Renderer *renderer, const char *font_path, float font
 	return ts;
 }
 
+/*
+ * THE QUAD FOR ONE CHARACTER, AND THE PEN MOVED PAST IT.
+ *
+ * False for a control character, which draws nothing and moves nothing - a tab or a carriage
+ * return in a name is not a letter. A character the atlas does not hold is drawn as a QUESTION
+ * MARK rather than skipped: skipping is how "Área" came out "rea", a name that looked whole and
+ * was not. A mark in its place says there was a letter there this face could not show.
+ */
+static bool quad_of (TextSystem *ts, Uint32 cp, float *cx, float *cy, stbtt_aligned_quad *q)
+{
+	if (cp < ASCII_FIRST) return false;
+
+	if (cp < ASCII_FIRST + ASCII_LOT)
+		stbtt_GetPackedQuad(ts->ascii, ATLAS_W, ATLAS_H, (int)(cp - ASCII_FIRST), cx, cy, q, 0);
+	else if (cp >= LATIN_FIRST && cp < LATIN_FIRST + LATIN_LOT)
+		stbtt_GetPackedQuad(ts->latin, ATLAS_W, ATLAS_H, (int)(cp - LATIN_FIRST), cx, cy, q, 0);
+	else
+		stbtt_GetPackedQuad(ts->ascii, ATLAS_W, ATLAS_H, '?' - ASCII_FIRST, cx, cy, q, 0);
+	return true;
+}
+
 void text_draw (TextSystem *ts, const char *text, float x, float y, uint32_t color)
 {
 	if (!ts || !text) return;
@@ -109,30 +190,26 @@ void text_draw (TextSystem *ts, const char *text, float x, float y, uint32_t col
 	 * mysterious vertical offset rather than as an error. */
 	float cx = x, cy = y + ts->ascent;
 
+	/* A CHARACTER AT A TIME, NOT A BYTE: SDL_StepUTF8 reads one whole code point and moves
+	 * past it, and hands back U+FFFD for bytes that are not UTF-8 - which then draws as the
+	 * question mark, like anything else the atlas does not hold. */
 	while (*text) {
+		Uint32 cp = SDL_StepUTF8(&text, NULL);
 
-		if (*text == '\n') {
+		if (cp == '\n') {
 			cx  = x;
 			cy += ts->line_height;
-			text++;
-			continue;
-		}
-
-		int c = (unsigned char)*text;
-		if (c < FIRST_CHAR || c >= FIRST_CHAR + NUM_CHARS) {
-			text++;
 			continue;
 		}
 
 		stbtt_aligned_quad q;
-		stbtt_GetPackedQuad(ts->chars, ATLAS_W, ATLAS_H, c - FIRST_CHAR, &cx, &cy, &q, 0);
+		if (!quad_of(ts, cp, &cx, &cy, &q)) continue;
 
 		SDL_FRect src = { q.s0 * ATLAS_W, q.t0 * ATLAS_H,
 		                  (q.s1 - q.s0) * ATLAS_W, (q.t1 - q.t0) * ATLAS_H };
 		SDL_FRect dst = { q.x0, q.y0, q.x1 - q.x0, q.y1 - q.y0 };
 
 		SDL_RenderTexture(ts->renderer, ts->atlas, &src, &dst);
-		text++;
 	}
 }
 
@@ -147,45 +224,63 @@ void text_measure (TextSystem *ts, const char *text, float *out_w, float *out_h)
 	float cx = 0, cy = 0, max_x = 0;
 	int   lines = 1;
 
-	/* Walks the same advance stb would apply while drawing, without emitting quads. */
+	/* Walks the same advance stb would apply while drawing, without emitting quads - and the
+	 * same characters text_draw would, so a measured string and a drawn one cannot disagree. */
 	while (*text) {
-		if (*text == '\n') {
+		Uint32 cp = SDL_StepUTF8(&text, NULL);
+
+		if (cp == '\n') {
 			if (cx > max_x) max_x = cx;
 			cx = 0;
 			lines++;
-			text++;
 			continue;
 		}
-		int c = (unsigned char)*text;
-		if (c >= FIRST_CHAR && c < FIRST_CHAR + NUM_CHARS) {
-			stbtt_aligned_quad q;
-			stbtt_GetPackedQuad(ts->chars, ATLAS_W, ATLAS_H, c - FIRST_CHAR,
-			                    &cx, &cy, &q, 0);
-		}
-		text++;
+
+		stbtt_aligned_quad q;
+		quad_of(ts, cp, &cx, &cy, &q);
 	}
 	if (cx > max_x) max_x = cx;
 	if (out_w) *out_w = max_x;
 	if (out_h) *out_h = (float)lines * ts->line_height;
 }
 
+/* Where the character ending at byte `end` begins: back over the continuation bytes (10xxxxxx)
+   to its first. */
+static size_t char_start (const char *s, size_t end)
+{
+	if (end == 0) return 0;
+
+	size_t i = end - 1;
+	while (i > 0 && ((unsigned char)s[i] & 0xC0) == 0x80) i--;
+	return i;
+}
+
 void text_fit (TextSystem *ts, char *dst, size_t cap, const char *src, float max_w)
 {
 	if (!dst || cap == 0) return;
 
-	SDL_strlcpy(dst, src ? src : "", cap);
+	/* Copied whole characters only, so a name cut by the buffer is not cut inside a letter. */
+	SDL_utf8strlcpy(dst, src ? src : "", cap);
 	if (!ts) return;
 
 	float w, h;
 	text_measure(ts, dst, &w, &h);
 	if (w <= max_w) return;
 
-	/* One character shorter each pass, with the new last column replaced rather than
-	 * appended - appending would make the string grow back to the width just rejected. */
+	/* One CHARACTER shorter each pass, with the new last one replaced by the tilde rather than
+	 * appended to - appending would make the string grow back to the width just rejected. A
+	 * character and not a byte: a cut through the middle of an accented letter left half of it,
+	 * which is not UTF-8 at all. */
 	size_t len = SDL_strlen(dst);
-	while (len > 1) {
-		dst[--len]   = '\0';
-		dst[len - 1] = '~';
+	for (;;) {
+		size_t gone = char_start(dst, len);   /* the last character goes */
+		if (gone == 0) return;                /* one left - it is the tilde already */
+
+		size_t last = char_start(dst, gone);  /* and the one before it becomes the tilde */
+		dst[last]     = '~';
+		dst[last + 1] = '\0';
+		len           = last + 1;
+
 		text_measure(ts, dst, &w, &h);
 		if (w <= max_w) return;
 	}

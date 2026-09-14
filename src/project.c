@@ -32,8 +32,9 @@ static void node_name (VNG_NODE *n, const char *path)
 			base = p + 1;
 
 	/* A root can be a drive or end in a separator, leaving nothing after the last one.
-	 * Showing an empty row would be worse than showing the whole path. */
-	SDL_strlcpy(n->name, *base ? base : path, sizeof n->name);
+	 * Showing an empty row would be worse than showing the whole path. Cut on a character,
+	 * never inside one - see tab_set_name. */
+	SDL_utf8strlcpy(n->name, *base ? base : path, sizeof n->name);
 }
 
 static VNG_NODE *node_new (const char *path, bool is_dir)
@@ -78,25 +79,34 @@ static int SDLCALL node_cmp (const void *a, const void *b)
 static SDL_EnumerationResult SDLCALL scan_cb (void *ud, const char *dirname, const char *fname)
 {
 	VNG_NODE *parent = (VNG_NODE *) ud;
-	char      full[1024];
-
-	/* dirname arrives with a trailing separator already, so this does not add one. */
-	SDL_snprintf(full, sizeof full, "%s%s", dirname, fname);
-
-	SDL_PathInfo info;
-	if (!SDL_GetPathInfo(full, &info))
-		return SDL_ENUM_CONTINUE;     /* unreadable entry: skip it, do not fail the scan */
-
-	bool is_dir = (info.type == SDL_PATHTYPE_DIRECTORY);
-	if (!is_dir && !project_is_image(fname))
-		return SDL_ENUM_CONTINUE;
 
 	/* Dot files and dot folders stay out. A project folder next to a .git holds tens of
-	 * thousands of entries no one wants to page through. */
+	 * thousands of entries no one wants to page through - and they are left out BEFORE the
+	 * disk is asked about them, which is the one thing a name alone can settle. */
 	if (fname[0] == '.')
 		return SDL_ENUM_CONTINUE;
 
+	/* dirname arrives with a trailing separator already, so this does not add one. Sized from
+	 * the two halves rather than a fixed buffer, which cut a long path short and listed a
+	 * file under a path that did not exist. */
+	char *full = NULL;
+	if (SDL_asprintf(&full, "%s%s", dirname, fname) < 0 || !full)
+		return SDL_ENUM_CONTINUE;
+
+	SDL_PathInfo info;
+	if (!SDL_GetPathInfo(full, &info)) {
+		SDL_free(full);
+		return SDL_ENUM_CONTINUE;     /* unreadable entry: skip it, do not fail the scan */
+	}
+
+	bool is_dir = (info.type == SDL_PATHTYPE_DIRECTORY);
+	if (!is_dir && !project_is_image(fname)) {
+		SDL_free(full);
+		return SDL_ENUM_CONTINUE;
+	}
+
 	VNG_NODE *n = node_new(full, is_dir);
+	SDL_free(full);
 	if (!n) return SDL_ENUM_FAILURE;
 
 	n->next = parent->child;      /* pushed on the front; the sort below fixes order */
@@ -215,8 +225,8 @@ bool project_add (const char *dir)
 		return false;
 
 	for (VNG_NODE *p = vng_projects; p; p = p->next)
-		if (SDL_strcmp(p->path, dir) == 0)
-			return false;                  /* already here */
+		if (vangopix_path_same(p->path, dir))
+			return false;                  /* already here - however the slashes were spelled */
 
 	VNG_NODE *n = node_new(dir, true);
 	if (!n) return false;

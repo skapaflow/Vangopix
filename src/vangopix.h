@@ -78,4 +78,16 @@ extern char *vangopix_asset (const char *relative);
  */
 extern bool vangopix_read_line (SDL_IOStream *io, char *dst, size_t cap);
 
+/*
+ * DO TWO PATHS NAME THE SAME FILE, as far as the string can tell. The two separators count as
+ * one - a path from the command line and one the project panel built spell the same folder
+ * with different ones on Windows - and so do upper and lower case where the filesystems the
+ * platform ships with ignore it (Windows and macOS). A symlink or a ".." is beyond what a
+ * string can say; those still count as different, which is no worse than before.
+ *
+ * One answer for three questions that must agree: is this file already open in a tab, is this
+ * the file on screen in the project panel, and is this folder already a project.
+ */
+extern bool vangopix_path_same (const char *a, const char *b);
+
 #endif

@@ -49,7 +49,8 @@
  * something to transform. Otherwise R is still the ellipse.
  */
 
-typedef struct _vng_sel_ VNG_SEL;   /* select.c owns it; opaque from here */
+/* VNG_SEL is declared in tabs.h, which holds one per tab, and a second typedef of it here would
+   not be legal C99 - select.c owns the struct; it is opaque everywhere else. */
 
 extern void select_free (VNG_SEL *s);
 
@@ -75,9 +76,17 @@ extern void select_draw (VNG_TAB *t);
 extern bool select_area (VNG_TAB *t, SDL_Rect *r);
 
 /* Drops a float into the document as one undo step, or does nothing if there is none. What
-   switching tabs, closing a tab and picking another tool all call, so that a float is never
-   left hanging in a document nobody is looking at. */
+   picking another tool calls, so that a float is never left hanging over a sheet a pencil is
+   now drawing on. */
 extern void select_commit (VNG_TAB *t);
+
+/* The same, and any drag in progress is let go of too - a mark being pulled out, a float being
+   carried. What vng_tab_settle calls: after it, nothing of the selection is half done. */
+extern void select_settle (VNG_TAB *t);
+
+/* Moves the marked rectangle, and a float with its hole, by (dx, dy) document pixels - what a
+   canvas resize calls, since growing to the left moves every pixel of the drawing right. */
+extern void select_shift (VNG_TAB *t, int dx, int dy);
 
 /* Puts the clipboard down as a float centred on that document pixel, and takes the select
    tool: a paste with no way to move what was pasted is a gesture that stops halfway. CTRL+V

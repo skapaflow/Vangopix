@@ -388,11 +388,6 @@ static LAYOUT layout (SDL_FRect r)
 	return l;
 }
 
-static bool in_rect (SDL_FRect r, float x, float y)
-{
-	return x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h;
-}
-
 
 
 /* ------------------------------------------------------------------------- the field */
@@ -440,22 +435,28 @@ static bool on_event (SDL_FRect area, const SDL_Event *e, void *ctx)
 
 	LAYOUT l = layout(area);
 
+	/* Presses, releases and motion, and nothing else: the wheel reaches this too, and its
+	 * position is not where a button's is in the union - read as one, it turned the hue to
+	 * wherever that garbage pointed whenever the wheel moved during a drag. */
 	float x, y;
 	if (e->type == SDL_EVENT_MOUSE_MOTION) { x = e->motion.x; y = e->motion.y; }
-	else                                   { x = e->button.x; y = e->button.y; }
+	else if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
+	         e->type == SDL_EVENT_MOUSE_BUTTON_UP)  { x = e->button.x; y = e->button.y; }
+	else return false;
 
 	if (e->type == SDL_EVENT_MOUSE_BUTTON_UP) { grab = GRAB_NONE; return false; }
 
 	if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
-		/* Pressing anywhere else finishes what was being typed, which is what a person means
-		 * by it - losing it because the mouse moved would be the surprising reading. */
-		if (!in_rect(l.hex, x, y)) field_close(hex_box, false);
+		/* Pressing anywhere else puts the box away WITHOUT taking what was half typed into it
+		 * - the lone box's reading of a click elsewhere, which field.h gives: a click is not an
+		 * ENTER, and a press on the wheel meant the wheel. */
+		if (!ui_hit(l.hex, x, y)) field_close(hex_box, false);
 
 		/* The button decides which colour this press is filling, before anything is read. */
 		slot = (e->button.button == SDL_BUTTON_RIGHT) ? 1 : 0;
 
 		/* Taken, so the window does not read it as somewhere to be dragged from. */
-		if (in_rect(l.hex, x, y)) { hex_start(); return true; }
+		if (ui_hit(l.hex, x, y)) { hex_start(); return true; }
 
 		/* ANYWHERE INSIDE THE WHEEL'S REACH TAKES THE HUE, not only the ring itself. Aiming
 		 * at a twenty pixel band is a worse gesture than pointing at a direction, and a
@@ -464,7 +465,7 @@ static bool on_event (SDL_FRect area, const SDL_Event *e, void *ctx)
 		if (SDL_sqrtf(dx * dx + dy * dy) <= l.radius) grab = GRAB_WHEEL;
 		else {
 			for (int b = 0; b < BARS; b++)
-				if (in_rect(l.bar[b], x, y)) { grab = GRAB_BAR; grab_bar = b; }
+				if (ui_hit(l.bar[b], x, y)) { grab = GRAB_BAR; grab_bar = b; }
 		}
 
 		/* Nothing under the press that this window wants. */
@@ -619,6 +620,19 @@ static void body (SDL_FRect area, void *ctx)
 }
 
 /*
+ * THE WINDOW GOING AWAY, BY ANY ROUTE, TAKES THE BOX WITH IT - C, or its own close dot, which
+ * is win.c's and used to hide the window and nothing else: the hex box went on holding the
+ * keyboard with no caret anywhere on screen, and every shortcut in the program was dead until
+ * somebody happened to press ESC. A window put away must not hold the keyboard.
+ */
+static void on_hide (void *ctx)
+{
+	(void)ctx;
+	field_close(hex_box, false);
+	grab = GRAB_NONE;
+}
+
+/*
  * IT COMES UP UNDER THE POINTER, centred on it - the first Vangopix's behaviour, and the same
  * reason as the 1:1 panel: a window summoned to the hand needs no dragging to be where it is
  * wanted.
@@ -647,6 +661,7 @@ void colour_open (void)
 		if (!hex_box) hex_box = field_make(VNG_FIELD_HEX, hex_done, NULL);
 
 		win = win_open("colour", a, m, body, on_event, NULL);
+		win_on_hide(win, on_hide);
 	}
 
 	win_place(win, mx, my);
@@ -656,8 +671,7 @@ void colour_open (void)
 void colour_toggle (void)
 {
 	if (win && win_visible(win)) {
-		field_close(hex_box, false);   /* a window put away must not hold the keyboard */
-		win_show(win, false);
+		win_show(win, false);   /* on_hide lets go of the keyboard - see there */
 		return;
 	}
 	colour_open();

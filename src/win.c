@@ -21,6 +21,7 @@ struct _vng_win_ {
 	SDL_FPoint min;
 	WIN_DRAW  draw;
 	WIN_EVENT ev;
+	WIN_HIDE  hide;         /* told on the way from shown to hidden - see win_on_hide */
 	void     *ctx;
 	bool      shown;
 	bool      fixed;        /* no stretch corner - see win_fixed */
@@ -36,8 +37,12 @@ static bool     stretching = false;
 static float    grab_x = 0.0f, grab_y = 0.0f;
 
 /* The window whose OWNER took a press. Everything that follows until the release goes to it,
- * even off the window: a slider dragged past its own edge is still being dragged. */
+ * even off the window: a slider dragged past its own edge is still being dragged.
+ *
+ * Until the release OF THAT BUTTON, and the same for a window being carried: any release used
+ * to end either, so tapping the other button mid-drag let go of a slider still under the hand. */
 static VNG_WIN *inner = NULL;
+static Uint8    inner_btn = 0;
 
 /* The close box a press went down on. The same contract as every other button here: it only
  * fires if the button comes back up over the same box. */
@@ -88,11 +93,6 @@ static SDL_FRect grip_rect (VNG_WIN *w)
 	return r;
 }
 
-static bool in_rect (SDL_FRect r, float x, float y)
-{
-	return x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h;
-}
-
 VNG_WIN *win_top (void)
 {
 	VNG_WIN *found = NULL;
@@ -124,13 +124,15 @@ void win_fixed (VNG_WIN *w, bool on)
 
 bool win_visible (VNG_WIN *w) { return w && w->shown; }
 
+void win_on_hide (VNG_WIN *w, WIN_HIDE fn) { if (w) w->hide = fn; }
+
 bool win_hover (VNG_WIN *w)
 {
 	if (!w || !w->shown) return false;
 
 	float mx, my;
 	SDL_GetMouseState(&mx, &my);
-	return in_rect(outer(w), mx, my);
+	return ui_hit(outer(w), mx, my);
 }
 
 /* Declared here because showing a window raises it: a window being summoned is the one being
@@ -154,6 +156,8 @@ void win_clip (VNG_WIN *w)
 void win_show (VNG_WIN *w, bool on)
 {
 	if (!w) return;
+
+	bool was = w->shown;
 	w->shown = on;
 	if (on) raise(w);
 
@@ -162,6 +166,9 @@ void win_show (VNG_WIN *w, bool on)
 	if (!on && held == w) { held = NULL; stretching = false; }
 	if (!on && inner == w) inner = NULL;
 	if (!on && close_armed == w) close_armed = NULL;
+
+	/* And the owner told, once, on the way out - see win_on_hide. */
+	if (was && !on && w->hide) w->hide(w->ctx);
 }
 
 VNG_WIN *win_open (const char *title, SDL_FRect area, SDL_FPoint min,
@@ -170,7 +177,7 @@ VNG_WIN *win_open (const char *title, SDL_FRect area, SDL_FPoint min,
 	VNG_WIN *w = (VNG_WIN *) SDL_calloc(1, sizeof *w);
 	if (!w) return NULL;
 
-	SDL_strlcpy(w->title, title ? title : "", sizeof w->title);
+	SDL_utf8strlcpy(w->title, title ? title : "", sizeof w->title);
 	w->a     = area;
 	w->min   = min;
 	w->draw  = draw;
@@ -220,10 +227,12 @@ static VNG_WIN *at (float x, float y)
 {
 	VNG_WIN *found = NULL;
 	for (VNG_WIN *w = list; w; w = w->next)
-		if (w->shown && in_rect(outer(w), x, y))
+		if (w->shown && ui_hit(outer(w), x, y))
 			found = w;
 	return found;
 }
+
+bool win_hit (float x, float y) { return at(x, y) != NULL; }
 
 /* Keeps enough of the head reachable. Not the whole window: dragging most of a panel off the
  * edge is a thing people do on purpose, and only being unable to get it back is the problem. */
@@ -266,12 +275,12 @@ bool win_event (const SDL_Event *e)
 		/* The frame answers the LEFT button only: dragging a window about with the right one
 		 * is not a gesture anybody makes, and reserving it here would take it away from the
 		 * inside - where it means something, since the two colours are one per button. */
-		bool on_frame = in_rect(head_rect(w), x, y) || in_rect(grip_rect(w), x, y);
+		bool on_frame = ui_hit(head_rect(w), x, y) || ui_hit(grip_rect(w), x, y);
 
 		if (e->button.button == SDL_BUTTON_LEFT) {
-			if (in_rect(close_rect(w), x, y)) { close_armed = w; return true; }
+			if (ui_hit(close_rect(w), x, y)) { close_armed = w; return true; }
 
-			if (in_rect(grip_rect(w), x, y)) {
+			if (ui_hit(grip_rect(w), x, y)) {
 				held = w;
 				stretching = true;
 				grab_x = x - (w->a.x + w->a.w);
@@ -279,7 +288,7 @@ bool win_event (const SDL_Event *e)
 				return true;
 			}
 
-			if (in_rect(head_rect(w), x, y)) {
+			if (ui_hit(head_rect(w), x, y)) {
 				held = w;
 				stretching = false;
 				grab_x = x - w->a.x;
@@ -307,7 +316,13 @@ bool win_event (const SDL_Event *e)
 		 */
 		if (on_frame) return true;
 
-		if (w->ev && w->ev(w->a, e, w->ctx)) { inner = w; return true; }
+		/* The owner took it, so the drag is the owner's - unless taking it was putting the
+		 * window away, as a menu does when a row is chosen: a drag held by a window nobody can
+		 * see swallowed every motion until the button came up. */
+		if (w->ev && w->ev(w->a, e, w->ctx)) {
+			if (w->shown) { inner = w; inner_btn = e->button.button; }
+			return true;
+		}
 
 		if (e->button.button == SDL_BUTTON_LEFT) {
 			held = w;
@@ -341,15 +356,20 @@ bool win_event (const SDL_Event *e)
 
 	case SDL_EVENT_MOUSE_BUTTON_UP: {
 		if (inner) {
+			/* Any release is the owner's to hear while it holds a drag; only its own ends it. */
 			VNG_WIN *w = inner;
-			inner = NULL;
+			if (e->button.button == inner_btn) inner = NULL;
 			w->ev(w->a, e, w->ctx);
 			return true;
 		}
+
+		/* The close box and the frame answer the LEFT button only, so only its release. */
+		if (e->button.button != SDL_BUTTON_LEFT) return false;
+
 		if (close_armed) {
 			VNG_WIN *w = close_armed;
 			close_armed = NULL;
-			if (in_rect(close_rect(w), e->button.x, e->button.y)) {
+			if (ui_hit(close_rect(w), e->button.x, e->button.y)) {
 				win_show(w, false);
 				return true;
 			}
@@ -418,7 +438,7 @@ void win_draw (void)
 		 * there. That was not true of the "x" this replaces. */
 		{
 			SDL_FRect c = close_rect(w);
-			ui_close_mark(c, in_rect(c, mx, my));
+			ui_close_mark(c, ui_hit(c, mx, my));
 		}
 
 		/* The stretch corner: two short strokes, which is enough to say "pull here" without

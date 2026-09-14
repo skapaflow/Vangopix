@@ -35,6 +35,10 @@ extern bool resize_event (const SDL_Event *e, VNG_TAB *t);
  */
 extern bool resize_hot (VNG_TAB *t);
 
+/* The same question about any point rather than the mouse - what the tool asks with the point
+   it is already looking at, and what lets a check ask it without a hand on the mouse. */
+extern bool resize_hot_at (VNG_TAB *t, float x, float y);
+
 /* Draws the four handles, and the outline plus the size readout while dragging. */
 extern void resize_draw (VNG_TAB *t);
 

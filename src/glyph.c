@@ -85,8 +85,9 @@ static const SDL_FPoint vdir_shut[] = {
 
 typedef struct { const SDL_FPoint *pt; int lot; } SHAPE;
 
-/* The order is the TOOL order, so a tool indexes its own glyph with no table between. */
-static const SHAPE shapes[GLYPH_LOT] = {
+/* The order is the TOOL order, so a tool indexes its own glyph with no table between. Unsized
+   and counted below: a glyph added to the enum without a shape here was a NULL path. */
+static const SHAPE shapes[] = {
 	{ vpencil,  (int)SDL_arraysize(vpencil)  },
 	{ vline,    (int)SDL_arraysize(vline)    },
 	{ vrect,    (int)SDL_arraysize(vrect)    },
@@ -101,6 +102,8 @@ static const SHAPE shapes[GLYPH_LOT] = {
 	{ vdir_open, (int)SDL_arraysize(vdir_open) },
 	{ vdir_shut, (int)SDL_arraysize(vdir_shut) },
 };
+
+SDL_COMPILE_TIME_ASSERT(glyph_has_a_shape_each, SDL_arraysize(shapes) == GLYPH_LOT);
 
 /* One more than the longest glyph, because the path is closed by repeating its first point.
  * A stack array rather than an allocation: this runs once a frame, and the first Vangopix's

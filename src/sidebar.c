@@ -181,7 +181,7 @@ static void stub_draw (void)
 
 	float mx, my;
 	SDL_GetMouseState(&mx, &my);
-	bool hot = mx >= r.x && my >= r.y && mx < r.x + r.w && my < r.y + r.h;
+	bool hot = ui_hit(r, mx, my);
 
 	SDL_SetRenderDrawBlendMode(vng_ren, SDL_BLENDMODE_BLEND);
 
@@ -348,9 +348,7 @@ bool sidebar_event (const SDL_Event *e)
 	if (anim <= 0.0f) {
 		if (!stub_up() || e->type != SDL_EVENT_MOUSE_BUTTON_DOWN) return false;
 
-		SDL_FRect r = stub_rect();
-		if (e->button.x < r.x || e->button.x >= r.x + r.w ||
-		    e->button.y < r.y || e->button.y >= r.y + r.h) return false;
+		if (!ui_hit(stub_rect(), e->button.x, e->button.y)) return false;
 
 		if (e->button.button == SDL_BUTTON_LEFT) sidebar_toggle();
 		return true;   /* either button: it landed on the strip, and nothing under it */
@@ -854,7 +852,7 @@ void sidebar_draw (void)
 		 * sprites, finding which one is on screen is otherwise a matter of reading the
 		 * window title and then reading the list. */
 		bool current = (!n->is_dir && vng_tab && vng_tab->path &&
-		                SDL_strcmp(vng_tab->path, n->path) == 0);
+		                vangopix_path_same(vng_tab->path, n->path));
 
 		bool lifted = (dragging && n == held);
 

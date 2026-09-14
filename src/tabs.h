@@ -6,6 +6,7 @@
 typedef struct _vng_undo_ VNG_UNDO;   /* undo.h owns it; opaque from here */
 typedef struct _vng_sel_  VNG_SEL;    /* select.h, likewise */
 typedef struct _vng_pal_  VNG_PAL;   /* palette.h, likewise */
+typedef struct _vng_anim_ VNG_ANIM;  /* anim.h, likewise */
 
 /*
  * A TAB IS A DOCUMENT. There is no second structure.
@@ -29,7 +30,19 @@ typedef struct _vng_tab_ {
 	int     w, h;
 	Uint32 *pixels;            /* ARGB8888 - THE DOCUMENT                        */
 	SDL_Texture *tex;          /* the copy the GPU sees                          */
-	bool    tex_dirty;         /* the sheet changed and the texture doesn't know */
+
+	/*
+	 * WHAT THE TEXTURE HAS NOT SEEN YET, as a rectangle and not as a flag - half open, empty
+	 * when tx1 <= tx0. See vng_tab_touch.
+	 *
+	 * It was a bool, and a bool can only say "all of it": every write-through stroke - the
+	 * eraser, any colour with alpha - set it on every frame the hand moved, and the frame
+	 * then sent the whole sheet to the GPU. On a 4000 pixel photograph that is sixty-four
+	 * megabytes a frame to rub out a dozen pixels. The preview texture keeps its own for the
+	 * same reason: it is re-sent only where it changed, not wherever the stroke has been.
+	 */
+	int     tx0, ty0, tx1, ty1;
+	int     px0, py0, px1, py1;
 
 	/*
 	 * THE OTHER TWO OF THE THREE BUFFERS A STROKE IS DRAWN OVER.
@@ -70,6 +83,13 @@ typedef struct _vng_tab_ {
 	 * lazily on first sight - a photograph opened only to be looked at pays nothing for a
 	 * panel nobody summoned - and freed with the tab it belongs to. */
 	VNG_PAL  *pal;
+
+	/* The animation clips are PER TAB too, and the reason is a file that got written wrong: a
+	 * clip is four numbers pointing at pixels IN THIS DRAWING and it is saved beside this image
+	 * (hero.png keeps hero.vnganime). One list for the program followed the tab only when the
+	 * window was summoned, so a player left open while the sheet changed underneath it saved
+	 * one image's clips into the other's sidecar. Built on first sight, freed with the tab. */
+	VNG_ANIM *anim;
 
 	/* The view is PER TAB, not global: switching tabs must put the drawing back
 	 * where the eye left it, same zoom and same corner. A global view makes every
@@ -122,11 +142,23 @@ extern VNG_TAB *vng_tab;    /* the one on screen */
  *          with no stroke open. What a tool that WALKS a region asks, because a walk has to
  *          take the edge as a wall rather than merely be refused at it - see plot_flood.
  *
- *   open_unclipped  THE ONE EXCEPTION, AND IT HAS ONE CALLER: select_commit. Putting a float
- *          down writes the hole it left AND the place it landed, and by then the marked
- *          rectangle is the second of those - bounding the selection's own move by the
- *          selection would leave the hole unwritten. The selection is what says where the
- *          edge is; it cannot be held inside itself. A second caller is a decision to raise.
+ *   open_unclipped  THE ONE EXCEPTION, AND IT HAS ONE CALLER: select.c's put_down, which is
+ *          what landing a float and throwing a cut one away both are. Putting a float down
+ *          writes the hole it left AND the place it landed, and by then the marked rectangle
+ *          is the second of those - bounding the selection's own move by the selection would
+ *          leave the hole unwritten. The selection is what says where the edge is; it cannot
+ *          be held inside itself. A second caller is a decision to raise.
+ *
+ * A PUT THAT CHANGES NOTHING RECORDS NOTHING. Black laid over black is marked - so a blending
+ * tool still will not come back to it - but carries no undo entry, and a stroke made only of
+ * such pixels leaves no step: CTRL+Z on it would seem to do nothing, which reads as undo being
+ * broken. It is the rule undo_close already applied to a click that touched no pixel at all.
+ *
+ * ONE STROKE AT A TIME PER SHEET. Opening a second one while the first is still open used to
+ * throw the first one's undo step away and forget its rectangle, leaving its preview pixels
+ * behind to be merged by whichever stroke came next. It now CANCELS the first - rewound or
+ * wiped, nothing of it left - which is a safety net and not a protocol: whoever is about to
+ * change the sheet calls vng_tab_settle first, and then there is nothing open to cancel.
  */
 extern bool vng_tab_stroke_open  (VNG_TAB *t, bool direct);
 extern bool vng_tab_stroke_open_unclipped (VNG_TAB *t, bool direct);
@@ -136,16 +168,57 @@ extern void vng_tab_put          (VNG_TAB *t, int x, int y, Uint32 argb);
 extern void vng_tab_stroke_reset (VNG_TAB *t);
 extern void vng_tab_stroke_close (VNG_TAB *t);
 
+/*
+ * THE DOCUMENT CHANGED INSIDE THIS RECTANGLE, and the texture has not been told.
+ *
+ * Every write to t->pixels outside a stroke calls it - undo, the adopt of a new buffer - and
+ * the strokes call it themselves. Clamped to the sheet here, so a caller may pass a rectangle
+ * that runs off the edge. vng_tab_upload is the other half: it sends exactly the union of
+ * everything touched since the last frame, and nothing that was not.
+ */
+extern void vng_tab_touch  (VNG_TAB *t, int x, int y, int w, int h);
+extern void vng_tab_upload (VNG_TAB *t);
+
 extern VNG_TAB *vng_tab_new   (int w, int h);
+
+/*
+ * Opens anything SDL3_image can read, as a new tab - OR SHOWS THE TAB THAT ALREADY HOLDS THAT
+ * FILE. Two tabs editing one file is two futures for it, and whichever is saved second
+ * silently throws away the first; a person dropping a file that is already open is asking to
+ * see it, not to fork it. A file that will not open says why in a message box: every caller
+ * is a person who asked for exactly that file, and with no console the log says it to nobody.
+ */
 extern VNG_TAB *vng_tab_open  (const char *path);
+
+/* Closes it and frees everything it owns. The tab on screen stays on screen unless it IS the
+   one being closed - the [x] on a tab behind the current one used to take the eye with it. */
 extern void     vng_tab_close (VNG_TAB *t);
+
+/*
+ * ENDS EVERYTHING IN FLIGHT ON THIS SHEET, so what comes next sees the document as it will
+ * stay: the tool's open stroke (a drag is kept - the person watched it appear - and the SHIFT
+ * line preview is thrown away, having never been a decision), and a floating selection, which
+ * is put down.
+ *
+ * WHY IT EXISTS: a stroke or a float is state that lives BETWEEN events, and every operation
+ * that replaces or reads the whole sheet used to meet it half done. A tab switched with the
+ * pencil's SHIFT preview open kept that preview in the old sheet's buffers, and the next
+ * stroke drawn there merged it in; an undo pressed mid-way through a write-through stroke was
+ * undone again by that stroke's own rewind a frame later; a save with a float in the air wrote
+ * the sheet without it. One call, made by each of those - switching (vng_tab_show), saving,
+ * closing, quitting, undo and redo, a resize - instead of each of them knowing what can be
+ * left open.
+ */
+extern void     vng_tab_settle (VNG_TAB *t);
+
 /*
  * THE ONE WAY TO CHANGE WHICH DOCUMENT IS ON SCREEN.
  *
- * It exists because a switch is not just an assignment: a floating selection over the
- * OUTGOING sheet has to be put down first, or it is lost the moment the tab it belongs to
- * stops being drawn. That is one of the bugs the first Vangopix had between tabs, and
- * scattering the fix across every place that assigned the pointer is how it would come back.
+ * It exists because a switch is not just an assignment: the OUTGOING sheet is settled first -
+ * a floating selection put down, an open stroke finished - or what was in flight is lost, or
+ * worse, left half done in a sheet nobody is looking at. That is one of the bugs the first
+ * Vangopix had between tabs, and scattering the fix across every place that assigned the
+ * pointer is how it would come back.
  *
  * vng_tab_close is the exception and assigns directly: by the time it picks a fallback, the
  * tab that was current has already been freed, and there is nothing left to commit into.
@@ -158,8 +231,21 @@ extern void     vng_tab_move  (VNG_TAB *t, int index);
 /* Resizes the canvas. (dx, dy) is where the OLD origin lands inside the new buffer, so
    growing to the left is dx > 0 and growing to the right is dx == 0 - one call serves
    all four corners. Uncovered area comes out white. Returns false and changes nothing
-   if the allocation fails. */
+   if the allocation fails or a side is past vng_tab_side_limit. The marked selection
+   moves with the pixels, so the edge every tool is held to stays on the same drawing. */
 extern bool     vng_tab_resize (VNG_TAB *t, int w, int h, int dx, int dy);
+
+/*
+ * THE LONGEST SIDE A SHEET CAN HAVE ON THIS MACHINE: the renderer's largest texture, because a
+ * document IS a texture and one past this cannot be drawn at all. Asked of the renderer once;
+ * VNG_MAX_SIDE when it will not say.
+ *
+ * It is the wall, not the default. VNG_MAX_SIDE is what a new sheet may be asked for; an image
+ * opened from disk may already be bigger than that, and a corner grip may keep it that big -
+ * but nothing may ask for a buffer the GPU would then refuse, which is what a grip pulled far
+ * out at 1/16 zoom used to do, gigabytes at a time.
+ */
+extern int      vng_tab_side_limit (void);
 /*
  * The tab with that id, or NULL if it has been closed.
  *

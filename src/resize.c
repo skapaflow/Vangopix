@@ -21,6 +21,11 @@ enum { C_TL = 0, C_TR = 1, C_BL = 2, C_BR = 3, C_NONE = -1 };
 
 static int  held = C_NONE;
 
+/* The sheet the grip was taken hold of on. A drag outlives nothing but its own sheet: with the
+ * row of sheets walked mid-drag, the release used to resize whichever sheet was on screen by
+ * the old one's rectangle. */
+static Uint32 held_tab = 0;
+
 /* The canvas being drawn, in DOCUMENT coordinates of the tab as it is right now. Kept
  * as a rectangle rather than a width and height because dragging a top or left corner
  * moves the origin, and the origin is what tells vng_tab_resize where the old image
@@ -82,12 +87,34 @@ static float snap_to (float v, int grid)
 	return SDL_roundf(v / (float)grid) * (float)grid;
 }
 
+/*
+ * HOW LONG A SIDE A GRIP MAY PULL OUT TO.
+ *
+ * The number a new sheet may be asked for, or the side the sheet already has when an image
+ * opened from disk is bigger than that - and never past the renderer's largest texture, which
+ * is the wall vng_tab_side_limit names. A grip had no ceiling at all: at 1/16 zoom a hand
+ * crossing the window asked for thirty thousand pixels a side, gigabytes allocated and filled
+ * before the texture refused them.
+ */
+static int side_max (int now)
+{
+	int cap   = now > VNG_MAX_SIDE ? now : VNG_MAX_SIDE;
+	int limit = vng_tab_side_limit();
+	return cap < limit ? cap : limit;
+}
+
 /* Rounds the pending rectangle into whole pixels and hands back what vng_tab_resize
- * wants: the new size, and where the old origin lands inside it. */
-static void pending (int *w, int *h, int *dx, int *dy)
+ * wants: the new size, and where the old origin lands inside it. The corner being held is the
+ * one that gives when a side is clamped - the opposite edge is the anchor, and stays put. */
+static void pending (VNG_TAB *t, int *w, int *h, int *dx, int *dy)
 {
 	int x0 = (int)SDL_roundf(px0), y0 = (int)SDL_roundf(py0);
 	int x1 = (int)SDL_roundf(px1), y1 = (int)SDL_roundf(py1);
+
+	int mw = side_max(t->w), mh = side_max(t->h);
+
+	if (x1 - x0 > mw) { if (held & 1) x1 = x0 + mw; else x0 = x1 - mw; }
+	if (y1 - y0 > mh) { if (held & 2) y1 = y0 + mh; else y0 = y1 - mh; }
 
 	*w = x1 - x0; if (*w < 1) *w = 1;
 	*h = y1 - y0; if (*h < 1) *h = 1;
@@ -105,14 +132,18 @@ bool resize_event (const SDL_Event *e, VNG_TAB *t)
 		if (e->button.button != SDL_BUTTON_LEFT) return false;
 
 		/* Space plus left is the pan gesture, and it wins over a grip: a hand that has
-		 * already said "I am panning" must not resize the canvas by landing on one. */
-		const bool *keys = SDL_GetKeyboardState(NULL);
-		if (keys && keys[SDL_SCANCODE_SPACE]) return false;
+		 * already said "I am panning" must not resize the canvas by landing on one.
+		 *
+		 * Through keys_held, which is the whole of the contract keys.h states: this one
+		 * polled SDL_GetKeyboardState directly, the one place left reading the hardware
+		 * behind the keyboard's owner. */
+		if (keys_held(SDL_SCANCODE_SPACE)) return false;
 
 		int c = corner_at(t, e->button.x, e->button.y);
 		if (c == C_NONE) return false;
 
-		held = c;
+		held     = c;
+		held_tab = t->id;
 		px0 = 0.0f;        py0 = 0.0f;
 		px1 = (float)t->w; py1 = (float)t->h;
 		return true;
@@ -120,6 +151,7 @@ bool resize_event (const SDL_Event *e, VNG_TAB *t)
 
 	case SDL_EVENT_MOUSE_MOTION: {
 		if (held == C_NONE) return false;
+		if (t->id != held_tab) { held = C_NONE; return false; }   /* see held_tab */
 
 		SDL_FPoint w = view_screen_to_world(t, e->motion.x, e->motion.y);
 
@@ -147,8 +179,12 @@ bool resize_event (const SDL_Event *e, VNG_TAB *t)
 		if (held == C_NONE) return false;
 		if (e->button.button != SDL_BUTTON_LEFT) return false;
 
+		/* The press was ours, so the release is too - but a rectangle measured on another
+		 * sheet is nothing to resize this one by. */
+		if (t->id != held_tab) { held = C_NONE; return true; }
+
 		int w, h, dx, dy;
-		pending(&w, &h, &dx, &dy);
+		pending(t, &w, &h, &dx, &dy);
 		held = C_NONE;
 
 		if (w == t->w && h == t->h && dx == 0 && dy == 0)
@@ -185,14 +221,19 @@ static VNG_CURSOR corner_cursor (int c)
 	return ((c & 1) == ((c >> 1) & 1)) ? VNG_CUR_NWSE : VNG_CUR_NESW;
 }
 
-bool resize_hot (VNG_TAB *t)
+bool resize_hot_at (VNG_TAB *t, float x, float y)
 {
 	if (!t) return false;
 	if (held != C_NONE) return true;   /* carrying one counts, wherever the hand has got to */
 
+	return corner_at(t, x, y) != C_NONE;
+}
+
+bool resize_hot (VNG_TAB *t)
+{
 	float mx, my;
 	SDL_GetMouseState(&mx, &my);
-	return corner_at(t, mx, my) != C_NONE;
+	return resize_hot_at(t, mx, my);
 }
 
 void resize_draw (VNG_TAB *t)
@@ -220,9 +261,17 @@ void resize_draw (VNG_TAB *t)
 
 	SDL_SetRenderDrawBlendMode(vng_ren, SDL_BLENDMODE_BLEND);
 
+	if (held != C_NONE && t->id != held_tab) held = C_NONE;   /* another sheet's drag */
+
 	if (held != C_NONE) {
-		SDL_FPoint a = view_world_to_screen(t, px0, py0);
-		SDL_FPoint b = view_world_to_screen(t, px1, py1);
+		/* THE OUTLINE IS THE RECTANGLE THE RELEASE WILL MAKE - rounded to whole pixels and held
+		 * to the longest side there is - so a hand that runs past the wall sees the canvas stop
+		 * at it, instead of an outline that promises a size the release will not give. */
+		int w, h, dx, dy;
+		pending(t, &w, &h, &dx, &dy);
+
+		SDL_FPoint a = view_world_to_screen(t, (float)-dx,      (float)-dy);
+		SDL_FPoint b = view_world_to_screen(t, (float)(w - dx), (float)(h - dy));
 
 		SDL_FRect box = { SDL_floorf(SDL_min(a.x, b.x)), SDL_floorf(SDL_min(a.y, b.y)),
 		                  SDL_floorf(SDL_fabsf(b.x - a.x)), SDL_floorf(SDL_fabsf(b.y - a.y)) };
@@ -231,9 +280,6 @@ void resize_draw (VNG_TAB *t)
 		 * the new size against, and a wash over it defeats the purpose. */
 		style_ink(vng_style.highlight);
 		SDL_RenderRect(vng_ren, &box);
-
-		int w, h, dx, dy;
-		pending(&w, &h, &dx, &dy);
 
 		/* The readout says when the grid is on. The jumping outline already shows it,
 		 * but only once the hand has moved - a person who presses SHIFT and pauses

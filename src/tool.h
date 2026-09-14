@@ -62,6 +62,21 @@ extern bool tool_event (const SDL_Event *e, VNG_TAB *t);
    what it lays down appears in the same frame. */
 extern void tool_frame (VNG_TAB *t);
 
+/* The same, with the pointer at (mx, my) instead of wherever the mouse is - which is what lets a
+   check drive the SHIFT line preview without a hand on the mouse. tool_frame is this, at the
+   mouse. */
+extern void tool_frame_at (VNG_TAB *t, float mx, float my);
+
+/*
+ * ENDS WHAT THE TOOL HAS IN FLIGHT ON THIS SHEET: a drag is closed and kept, because the person
+ * watched those pixels appear; the SHIFT line preview is thrown away, having never been a
+ * decision. Nothing happens when what is open belongs to another sheet, or nothing is open.
+ *
+ * What vng_tab_settle calls first - see tabs.h for every operation that meets a stroke half
+ * done without it.
+ */
+extern void tool_settle (VNG_TAB *t);
+
 /* The tip outline, the glyph, the hex readout and the two loaded colours. */
 extern void tool_draw (VNG_TAB *t);
 

@@ -19,10 +19,17 @@ static const float STEPS[] = {
 #define STEP_LOT ((int)(sizeof STEPS / sizeof STEPS[0]))
 
 /* Panning state. It is global rather than per tab because a hand can only drag one
- * document at a time, and the drag dies with the mouse button, not with the tab. */
-static bool  panning   = false;
-static float pan_wx    = 0.0f;   /* the world point the hand took hold of */
-static float pan_wy    = 0.0f;
+ * document at a time, and the drag dies with the mouse button, not with the tab.
+ *
+ * It remembers WHICH button and WHICH sheet, though. Any release used to end it, so tapping
+ * the right button while the middle one panned let go of the sheet under a hand still holding
+ * it; and the point taken hold of is a point of one sheet, which the next sheet on screen was
+ * then yanked to. */
+static bool   panning   = false;
+static float  pan_wx    = 0.0f;   /* the world point the hand took hold of */
+static float  pan_wy    = 0.0f;
+static Uint8  pan_btn   = 0;
+static Uint32 pan_tab   = 0;
 
 /*
  * THE SHEET'S ORIGIN IS ON A WHOLE SCREEN PIXEL, AND THE CAMERA'S OWN STATE IS NOT TOUCHED
@@ -221,12 +228,15 @@ bool view_event (const SDL_Event *e, VNG_TAB *t)
 		SDL_FPoint w = raw_to_world(t, e->button.x, e->button.y);
 		pan_wx  = w.x;
 		pan_wy  = w.y;
+		pan_btn = e->button.button;
+		pan_tab = t->id;
 		panning = true;
 		return true;
 	}
 
 	case SDL_EVENT_MOUSE_MOTION: {
 		if (!panning) return false;
+		if (t->id != pan_tab) { panning = false; return false; }   /* see pan_tab */
 
 		/* offset = grabbed world point - cursor in world units. Assignment, not
 		 * accumulation: the offset is derived from where the hand started and where it
@@ -237,7 +247,7 @@ bool view_event (const SDL_Event *e, VNG_TAB *t)
 	}
 
 	case SDL_EVENT_MOUSE_BUTTON_UP: {
-		if (!panning) return false;
+		if (!panning || e->button.button != pan_btn) return false;
 		panning = false;
 		return true;
 	}

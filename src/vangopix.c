@@ -12,6 +12,7 @@
 #include "win.h"
 #include "colour.h"
 #include "style.h"
+#include "prompt.h"
 
 SDL_Window   *vng_win   = NULL;
 SDL_Renderer *vng_ren   = NULL;
@@ -109,6 +110,26 @@ bool vangopix_read_line (SDL_IOStream *io, char *dst, size_t cap)
 	return n > 0;   /* a last line with no newline is still a line */
 }
 
+bool vangopix_path_same (const char *a, const char *b)
+{
+	if (!a || !b) return false;
+
+	for (;; a++, b++) {
+		char x = *a, y = *b;
+
+		if (x == '\\') x = '/';
+		if (y == '\\') y = '/';
+
+	#if defined(SDL_PLATFORM_WINDOWS) || defined(SDL_PLATFORM_APPLE)
+		x = (char) SDL_tolower((unsigned char)x);
+		y = (char) SDL_tolower((unsigned char)y);
+	#endif
+
+		if (x != y) return false;
+		if (!x)     return true;
+	}
+}
+
 bool vangopix_init (int argc, char **argv)
 {
 	if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -121,7 +142,10 @@ bool vangopix_init (int argc, char **argv)
 		SDL_Log("SDL_CreateWindowAndRenderer: %s", SDL_GetError());
 		return false;
 	}
-	SDL_SetRenderVSync(vng_ren, 1);
+	/* Asked for, not assumed: a renderer can refuse, and core.c's frame_pace keeps the loop off
+	 * the processor's back when it does. The refusal is worth one line in the log. */
+	if (!SDL_SetRenderVSync(vng_ren, 1))
+		SDL_Log("no vsync (%s) - the frame will pace itself", SDL_GetError());
 
 	/* HOW IT LOOKS, before the first thing is drawn and before the faces are packed - the font
 	 * sizes are two of its settings, and an atlas cannot be re-packed at a size it has already
@@ -209,6 +233,7 @@ void vangopix_quit (void)
 {
 	tool_free();
 	colour_free();
+	prompt_free();
 	win_free();
 	select_clipboard_free();
 	vng_tabs_free();

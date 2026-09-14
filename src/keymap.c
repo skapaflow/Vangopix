@@ -9,6 +9,10 @@
  * and the drift is invisible: the program keeps working and only the words go wrong.
  *
  * The order is keymap.h's enum, and the nine tools must stay contiguous and in tool order.
+ *
+ * UNSIZED, AND COUNTED BELOW. Sized by VNG_ACT_LOT, an action added to the enum without a row
+ * here was a row of zeros - a NULL name that the first line of keyboard.txt handed to a string
+ * compare. The count is checked where the compiler can refuse it.
  */
 typedef struct {
 	const char *name;
@@ -16,7 +20,7 @@ typedef struct {
 	SDL_Keycode key;
 } BIND;
 
-static const BIND fallback[VNG_ACT_LOT] = {
+static const BIND fallback[] = {
 	{ "tool-pencil",    "pencil",                          SDLK_Q },
 	{ "tool-line",      "line",                            SDLK_W },
 	{ "tool-rect",      "rectangle",                       SDLK_E },
@@ -42,8 +46,11 @@ static const BIND fallback[VNG_ACT_LOT] = {
 	{ "overlay",        "what is on screen",               SDLK_F1 },
 };
 
+SDL_COMPILE_TIME_ASSERT(keymap_has_a_row_per_action, SDL_arraysize(fallback) == VNG_ACT_LOT);
+
 /*
- * Where each action ACTUALLY lives - the defaults until the file says otherwise.
+ * Where each action ACTUALLY lives - the defaults until the file says otherwise, and
+ * SDLK_UNKNOWN for an action whose default key a line of the file gave to another one.
  *
  * SEEDED ON FIRST USE AND NOT BY keymap_load, so this module is usable by anybody who never
  * called it. A keymap that is empty until somebody remembers to initialise it is a program
@@ -178,45 +185,52 @@ static bool spell_to_key (const char *text, SDL_Keycode *out)
 	return true;
 }
 
+/* The name to write a key under, or "?" for one nobody holds or SDL cannot name. */
+static const char *key_word (SDL_Keycode k)
+{
+	const char *name = (k != SDLK_UNKNOWN) ? SDL_GetKeyName(k) : NULL;
+	return (name && name[0]) ? name : "?";
+}
+
 /* ----------------------------------------------------------------------- the desk's rows */
 
 int keymap_lot (void) { return LAYOUT_LOT; }
 
 const VNG_KEYROW *keymap_row (int i)
 {
-	static VNG_KEYROW out;
-
 	/*
-	 * ONE SPELLING BUFFER PER ROW, and it is worth the three hundred bytes.
+	 * ONE ROW STRUCT AND ONE SPELLING BUFFER PER ROW, and it is worth the few hundred bytes.
 	 *
-	 * A single shared buffer works for the caller this was written for - the desk measures a
+	 * A single shared answer works for the caller this was written for - the desk measures a
 	 * row and then draws it, one at a time. It breaks the moment anybody holds two rows at
 	 * once, and it breaks SILENTLY: both pointers are still valid, and both now read the same
-	 * key. That is not a bug a caller can see; it just prints the wrong letter.
+	 * row. That is not a bug a caller can see; it just prints the wrong words.
 	 *
-	 * Found by a check that asked for two rows in the same expression and got one answer
-	 * twice. A buffer per row makes the returned pointer good until that row is asked for
-	 * again, which is the promise a caller would reasonably assume anyway.
+	 * The spelling buffers were made per row after a check asked for two rows in the same
+	 * expression and got one key twice - and the struct they were pointed from stayed shared,
+	 * which is the same mistake one level up. Now the pointer handed back is good until THAT
+	 * row is asked for again, which is the promise a caller would reasonably assume anyway.
 	 */
-	static char spell[LAYOUT_LOT][16];
+	static VNG_KEYROW out[LAYOUT_LOT];
+	static char       spell[LAYOUT_LOT][32];
 
 	if (i < 0 || i >= LAYOUT_LOT) return NULL;
 
 	seed();
 
 	const SHOWROW *r = &layout[i];
+	VNG_KEYROW    *o = &out[i];
 
-	if (r->head) { out.key = r->head; out.does = NULL;    return &out; }
-	if (r->keys) { out.key = r->keys; out.does = r->does; return &out; }
+	if (r->head) { o->key = r->head; o->does = NULL;    return o; }
+	if (r->keys) { o->key = r->keys; o->does = r->does; return o; }
 
-	if (r->act < 0) { out.key = NULL; out.does = NULL; return &out; }
+	if (r->act < 0) { o->key = NULL; o->does = NULL; return o; }
 
-	const char *name = SDL_GetKeyName(live[r->act]);
-	SDL_strlcpy(spell[i], (name && name[0]) ? name : "?", sizeof spell[i]);
+	SDL_strlcpy(spell[i], key_word(live[r->act]), sizeof spell[i]);
 
-	out.key  = spell[i];
-	out.does = fallback[r->act].does;
-	return &out;
+	o->key  = spell[i];
+	o->does = fallback[r->act].does;
+	return o;
 }
 
 /* -------------------------------------------------------------------------- the matching */
@@ -230,6 +244,10 @@ bool keymap_hit (VNG_ACT a, const SDL_Event *e)
 
 	if (e->key.repeat) return false;
 
+	/* An action whose key a line of the file gave to another has none - and a key event SDL
+	 * could not name arrives as SDLK_UNKNOWN too, which must not fire it. */
+	if (live[a] == SDLK_UNKNOWN) return false;
+
 	/* BARE means no modifier at all - see keymap.h on why the narrow question is the bug. */
 	if (e->key.mod & (SDL_KMOD_CTRL | SDL_KMOD_SHIFT | SDL_KMOD_ALT | SDL_KMOD_GUI))
 		return false;
@@ -242,7 +260,9 @@ bool keymap_hit (VNG_ACT a, const SDL_Event *e)
 /*
  * THE STAMP. A file naming actions an older build did not have - or missing ones this build
  * needs - is a file that silently leaves half the program on its defaults while looking
- * complete. Raise this whenever an action is added, removed or renamed.
+ * complete. Raise this whenever an action is added, removed or renamed: a file with an older
+ * stamp is then read for the keys it still names, and written again with everything this
+ * build has - see keymap_load in keymap.h.
  */
 #define KEYMAP_STAMP "# vangopix-keys 3"
 
@@ -261,9 +281,10 @@ static const char *const PREAMBLE =
 	"# that are not presses at all, still live in the source. So do the descriptions: this\n"
 	"# file cannot reword what a key does, only move it.\n"
 	"#\n"
-	"# TWO ACTIONS ON ONE KEY is refused too, and the second one keeps its default. Which of\n"
-	"# them would have won is decided by the order the program asks, which is not visible\n"
-	"# from here - so it is not offered as a choice.\n"
+	"# TWO ACTIONS ON ONE KEY: the line further down is refused, and that action keeps its\n"
+	"# default if nothing else holds it. Swapping two keys is two lines, and works. A key\n"
+	"# written here beats a default: the action that only had it by default is left without\n"
+	"# one, and the desk shows it as ?.\n"
 	"#\n"
 	"# DELETE THIS FILE TO GET THE DEFAULTS BACK. Vangopix writes it again from its own list\n"
 	"# the next time it starts. A line it cannot read is skipped and costs only that line.\n"
@@ -279,7 +300,8 @@ static bool group_binds (int at)
 	return false;
 }
 
-static bool write_default (const char *path)
+/* Writes the map IN HAND - the defaults, and whatever an older file said that still holds. */
+static bool write_map (const char *path)
 {
 	SDL_IOStream *io = SDL_IOFromFile(path, "w");
 	if (!io) return false;
@@ -307,9 +329,8 @@ static bool write_default (const char *path)
 			if (!group_binds(i)) continue;
 			n = SDL_snprintf(line, sizeof line, "[%s]\n", r->head);
 		} else if (r->act >= 0) {
-			const char *name = SDL_GetKeyName(live[r->act]);
 			n = SDL_snprintf(line, sizeof line, "%-16s= %s\n",
-			                 fallback[r->act].name, (name && name[0]) ? name : "?");
+			                 fallback[r->act].name, key_word(live[r->act]));
 		} else if (!r->keys) {
 			if (was_blank) continue;
 			n = SDL_snprintf(line, sizeof line, "\n");
@@ -344,22 +365,49 @@ static int act_named (const char *name)
 	return -1;
 }
 
-/* Who else is already on that key. -1 when nobody is. */
-static int already_on (SDL_Keycode k, int except)
+/* Who in `map` already holds that key. -1 when nobody does. */
+static int holder (const SDL_Keycode *map, SDL_Keycode k)
 {
 	for (int i = 0; i < VNG_ACT_LOT; i++)
-		if (i != except && live[i] == k) return i;
+		if (map[i] == k) return i;
 	return -1;
 }
 
+/*
+ * THE FILE, READ IN TWO PASSES - and the second pass is the fix.
+ *
+ * Every line used to be checked, as it was read, against the map as it stood: the defaults,
+ * plus whatever the lines above had changed. So SWAPPING two keys could not be written at all.
+ * `tool-pencil = W` met the line tool still sitting on W by default and was refused, and
+ * `tool-line = Q` then met the pencil still sitting on Q and was refused too - whichever order
+ * the two lines came in. The file offers every key as editable; it has to mean it.
+ *
+ * So the lines are only collected here - the last word on each action wins, the way a later
+ * line wins in any settings file - and settled afterwards, all at once:
+ *
+ *   1. the actions the file names claim their keys, in the order their lines were written;
+ *      a key an earlier line already claimed refuses the later one;
+ *   2. every action left without a claim - not named, or refused - gets its default back,
+ *      if nobody claimed that. An action that only had a key BY DEFAULT loses it to a line
+ *      that asked for it on purpose, and goes without one; the desk shows it as "?".
+ *
+ * Each refusal says which line lost and to what, because a binding that quietly did not take
+ * is exactly what a person would blame on their keyboard.
+ */
 static void read_file (const char *path)
 {
 	SDL_IOStream *io = SDL_IOFromFile(path, "r");
 	if (!io) return;
 
+	SDL_Keycode want[VNG_ACT_LOT];
+	int         line_of[VNG_ACT_LOT];
+	for (int i = 0; i < VNG_ACT_LOT; i++) { want[i] = SDLK_UNKNOWN; line_of[i] = 0; }
+
 	char line[256];
+	int  nth = 0;
 
 	while (vangopix_read_line(io, line, sizeof line)) {
+		nth++;
 		trim(line);
 
 		if (line[0] == 0 || line[0] == '#' || line[0] == '[') continue;
@@ -380,32 +428,58 @@ static void read_file (const char *path)
 		SDL_Keycode k;
 		if (!spell_to_key(spell, &k)) {
 			SDL_Log("keyboard.txt: %s = %s is not a bare key - keeping %s",
-			        name, spell, SDL_GetKeyName(live[a]));
+			        name, spell, key_word(live[a]));
 			continue;
 		}
 
-		/*
-		 * TWO ACTIONS ON ONE KEY IS THE NEW WAY TO BE WRONG, and it is invisible from the
-		 * file: which one wins is decided by the order the layers are asked, which is a fact
-		 * about core.c. Refusing the second is the only answer that cannot surprise - and it
-		 * says which line lost, because a binding that quietly did not take is exactly what
-		 * a person would blame on their keyboard.
-		 */
-		int clash = already_on(k, a);
-		if (clash >= 0) {
-			SDL_Log("keyboard.txt: %s = %s is already %s - keeping %s",
-			        name, spell, fallback[clash].name, SDL_GetKeyName(live[a]));
-			continue;
-		}
-
-		live[a] = k;
+		want[a]    = k;
+		line_of[a] = nth;
 	}
 
 	SDL_CloseIO(io);
+
+	/* 1. The named actions, in the order they were written. */
+	int order[VNG_ACT_LOT], n = 0;
+	for (int a = 0; a < VNG_ACT_LOT; a++)
+		if (want[a] != SDLK_UNKNOWN) order[n++] = a;
+
+	for (int i = 1; i < n; i++)                 /* twenty at most: an insertion sort */
+		for (int j = i; j > 0 && line_of[order[j]] < line_of[order[j - 1]]; j--) {
+			int s = order[j]; order[j] = order[j - 1]; order[j - 1] = s;
+		}
+
+	SDL_Keycode got[VNG_ACT_LOT];
+	for (int a = 0; a < VNG_ACT_LOT; a++) got[a] = SDLK_UNKNOWN;
+
+	for (int i = 0; i < n; i++) {
+		int a = order[i];
+		int b = holder(got, want[a]);
+
+		if (b >= 0) {
+			SDL_Log("keyboard.txt: %s = %s is already %s - keeping its default",
+			        fallback[a].name, key_word(want[a]), fallback[b].name);
+			continue;
+		}
+		got[a] = want[a];
+	}
+
+	/* 2. Everything left, back on its default if that is still free. */
+	for (int a = 0; a < VNG_ACT_LOT; a++) {
+		if (got[a] != SDLK_UNKNOWN) continue;
+
+		int b = holder(got, fallback[a].key);
+		if (b >= 0) {
+			SDL_Log("keyboard.txt: %s has no key - %s is %s now",
+			        fallback[a].name, key_word(fallback[a].key), fallback[b].name);
+			continue;
+		}
+		got[a] = fallback[a].key;
+	}
+
+	SDL_memcpy(live, got, sizeof live);
 }
 
-/* Does the file carry OUR stamp - see KEYMAP_STAMP. False for a missing file and false for
-   one an older Vangopix wrote, which are the same answer: write it. */
+/* Does the file carry OUR stamp - see KEYMAP_STAMP. */
 static bool stamped (const char *path)
 {
 	size_t len = 0;
@@ -418,7 +492,7 @@ static bool stamped (const char *path)
 	return ours;
 }
 
-void keymap_load (void)
+void keymap_load_from (const char *path)
 {
 	/* The defaults go down FIRST and unconditionally, so an action the file forgets to
 	 * mention is bound rather than dead - and so a second call cannot inherit the last
@@ -426,13 +500,26 @@ void keymap_load (void)
 	seeded = false;
 	seed();
 
-	char *path = vangopix_asset(VNG_KEYMAP_FILE);
 	if (!path) return;   /* the built-in map stands */
 
-	/* Written before it is read, so the run that creates it uses the same map every later
-	 * run will - and so a person who deletes it has it back without restarting twice. */
-	if (!stamped(path)) write_default(path);
-
+	/*
+	 * READ BEFORE IT IS WRITTEN, WHATEVER THE STAMP SAYS - which is where this used to part
+	 * company with config.txt. A file from an older build was written over from the defaults,
+	 * so every key somebody had moved went back to where it was on the first run of the new
+	 * build, without a word. It is read first now, and the rewrite below carries what it said
+	 * forward: keys moved stay moved, and actions this build added arrive on their defaults.
+	 *
+	 * Written before the NEXT run reads it, so the run that creates it uses the same map every
+	 * later run will - and a person who deletes it has it back without restarting twice.
+	 */
 	read_file(path);
+
+	if (!stamped(path)) write_map(path);
+}
+
+void keymap_load (void)
+{
+	char *path = vangopix_asset(VNG_KEYMAP_FILE);
+	keymap_load_from(path);
 	SDL_free(path);
 }

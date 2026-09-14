@@ -76,17 +76,9 @@ typedef struct {
 	int   x, y, w, h;
 } CLIP;
 
-static CLIP list[VNG_ANIM_MAX];
-static int  list_lot = 0;
-static int  list_top = 0;    /* the first row showing */
-
-/* The clip being played and edited. A COPY and not an index, which is the original's own
-   arrangement and the right one: deleting a clip must not leave the player pointing into a
-   hole, and a copy simply goes on playing. */
 /*
  * WHAT A CLIP IS BEFORE ANYBODY HAS SAID, named because it is wanted in two places: the value
- * the program starts on, and what the window goes back to when it is shown a drawing that has
- * no clips of its own.
+ * a drawing starts on, and what it goes back to when it has no clips of its own.
  *
  * ONE FRAME AND NOT ZERO, which is what it was. Everything that draws a clip guards on
  * `frames >= 1` - correctly, since the sidecar is a text file - so a player opened before any
@@ -96,34 +88,72 @@ static int  list_top = 0;    /* the first row showing */
  */
 static const CLIP CLIP_NEW = { "UNKNOWN", 0.1f, 1, 0, 0, 32, 32 };
 
-static CLIP box = { "UNKNOWN", 0.1f, 1, 0, 0, 32, 32 };
-
-/* Which entry the editor is writing back to, or -1 for a new one.
+/*
+ * THE CLIPS OF ONE DRAWING, and every field here is one drawing's.
  *
- * THE ORIGINAL KEPT A BOOL FOR THIS AND CLEARED IT ONLY ON COMMIT, so closing the editor with
- * its close box left "new" set and the next edit appended a duplicate instead of updating.
- * One value that says both things cannot fall out of step with itself. */
-static int  edit_at = -1;
+ * They were file statics: one list for the program, re-read from the sidecar of whatever sheet
+ * was on screen when the window was summoned, and then never again. A player left open while
+ * the sheet under it changed went on showing the old one's clips over the new one's pixels -
+ * and SAVE, which writes beside the sheet ON SCREEN, wrote one image's clips into the other
+ * one's .vnganime. Held by the tab, the question of which drawing they belong to cannot be
+ * answered wrong, and clips being built for a sheet survive a trip to another one.
+ *
+ * `box` is the clip being played and edited - a COPY and not an index, which is the original's
+ * own arrangement and the right one: deleting a clip must not leave the player pointing into a
+ * hole, and a copy simply goes on playing. `edit_at` is which entry the editor writes back to,
+ * or -1 for a new one: THE ORIGINAL KEPT A BOOL FOR THIS AND CLEARED IT ONLY ON COMMIT, so
+ * closing the editor with its close box left "new" set and the next edit appended a duplicate
+ * instead of updating. One value that says both things cannot fall out of step with itself.
+ */
+struct _vng_anim_ {
+	CLIP list[VNG_ANIM_MAX];
+	int  lot;
+	int  top;        /* the first row showing */
+	CLIP box;
+	int  vert;       /* the row on the sheet */
+	int  edit_at;
+};
 
 /* The list row the LAST press in the player landed on, or -1 when it landed anywhere else -
  * half of what makes a double click; see on_event. */
 static int  last_row = -1;
 
-/* Which document's sidecar the list came from, so summoning the window on a DIFFERENT
- * drawing reads that drawing's clips instead of showing the last one's. Zero is "none yet".
- * The tab id and not the pointer: a closed tab's address can come back as another one. */
-static Uint32 list_for = 0;
+/* Which sheet the window last looked at, so the frame a DIFFERENT one comes on screen can let
+   go of the editor and the half of a double click that belonged to the other. */
+static Uint32 seen_tab = 0;
 
 static float clock_s = 0.0f;   /* seconds since the clip started playing */
-static int   vert    = 0;      /* the row on the sheet */
 static float gap     = 1.0f;   /* the preview's zoom */
 static int   bg      = 0;
 
-int anim_lot (void) { return list_lot; }
-
-const char *anim_name (int i)
+/*
+ * EVERY NUMBER A CLIP CARRIES, HELD TO WHAT CAN BE DRAWN - see VNG_ANIM_FRAMES_MAX.
+ *
+ * Not a refusal: the form reports every keystroke and the sidecar is a text file, and either
+ * can say something absurd on its way to saying something sensible. The clip takes the nearest
+ * thing it can play. A rectangle is kept on the scale of the largest sheet this machine can
+ * have, which also keeps x + w * frames inside an int.
+ */
+static void clip_sane (CLIP *c)
 {
-	return (i >= 0 && i < list_lot) ? list[i].name : "";
+	int side = vng_tab_side_limit();
+
+	if (c->frames < 1)                   c->frames = 1;
+	if (c->frames > VNG_ANIM_FRAMES_MAX) c->frames = VNG_ANIM_FRAMES_MAX;
+
+	if (!(c->speed > 0.0f))              c->speed = 0.1f;
+	if (c->speed < VNG_ANIM_SPEED_MIN)   c->speed = VNG_ANIM_SPEED_MIN;
+	if (c->speed > VNG_ANIM_SPEED_MAX)   c->speed = VNG_ANIM_SPEED_MAX;
+
+	if (c->w < 1) c->w = 1;
+	if (c->h < 1) c->h = 1;
+	if (c->w > side) c->w = side;
+	if (c->h > side) c->h = side;
+
+	if (c->x < -side) c->x = -side;
+	if (c->y < -side) c->y = -side;
+	if (c->x >  side) c->x =  side;
+	if (c->y >  side) c->y =  side;
 }
 
 /*
@@ -136,6 +166,10 @@ const char *anim_name (int i)
  * limit that is the frame count itself, so fps reached 4.0 on a four-frame clip and (int)fps
  * indexed the FIFTH cell - whatever happened to be to the right on the sheet - for one tick
  * of every loop. A modulo cannot do that.
+ *
+ * THE TIME IS WRAPPED BEFORE IT IS DIVIDED, so the quotient is always under the frame count:
+ * a float divided out to more than an int holds is not a large number when it is converted,
+ * it is undefined.
  */
 int anim_frame_at (float t, int frames, float speed)
 {
@@ -144,12 +178,14 @@ int anim_frame_at (float t, int frames, float speed)
 	/* A speed of zero is a division, and a .anime is a text file a person can edit. */
 	if (!(speed > 0.0f)) return 0;
 
-	int n = (int)(t / speed);
-
 	/* Negative time is not reachable from the clock, but the guard is free and the
 	 * alternative is a negative index into a sheet. */
-	if (n < 0) n = 0;
+	if (!(t > 0.0f)) return 0;
 
+	float loop = speed * (float)frames;
+	if (t >= loop) t = SDL_fmodf(t, loop);
+
+	int n = (int)(t / speed);
 	return n % frames;
 }
 
@@ -180,52 +216,10 @@ static bool parse (const char *line, CLIP *c)
 	if (t.frames < 1 || t.w < 1 || t.h < 1) return false;
 	if (!(t.speed > 0.0f)) return false;
 
+	/* A clip that IS one but says too much is pulled in, not thrown out - see clip_sane. */
+	clip_sane(&t);
+
 	*c = t;
-	return true;
-}
-
-int anim_load (const char *path)
-{
-	SDL_IOStream *io = SDL_IOFromFile(path, "r");
-
-	/* The original called fclose on the result without checking it, in both directions. */
-	if (!io) return 0;
-
-	/* Read into a fresh list and swap only at the end. A file that turns out to be junk must
-	 * not cost the clips already in hand - the same reason the resize builds its new texture
-	 * before letting go of the old one. */
-	CLIP got[VNG_ANIM_MAX];
-	int  lot = 0;
-
-	char line[256];
-	while (lot < VNG_ANIM_MAX && vangopix_read_line(io, line, sizeof line))
-		if (parse(line, &got[lot])) lot++;
-
-	SDL_CloseIO(io);
-
-	SDL_memcpy(list, got, sizeof(CLIP) * (size_t)lot);
-	list_lot = lot;
-	list_top = 0;
-
-	if (list_lot > 0) box = list[0];
-	return list_lot;
-	/* list_for is NOT set here: this says what was read, and the caller says what it was
-	 * reading FOR. anim_load is also the check suite's entry point. */
-}
-
-static bool anim_save (const char *path)
-{
-	SDL_IOStream *io = SDL_IOFromFile(path, "w");
-	if (!io) return false;
-
-	for (int i = 0; i < list_lot; i++) {
-		char line[128];
-		int  n = SDL_snprintf(line, sizeof line, "\"%s\"[%f,%d,%d,%d,%d,%d]\n",
-		                      list[i].name, list[i].speed, list[i].frames,
-		                      list[i].x, list[i].y, list[i].w, list[i].h);
-		if (n > 0) SDL_WriteIO(io, line, (size_t)n);
-	}
-	SDL_CloseIO(io);
 	return true;
 }
 
@@ -247,10 +241,8 @@ static bool anim_save (const char *path)
  */
 #define ANIM_EXT ".vnganime"
 
-static bool anim_path (char *dst, size_t cap)
+static bool anim_path (VNG_TAB *t, char *dst, size_t cap)
 {
-	VNG_TAB *t = vng_tab;
-
 	if (!t || !t->path || !t->path[0]) return false;
 	if (SDL_strlcpy(dst, t->path, cap) >= cap) return false;
 
@@ -269,13 +261,117 @@ static bool anim_path (char *dst, size_t cap)
 	return SDL_strlcat(dst, ANIM_EXT, cap) < cap;
 }
 
+/* Reads a .anime into `a`. REPLACES the list on success and leaves it alone when the file will
+   not open - see anim.h. */
+static int read_into (VNG_ANIM *a, const char *path)
+{
+	SDL_IOStream *io = SDL_IOFromFile(path, "r");
+
+	/* The original called fclose on the result without checking it, in both directions. */
+	if (!io) return 0;
+
+	/* Read into a fresh list and swap only at the end. A file that turns out to be junk must
+	 * not cost the clips already in hand - the same reason the resize builds its new texture
+	 * before letting go of the old one. */
+	CLIP got[VNG_ANIM_MAX];
+	int  lot = 0;
+
+	char line[256];
+	while (lot < VNG_ANIM_MAX && vangopix_read_line(io, line, sizeof line))
+		if (parse(line, &got[lot])) lot++;
+
+	SDL_CloseIO(io);
+
+	SDL_memcpy(a->list, got, sizeof(CLIP) * (size_t)lot);
+	a->lot = lot;
+	a->top = 0;
+
+	if (a->lot > 0) a->box = a->list[0];
+	return a->lot;
+}
+
+/*
+ * THIS DRAWING'S CLIPS, READ ONCE PER DRAWING - on the first moment anything asks about them,
+ * which is the window being up over it.
+ *
+ * ONCE, and that is the whole reason the set lives on the tab: reading again on every summoning
+ * would throw away everything typed since the last SAVE, silently. A drawing whose sidecar does
+ * not exist yet is still marked as read, so clips being built for it survive the window being
+ * hidden - and now survive another sheet being looked at in between, too.
+ */
+static VNG_ANIM *anim_of (VNG_TAB *t)
+{
+	if (!t) return NULL;
+	if (t->anim) return t->anim;
+
+	VNG_ANIM *a = (VNG_ANIM *) SDL_calloc(1, sizeof *a);
+	if (!a) return NULL;
+
+	a->box     = CLIP_NEW;
+	a->edit_at = -1;
+	t->anim    = a;
+
+	char path[1024];
+	if (anim_path(t, path, sizeof path)) read_into(a, path);
+	return a;
+}
+
+/* The clips of the drawing on screen - which is the only one the window ever shows. */
+static VNG_ANIM *cur (void) { return anim_of(vng_tab); }
+
+void anim_tab_free (VNG_ANIM *a) { SDL_free(a); }
+
+int anim_load (const char *path)
+{
+	VNG_ANIM *a = cur();
+	return (a && path) ? read_into(a, path) : 0;
+}
+
+int anim_lot (void)
+{
+	VNG_ANIM *a = cur();
+	return a ? a->lot : 0;
+}
+
+const char *anim_name (int i)
+{
+	VNG_ANIM *a = cur();
+	return (a && i >= 0 && i < a->lot) ? a->list[i].name : "";
+}
+
+int anim_frames (void)
+{
+	VNG_ANIM *a = cur();
+	return a ? a->box.frames : 0;
+}
+
+static bool anim_save (VNG_ANIM *a, const char *path)
+{
+	SDL_IOStream *io = SDL_IOFromFile(path, "w");
+	if (!io) return false;
+
+	for (int i = 0; i < a->lot; i++) {
+		char line[128];
+		int  n = SDL_snprintf(line, sizeof line, "\"%s\"[%f,%d,%d,%d,%d,%d]\n",
+		                      a->list[i].name, a->list[i].speed, a->list[i].frames,
+		                      a->list[i].x, a->list[i].y, a->list[i].w, a->list[i].h);
+		if (n > 0) SDL_WriteIO(io, line, (size_t)n);
+	}
+	SDL_CloseIO(io);
+	return true;
+}
+
+/* SAVE and LOAD, beside the sheet on screen and into ITS clips - the two cannot name
+   different drawings any more, which is the bug the per-tab set exists to end. */
 static void anim_file (bool write)
 {
+	VNG_ANIM *a = cur();
 	char path[1024];
-	if (!anim_path(path, sizeof path)) return;
 
-	if (write) anim_save(path);
-	else       anim_load(path);
+	if (!a || !anim_path(vng_tab, path, sizeof path)) return;
+
+	if (write) anim_save(a, path);
+	else       read_into(a, path);
 }
 
 /* ------------------------------------------------------------------------- the list ops */
@@ -287,21 +383,21 @@ static void anim_file (bool write)
  * not, deleting a row removed a different clip. Everything below takes the LIST index, and
  * the one place that turns a screen row into one is the event handler.
  */
-static void list_del (int i)
+static void list_del (VNG_ANIM *a, int i)
 {
-	if (i < 0 || i >= list_lot) return;
+	if (i < 0 || i >= a->lot) return;
 
-	for (int j = i; j < list_lot - 1; j++) list[j] = list[j + 1];
-	list_lot--;
+	for (int j = i; j < a->lot - 1; j++) a->list[j] = a->list[j + 1];
+	a->lot--;
 }
 
-static void list_up (int i)
+static void list_up (VNG_ANIM *a, int i)
 {
-	if (i <= 0 || i >= list_lot) return;
+	if (i <= 0 || i >= a->lot) return;
 
-	CLIP t = list[i - 1];
-	list[i - 1] = list[i];
-	list[i]     = t;
+	CLIP t = a->list[i - 1];
+	a->list[i - 1] = a->list[i];
+	a->list[i]     = t;
 }
 
 /* ------------------------------------------------------------------------- the editor */
@@ -314,14 +410,19 @@ static const char *const EDIT_LABEL[FIELDS] = { "n:", "s:", "f:", "x:", "y:", "w
 
 static void edit_text (int i, char *dst, size_t cap)
 {
+	VNG_ANIM *a = cur();
+	if (!a) { if (cap) dst[0] = 0; return; }
+
+	const CLIP *b = &a->box;
+
 	switch (i) {
-	case 0: SDL_strlcpy(dst, box.name, cap);                 break;
-	case 1: SDL_snprintf(dst, cap, "%g", box.speed);         break;
-	case 2: SDL_snprintf(dst, cap, "%d", box.frames);        break;
-	case 3: SDL_snprintf(dst, cap, "%d", box.x);             break;
-	case 4: SDL_snprintf(dst, cap, "%d", box.y);             break;
-	case 5: SDL_snprintf(dst, cap, "%d", box.w);             break;
-	default: SDL_snprintf(dst, cap, "%d", box.h);            break;
+	case 0: SDL_strlcpy(dst, b->name, cap);                 break;
+	case 1: SDL_snprintf(dst, cap, "%g", b->speed);         break;
+	case 2: SDL_snprintf(dst, cap, "%d", b->frames);        break;
+	case 3: SDL_snprintf(dst, cap, "%d", b->x);             break;
+	case 4: SDL_snprintf(dst, cap, "%d", b->y);             break;
+	case 5: SDL_snprintf(dst, cap, "%d", b->w);             break;
+	default: SDL_snprintf(dst, cap, "%d", b->h);            break;
 	}
 }
 
@@ -338,24 +439,26 @@ static void edit_text (int i, char *dst, size_t cap)
  */
 static void edit_done (const char *text, void *ctx)
 {
-	int i = (int)(intptr_t)ctx;
+	VNG_ANIM *a = cur();
+	if (!a) return;
+
+	CLIP *b = &a->box;
+	int   i = (int)(intptr_t)ctx;
 
 	switch (i) {
-	case 0: SDL_strlcpy(box.name, text, sizeof box.name);           break;
-	case 1: box.speed  = (float)SDL_atof(text);                     break;
-	case 2: box.frames = SDL_atoi(text);                            break;
-	case 3: box.x      = SDL_atoi(text);                            break;
-	case 4: box.y      = SDL_atoi(text);                            break;
-	case 5: box.w      = SDL_atoi(text);                            break;
-	default: box.h     = SDL_atoi(text);                            break;
+	case 0: SDL_strlcpy(b->name, text, sizeof b->name);           break;
+	case 1: b->speed  = (float)SDL_atof(text);                    break;
+	case 2: b->frames = SDL_atoi(text);                           break;
+	case 3: b->x      = SDL_atoi(text);                           break;
+	case 4: b->y      = SDL_atoi(text);                           break;
+	case 5: b->w      = SDL_atoi(text);                           break;
+	default: b->h     = SDL_atoi(text);                           break;
 	}
 
-	/* A clip with no frames or no size is a division and a degenerate blit. The field takes
-	 * what was typed; the model takes what can be played. */
-	if (box.frames < 1)      box.frames = 1;
-	if (box.w < 1)           box.w = 1;
-	if (box.h < 1)           box.h = 1;
-	if (!(box.speed > 0.0f)) box.speed = 0.1f;
+	/* A clip with no frames or no size is a division and a degenerate blit, and one with two
+	 * billion frames is a loop that does not end. The field takes what was typed; the model
+	 * takes what can be played - see clip_sane. */
+	clip_sane(b);
 }
 
 /*
@@ -420,13 +523,16 @@ static SDL_FRect edit_button (SDL_FRect a)
 /* Puts the clip into the list, at the entry the editor was opened on or as a new one. */
 static void edit_commit (void)
 {
-	int i = (edit_at >= 0 && edit_at < list_lot) ? edit_at
-	      : (list_lot < VNG_ANIM_MAX ? list_lot++ : -1);
+	VNG_ANIM *a = cur();
+	if (!a) return;
+
+	int i = (a->edit_at >= 0 && a->edit_at < a->lot) ? a->edit_at
+	      : (a->lot < VNG_ANIM_MAX ? a->lot++ : -1);
 
 	if (i < 0) return;   /* the list is full; the original grew past its array instead */
 
-	list[i] = box;
-	edit_at = -1;
+	a->list[i] = a->box;
+	a->edit_at = -1;
 
 	if (edit_win) win_show(edit_win, false);
 }
@@ -450,7 +556,7 @@ static void edit_body (SDL_FRect a, void *ctx)
 	float mx, my;
 	SDL_GetMouseState(&mx, &my);
 
-	bool hot = mx >= b.x && my >= b.y && mx < b.x + b.w && my < b.y + b.h;
+	bool hot = ui_hit(b, mx, my);
 
 	prim_fill(b, hot ? 0xFF303030u : 0xFF1C1C1Cu);
 	prim_rect(b, 0xFF505050u);
@@ -474,10 +580,8 @@ static bool edit_event (SDL_FRect a, const SDL_Event *e, void *ctx)
 	 * field_open drops whatever else was live, without committing, and it has to find the
 	 * others already emptied into the clip by then. */
 	int hit = -1;
-	for (int i = 0; i < FIELDS; i++) {
-		SDL_FRect r = edit_rect(a, i);
-		if (x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h) { hit = i; break; }
-	}
+	for (int i = 0; i < FIELDS; i++)
+		if (ui_hit(edit_rect(a, i), x, y)) { hit = i; break; }
 
 	edit_take(hit);
 
@@ -492,8 +596,7 @@ static bool edit_event (SDL_FRect a, const SDL_Event *e, void *ctx)
 		return true;
 	}
 
-	SDL_FRect b = edit_button(a);
-	if (x >= b.x && y >= b.y && x < b.x + b.w && y < b.y + b.h) {
+	if (ui_hit(edit_button(a), x, y)) {
 		edit_commit();
 		return true;
 	}
@@ -501,9 +604,21 @@ static bool edit_event (SDL_FRect a, const SDL_Event *e, void *ctx)
 	return false;   /* the rest of the window is somewhere to take hold of it */
 }
 
+/* The editor going away, by its own close dot or with the player, lets go of the keyboard: a
+   box left open would hold it with no caret on screen, and every shortcut would be dead. Not
+   committed - the boxes are live, so the clip already holds everything typed. */
+static void edit_hidden (void *ctx)
+{
+	(void)ctx;
+	for (int i = 0; i < FIELDS; i++) field_close(edit_box[i], false);
+}
+
 static void edit_open (int at)
 {
-	edit_at = at;
+	VNG_ANIM *a = cur();
+	if (!a) return;
+
+	a->edit_at = at;
 
 	if (!edit_win) {
 		for (int i = 0; i < FIELDS; i++) {
@@ -523,6 +638,7 @@ static void edit_open (int at)
 
 		edit_win = win_open("Set frames", r, m, edit_body, edit_event, NULL);
 		win_fixed(edit_win, true);
+		win_on_hide(edit_win, edit_hidden);
 	}
 
 	float mx, my;
@@ -536,21 +652,21 @@ static void edit_open (int at)
 static VNG_WIN *win = NULL;
 
 /* The source rect on the sheet: frame n of the clip, on row `vert`. */
-static SDL_FRect source (int frame)
+static SDL_FRect source (const VNG_ANIM *a, int frame)
 {
-	SDL_FRect r = { (float)(box.x + box.w * frame),
-	                (float)(box.y + box.h * vert),
-	                (float)box.w, (float)box.h };
+	SDL_FRect r = { (float)(a->box.x + a->box.w * frame),
+	                (float)(a->box.y + a->box.h * a->vert),
+	                (float)a->box.w, (float)a->box.h };
 	return r;
 }
 
 /* How many whole rows of this clip the sheet holds. The original never asked, so the row
    stepped off the bottom for ever with nothing on screen to say how far it went. */
-static int rows_in (VNG_TAB *t)
+static int rows_in (VNG_TAB *t, const VNG_ANIM *a)
 {
-	if (!t || box.h < 1) return 1;
+	if (!t || !a || a->box.h < 1) return 1;
 
-	int n = (t->h - box.y) / box.h;
+	int n = (t->h - a->box.y) / a->box.h;
 	return n > 0 ? n : 1;
 }
 
@@ -595,11 +711,14 @@ static void body (SDL_FRect a, void *ctx)
 {
 	(void)ctx;
 
-	VNG_TAB *t = vng_tab;
+	VNG_TAB  *t = vng_tab;
+	VNG_ANIM *s = cur();
+	if (!s) return;
+
 	float mx, my;
 	SDL_GetMouseState(&mx, &my);
 
-	#define HOT(r) (mx >= (r).x && my >= (r).y && mx < (r).x + (r).w && my < (r).y + (r).h)
+	#define HOT(r) ui_hit((r), mx, my)
 
 	/*
 	 * THE PREVIEW SITS ABOVE THE WINDOW, which is where the original put it - and it is the
@@ -612,8 +731,8 @@ static void body (SDL_FRect a, void *ctx)
 	 * being what happens because nothing clipped anything - and that the zoom has a ceiling,
 	 * which it did not.
 	 */
-	if (t && t->tex && box.frames > 0) {
-		float pw = (float)box.w * gap, ph = (float)box.h * gap;
+	if (t && t->tex && s->box.frames > 0) {
+		float pw = (float)s->box.w * gap, ph = (float)s->box.h * gap;
 
 		/* ABOVE the window, UNLESS THERE IS NO ROOM THERE. The head bar is kept on screen
 		 * by win.c, not the space a preview wants over it, so a player summoned near the top
@@ -624,7 +743,7 @@ static void body (SDL_FRect a, void *ctx)
 		if (top < 0.0f) top = a.y + a.h + ui_pad();
 
 		SDL_FRect dst = { a.x + SDL_floorf((a.w - pw) * 0.5f), top, pw, ph };
-		SDL_FRect src = source(anim_frame_at(clock_s, box.frames, box.speed));
+		SDL_FRect src = source(s, anim_frame_at(clock_s, s->box.frames, s->box.speed));
 
 		/*
 		 * IS THIS FRAME EVEN ON THE SHEET, which is the question nothing was asking.
@@ -677,7 +796,7 @@ static void body (SDL_FRect a, void *ctx)
 
 	{
 		char n[24];
-		SDL_snprintf(n, sizeof n, "%d/%d", vert + 1, rows_in(t));
+		SDL_snprintf(n, sizeof n, "%d/%d", s->vert + 1, rows_in(t, s));
 
 		float tw, th;
 		text_measure(vng_text_small, n, &tw, &th);
@@ -697,7 +816,7 @@ static void body (SDL_FRect a, void *ctx)
 	static const char *const ICON[3] = { "NEW", "SAVE", "LOAD" };
 
 	char side[1024];
-	bool named = anim_path(side, sizeof side);   /* is there an image to hang a file on */
+	bool named = anim_path(t, side, sizeof side);   /* is there an image to hang a file on */
 
 	for (int i = 0; i < 3; i++) {
 		SDL_FRect b = icon_rect(a, i);
@@ -711,11 +830,11 @@ static void body (SDL_FRect a, void *ctx)
 	int fit = (int)(lr.h / ROW);
 	if (fit < 1) fit = 1;
 
-	if (list_top > list_lot - fit) list_top = list_lot - fit;
-	if (list_top < 0)              list_top = 0;
+	if (s->top > s->lot - fit) s->top = s->lot - fit;
+	if (s->top < 0)            s->top = 0;
 
-	for (int j = 0; j < fit && list_top + j < list_lot; j++) {
-		int   i = list_top + j;
+	for (int j = 0; j < fit && s->top + j < s->lot; j++) {
+		int   i = s->top + j;
 		float y = lr.y + (float)j * ROW;
 
 		SDL_FRect row = { lr.x, y, lr.w, ROW };
@@ -727,7 +846,7 @@ static void body (SDL_FRect a, void *ctx)
 		if (hot) prim_rect(row, 0xFFFFFFFFu);
 
 		char cut[VNG_ANIM_NAME + 4];
-		text_fit(vng_text, cut, sizeof cut, list[i].name, lr.w - ROW * 2.0f - 4.0f);
+		text_fit(vng_text, cut, sizeof cut, s->list[i].name, lr.w - ROW * 2.0f - 4.0f);
 
 		text_print(vng_text, lr.x + ROW + ui_pad(),
 		           y + SDL_floorf((ROW - ui_line()) * 0.5f),
@@ -737,7 +856,7 @@ static void body (SDL_FRect a, void *ctx)
 		ui_close_mark(ex, HOT(ex));
 	}
 
-	if (list_lot > fit)
+	if (s->lot > fit)
 		text_print(vng_text_small, lr.x + lr.w - ui_cell(), lr.y + lr.h - ROW,
 		           0x808080FFu, "v");
 
@@ -759,6 +878,9 @@ static bool on_event (SDL_FRect a, const SDL_Event *e, void *ctx)
 
 	if (e->type != SDL_EVENT_MOUSE_BUTTON_DOWN) return false;
 
+	VNG_ANIM *s = cur();
+	if (!s) return false;
+
 	/* LEAVING THE FORM TAKES WHAT IS IN IT, and this is the other half of that rule: the
 	 * editor's boxes are settled by a press in the PLAYER too. Without it, typing a width and
 	 * then picking a different clip from the list left the box open holding that width, and
@@ -771,7 +893,7 @@ static bool on_event (SDL_FRect a, const SDL_Event *e, void *ctx)
 	last_row = -1;
 
 	float x = e->button.x, y = e->button.y;
-	#define HIT(r) (x >= (r).x && y >= (r).y && x < (r).x + (r).w && y < (r).y + (r).h)
+	#define HIT(r) ui_hit((r), x, y)
 
 	/* The right button cycles the preview's background, the original's own gesture. */
 	if (e->button.button == SDL_BUTTON_RIGHT) {
@@ -780,8 +902,8 @@ static bool on_event (SDL_FRect a, const SDL_Event *e, void *ctx)
 	}
 
 	SDL_FRect l = step_rect(a, 0), r = step_rect(a, 1);
-	if (HIT(l)) { if (vert > 0) vert--; return true; }
-	if (HIT(r)) { if (vert < rows_in(vng_tab) - 1) vert++; return true; }
+	if (HIT(l)) { if (s->vert > 0) s->vert--; return true; }
+	if (HIT(r)) { if (s->vert < rows_in(vng_tab, s) - 1) s->vert++; return true; }
 
 	for (int i = 0; i < 3; i++) {
 		if (!HIT(icon_rect(a, i))) continue;
@@ -796,19 +918,19 @@ static bool on_event (SDL_FRect a, const SDL_Event *e, void *ctx)
 	if (HIT(lr)) {
 		int fit = (int)(lr.h / ROW);
 		int j   = (int)((y - lr.y) / ROW);
-		int i   = list_top + j;
+		int i   = s->top + j;
 
-		if (fit < 1 || j < 0 || i < 0 || i >= list_lot) return true;
+		if (fit < 1 || j < 0 || i < 0 || i >= s->lot) return true;
 
 		SDL_FRect up = { lr.x, lr.y + (float)j * ROW, ROW, ROW };
 		SDL_FRect ex = { lr.x + lr.w - ROW, lr.y + (float)j * ROW, ROW, ROW };
 
 		/* ALL THREE TAKE THE LIST INDEX. The original selected with the scrolled index and
 		 * deleted with the screen row, so a scrolled list deleted the wrong clip. */
-		if (HIT(up)) { list_up(i);  return true; }
-		if (HIT(ex)) { list_del(i); return true; }
+		if (HIT(up)) { list_up(s, i);  return true; }
+		if (HIT(ex)) { list_del(s, i); return true; }
 
-		box     = list[i];
+		s->box  = s->list[i];
 		clock_s = 0.0f;
 
 		/*
@@ -824,8 +946,8 @@ static bool on_event (SDL_FRect a, const SDL_Event *e, void *ctx)
 		 * "edit this".
 		 */
 		bool twice = e->button.clicks >= 2 && row == i;
-		last_row = i;
-		edit_at  = i;
+		last_row   = i;
+		s->edit_at = i;
 		if (twice) edit_open(i);
 
 		return true;
@@ -839,7 +961,10 @@ static bool on_event (SDL_FRect a, const SDL_Event *e, void *ctx)
 
 void anim_draw (VNG_TAB *t)
 {
-	if (!t || !win_visible(win) || box.frames < 1 || box.w < 1 || box.h < 1) return;
+	if (!t || !win_visible(win)) return;
+
+	VNG_ANIM *s = anim_of(t);
+	if (!s || s->box.frames < 1 || s->box.w < 1 || s->box.h < 1) return;
 
 	/*
 	 * THE GRID ON THE SHEET, which is the best idea in the original: the clip is a rectangle
@@ -850,12 +975,15 @@ void anim_draw (VNG_TAB *t)
 	 * sheet can be any colour. prim_box is that idiom, and the original hand-rolled it here
 	 * with a second rect at +1.
 	 */
-	for (int i = 0; i < box.frames; i++) {
-		float wx = (float)(box.x + box.w * i);
-		float wy = (float)(box.y + box.h * vert);
+	for (int i = 0; i < s->box.frames; i++) {
+		float wx = (float)(s->box.x + s->box.w * i);
+		float wy = (float)(s->box.y + s->box.h * s->vert);
 
 		SDL_FPoint p = view_world_to_screen(t, wx, wy);
-		SDL_FPoint q = view_world_to_screen(t, wx + (float)box.w, wy + (float)box.h);
+		SDL_FPoint q = view_world_to_screen(t, wx + (float)s->box.w, wy + (float)s->box.h);
+
+		/* A cell wholly past the right of the window, and every one after it, is not seen. */
+		if (p.x > (float)vng_win_w) break;
 
 		SDL_FRect r = { p.x, p.y, q.x - p.x, q.y - p.y };
 		prim_box(r, 0xE0FFFFFFu, 0xC0000000u);
@@ -864,36 +992,12 @@ void anim_draw (VNG_TAB *t)
 
 /* --------------------------------------------------------------------------- the frame */
 
-/*
- * READ THIS DRAWING'S CLIPS, ONCE PER DRAWING.
- *
- * Summoning the window is the gesture that means "show me this sheet's animation", so that is
- * where the sidecar is read - which is what makes LOAD a button nobody has to press.
- *
- * ONCE, though, and that is the whole reason list_for exists: reading on every X would throw
- * away everything typed since the last SAVE the second time the window was put up, and it
- * would do it silently. A drawing whose sidecar does not exist yet is still marked as read, so
- * clips being built for it survive the window being hidden.
- */
-static void anim_follow_tab (void)
+/* THE EDITOR BELONGS TO THE PLAYER, so it goes when the player goes - by X, or by the player's
+   own close dot, which used to leave the editor parked on its own. */
+static void player_hidden (void *ctx)
 {
-	Uint32 id = vng_tab ? vng_tab->id : 0;
-	if (id == list_for) return;
-
-	list_for = id;
-	list_top = 0;
-	list_lot = 0;      /* another drawing's rectangles are not this one's */
-	edit_at  = -1;     /* nor is the row the editor was writing back to */
-	last_row = -1;     /* nor half a double click on a row of the other list */
-
-	anim_file(false);
-
-	/* AND NEITHER IS THE CLIP IN HAND. anim_load takes list[0] when it reads one; when it
-	 * reads nothing, the player would otherwise go on playing the last drawing's rectangle
-	 * and draw its grid over this one - four numbers about pixels that are not there. */
-	if (list_lot == 0) box = CLIP_NEW;
-
-	clock_s = 0.0f;
+	(void)ctx;
+	if (edit_win) win_show(edit_win, false);
 }
 
 void anim_toggle (void)
@@ -904,19 +1008,17 @@ void anim_toggle (void)
 	if (win) {
 		bool on = !win_visible(win);
 
-		if (on) { win_place(win, mx, my); clock_s = 0.0f; anim_follow_tab(); }
-		else if (edit_win) win_show(edit_win, false);   /* the editor belongs to the player */
+		if (on) { win_place(win, mx, my); clock_s = 0.0f; }
 
 		win_show(win, on);
 		return;
 	}
 
-	anim_follow_tab();   /* this drawing's sidecar, if it has one */
-
 	SDL_FRect  r = { 0.0f, 0.0f, OPEN_W, OPEN_H };
 	SDL_FPoint m = { OPEN_W, OPEN_H };
 
 	win = win_open("animation", r, m, body, on_event, NULL);
+	win_on_hide(win, player_hidden);
 	win_place(win, mx, my);
 }
 
@@ -936,22 +1038,30 @@ void anim_free (void)
 void anim_tick (void)
 {
 	/*
-	 * THE CLOSE BOX IS win.c's, AND THE EDITOR NEVER HEARS ABOUT IT - it hides the window and
-	 * that is all. A field left open goes on holding the keyboard with no caret anywhere on
-	 * screen, and while it does, every bare shortcut in the program is dead: Q is not the
-	 * pencil, TAB is not the sidebar and X will not put this window back. Asked here because
-	 * this is the one call that happens whether the windows are showing or not.
+	 * ANOTHER SHEET ON SCREEN IS ANOTHER SET OF CLIPS, and the editor belongs to a clip of the
+	 * old one: the entry it writes back to is an index into THAT list. It is let go of, and so
+	 * is half a double click on a row of the other list.
 	 */
-	if (!win_visible(edit_win))
+	Uint32 id = vng_tab ? vng_tab->id : 0;
+	if (id != seen_tab) {
+		seen_tab = id;
+		last_row = -1;
+		clock_s  = 0.0f;
 		for (int i = 0; i < FIELDS; i++) field_close(edit_box[i], false);
+		if (edit_win) win_show(edit_win, false);
+	}
 
 	if (!win_visible(win)) return;
+
+	VNG_ANIM *s = cur();
+	if (!s) return;
 
 	clock_s += vng_dt;
 
 	/* Wrapped rather than left to grow, so a window left open all day does not lose the
-	 * precision that decides which frame it is on. */
-	float loop = box.speed * (float)(box.frames > 0 ? box.frames : 1);
-	if (loop > 0.0f)
-		while (clock_s >= loop) clock_s -= loop;
+	 * precision that decides which frame it is on. With fmod and not by subtraction: a loop
+	 * shorter than one step of a float at this clock is a subtraction that changes nothing,
+	 * and a while loop around it that never ends. */
+	float loop = s->box.speed * (float)(s->box.frames > 0 ? s->box.frames : 1);
+	if (loop > 0.0f && clock_s >= loop) clock_s = SDL_fmodf(clock_s, loop);
 }
