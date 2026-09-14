@@ -62,6 +62,18 @@ extern bool select_event (const SDL_Event *e, VNG_TAB *t);
    the panels. */
 extern void select_draw (VNG_TAB *t);
 
+/*
+ * THE EDGE EVERY COLOUR EDIT STAYS INSIDE. True with the marked rectangle in `r`, clamped to
+ * the sheet - which can leave it EMPTY, when what is marked covers no pixel of the sheet (a
+ * float put down out on the desk). False with `r` untouched when nothing is marked.
+ *
+ * While a float is in the air it is where the float is NOW, which is where it will land - but
+ * a tool never draws under a float in practice: taking one puts the float down first.
+ *
+ * vng_tab_stroke_open is the caller that matters, and the reason this exists: see tabs.h.
+ */
+extern bool select_area (VNG_TAB *t, SDL_Rect *r);
+
 /* Drops a float into the document as one undo step, or does nothing if there is none. What
    switching tabs, closing a tab and picking another tool all call, so that a float is never
    left hanging in a document nobody is looking at. */

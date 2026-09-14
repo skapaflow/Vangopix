@@ -119,18 +119,51 @@ static bool draw_buffers_make (VNG_TAB *t)
 	return true;
 }
 
-bool vng_tab_stroke_open (VNG_TAB *t, bool direct)
+static bool stroke_begin (VNG_TAB *t, bool direct, bool clipped)
 {
 	if (!t || !draw_buffers_make(t)) return false;
 	if (!undo_open(t)) return false;
 
 	t->direct = direct;
 
+	/* THE EDGE IS DECIDED HERE, ONCE, like the colour a tool lays: a selection changed while a
+	 * stroke is running must not move the edge of a line already begun. select_area leaves the
+	 * whole sheet in place when nothing is marked, and hands back a rectangle already clamped
+	 * to the sheet - possibly empty, when what is marked covers no pixel of it, and then
+	 * nothing is writable, because nothing is inside the selection. */
+	SDL_Rect r = { 0, 0, t->w, t->h };
+	if (clipped) select_area(t, &r);
+	t->clip = r;
+
 	/* An empty box, stated so that the first put widens it in both directions. */
 	t->sx0 = t->w; t->sy0 = t->h;
 	t->sx1 = 0;    t->sy1 = 0;
 	t->stroke = true;
 	return true;
+}
+
+bool vng_tab_stroke_open (VNG_TAB *t, bool direct)
+{
+	return stroke_begin(t, direct, true);
+}
+
+/* select_commit's, and nobody else's - see tabs.h. */
+bool vng_tab_stroke_open_unclipped (VNG_TAB *t, bool direct)
+{
+	return stroke_begin(t, direct, false);
+}
+
+/* The clip is clamped to the sheet when it is taken and the geometry cannot change while a
+ * stroke is open (adopt throws the stroke away), so inside the clip is inside the buffer. */
+static bool in_clip (const VNG_TAB *t, int x, int y)
+{
+	return x >= t->clip.x && y >= t->clip.y &&
+	       x <  t->clip.x + t->clip.w && y < t->clip.y + t->clip.h;
+}
+
+bool vng_tab_writable (VNG_TAB *t, int x, int y)
+{
+	return t && t->stroke && in_clip(t, x, y);
 }
 
 bool vng_tab_touched (VNG_TAB *t, int x, int y)
@@ -141,7 +174,10 @@ bool vng_tab_touched (VNG_TAB *t, int x, int y)
 
 void vng_tab_put (VNG_TAB *t, int x, int y, Uint32 argb)
 {
-	if (!t || !t->stroke || x < 0 || y < 0 || x >= t->w || y >= t->h) return;
+	/* THE SELECTION HOLDS HERE, for every tool at once. Refused and not clamped: a pixel
+	 * outside the edge is simply not part of this stroke - not written, not carried, not
+	 * marked - so a stroke that never crosses into the selection leaves no undo step. */
+	if (!t || !t->stroke || !in_clip(t, x, y)) return;
 
 	size_t i = (size_t)y * t->w + x;
 

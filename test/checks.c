@@ -816,6 +816,188 @@ int main (void)
 		   tool_current() == T_ELLIPSE);
 	}
 
+	/* ---- WHILE A RECTANGLE IS MARKED, NO COLOUR LANDS OUTSIDE IT ----
+	 *
+	 * The rule lives in vng_tab_stroke_open / vng_tab_put, not in any tool, so every tool is
+	 * checked here: the ones that lay a tip, the anchored shapes on both paths (previewed and
+	 * written straight through), the spray, and the two that WALK a region, where the edge has
+	 * to be a wall or the walk never ends. The rectangle is (4,4)-(9,9) on a white 16x16 sheet,
+	 * and every check says what it claims about the pixels OUTSIDE it.
+	 */
+	{
+		VNG_TAB *m = vng_tab_new(16, 16);
+		view_sheet_rect(m);
+		undo_mark_saved(m);
+
+		const Uint32 paper = 0xFFFFFFFFu, ink = 0xFF203040u;
+		Uint32 was0 = tool_colour(0), was1 = tool_colour(1);
+		TOOL   was_tool = tool_current();
+		tool_set_colour(0, ink);
+		tool_set_colour(1, 0x00000000u);
+
+		Uint32 blank[16 * 16];
+		SDL_memcpy(blank, m->pixels, sizeof blank);
+
+		#define IN(x, y)  ((x) >= 4 && (x) <= 9 && (y) >= 4 && (y) <= 9)
+
+		/* How many pixels changed, inside the rectangle and outside it. */
+		#define TALLY(in, out) do {                                                     \
+			(in) = (out) = 0;                                                           \
+			for (int yy = 0; yy < 16; yy++)                                             \
+				for (int xx = 0; xx < 16; xx++)                                         \
+					if (m->pixels[yy * 16 + xx] != blank[yy * 16 + xx]) {               \
+						if (IN(xx, yy)) (in)++; else (out)++;                           \
+					}                                                                   \
+		} while (0)
+
+		int in = 0, out = 0;
+
+		key(m, SDLK_Z, SDL_KMOD_NONE);
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 4, 4);
+		mouse(m, SDL_EVENT_MOUSE_MOTION,      0,               9, 9);
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 9, 9);
+
+		SDL_Rect r;
+		ok("the rectangle is what select_area reports",
+		   select_area(m, &r) && r.x == 4 && r.y == 4 && r.w == 6 && r.h == 6);
+
+		/* Taking another tool puts down a float, and there is none - the rectangle stays
+		 * marked, which is what makes the rest of this block mean anything. */
+		key(m, SDLK_Q, SDL_KMOD_NONE);
+		ok("taking the pencil leaves the rectangle marked", select_area(m, &r));
+
+		vng_tab_stroke_open(m, false);
+		ok("A STROKE MAY WRITE INSIDE THE SELECTION",  vng_tab_writable(m, 4, 4) && vng_tab_writable(m, 9, 9));
+		ok("AND NOT ONE PIXEL OUTSIDE IT",             !vng_tab_writable(m, 3, 4) && !vng_tab_writable(m, 10, 9) &&
+		                                               !vng_tab_writable(m, 4, 3) && !vng_tab_writable(m, 9, 10));
+		vng_tab_put(m, 0, 0, ink);
+		vng_tab_stroke_close(m);
+		ok("a put outside it is refused, and leaves no step",
+		   m->pixels[0] == paper && undo_undo(m) == false);
+		ok("writable says no with no stroke open", !vng_tab_writable(m, 5, 5));
+
+		/* The pencil, begun OUTSIDE and dragged across: the part that crosses in lands. */
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 0,  6);
+		mouse(m, SDL_EVENT_MOUSE_MOTION,      0,               15, 6);
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 15, 6);
+		TALLY(in, out);
+		ok("A PENCIL DRAGGED ACROSS THE SELECTION PAINTS ONLY THE PART INSIDE IT", in == 6 && out == 0);
+		ok("and is one undo", undo_undo(m) && SDL_memcmp(m->pixels, blank, sizeof blank) == 0);
+
+		/* A stroke that never crosses in changes nothing and records nothing. */
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 0,  1);
+		mouse(m, SDL_EVENT_MOUSE_MOTION,      0,               15, 1);
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 15, 1);
+		ok("a stroke wholly outside leaves the sheet and the undo stack alone",
+		   SDL_memcmp(m->pixels, blank, sizeof blank) == 0 && undo_undo(m) == false);
+
+		/* The eraser, at whatever size it is: rubbed out inside, paper outside. */
+		key(m, SDLK_A, SDL_KMOD_NONE);
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 9, 9);
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 9, 9);
+		TALLY(in, out);
+		ok("THE ERASER RUBS OUT ONLY INSIDE", m->pixels[9 * 16 + 9] == 0x00000000u && out == 0);
+		undo_undo(m);
+
+		/* An anchored shape, previewed: a diagonal line corner to corner crosses six pixels. */
+		key(m, SDLK_W, SDL_KMOD_NONE);
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 0,  0);
+		mouse(m, SDL_EVENT_MOUSE_MOTION,      0,               15, 15);
+		tool_frame(m);
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 15, 15);
+		TALLY(in, out);
+		ok("A LINE ACROSS THE SELECTION LANDS ONLY INSIDE IT", in == 6 && out == 0);
+		undo_undo(m);
+
+		/* The same shape WRITTEN THROUGH - colour 2 is nothing, so the right button takes the
+		 * direct path, which rewinds rather than wipes and must be held to the edge too. */
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_RIGHT, 0,  15);
+		mouse(m, SDL_EVENT_MOUSE_MOTION,      0,                15, 0);
+		tool_frame(m);
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_RIGHT, 15, 0);
+		TALLY(in, out);
+		ok("AND SO DOES ONE WRITTEN STRAIGHT THROUGH", in == 4 && out == 0);
+		undo_undo(m);
+
+		/* A rectangle drawn round the selection's outside touches nothing at all. */
+		key(m, SDLK_E, SDL_KMOD_NONE);
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 2,  2);
+		mouse(m, SDL_EVENT_MOUSE_MOTION,      0,               12, 12);
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 12, 12);
+		ok("a rect drawn round the outside of it changes nothing",
+		   SDL_memcmp(m->pixels, blank, sizeof blank) == 0 && undo_undo(m) == false);
+
+		/* The spray is random, and the claim is not: wherever it lands, it lands inside. */
+		key(m, SDLK_D, SDL_KMOD_NONE);
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 6, 6);
+		for (int i = 0; i < 8; i++) tool_frame(m);
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 6, 6);
+		TALLY(in, out);
+		ok("THE SPRAY LANDS ONLY INSIDE", in > 0 && out == 0);
+		undo_undo(m);
+
+		/* THE WALKS. The whole sheet is one white region, so an unbounded bucket would take all
+		 * of it - and the barrier, which crosses everything that is not its own colour, would
+		 * never finish if the edge were only a refusal: the pixels outside are never marked. */
+		tool_fill(m, 6, 6, 0, false);
+		TALLY(in, out);
+		ok("THE BUCKET FILLS THE SELECTION AND STOPS AT ITS EDGE", in == 36 && out == 0);
+		undo_undo(m);
+
+		tool_fill(m, 6, 6, 0, true);
+		TALLY(in, out);
+		ok("THE BARRIER FILL TOO, and it came back", in == 36 && out == 0);
+		undo_undo(m);
+
+		tool_fill(m, 0, 0, 0, false);
+		ok("a bucket dropped outside the selection fills nothing and records nothing",
+		   SDL_memcmp(m->pixels, blank, sizeof blank) == 0 && undo_undo(m) == false);
+
+		/* Change-colours READS under the pointer wherever it is and REPLACES inside the edge:
+		 * pressed on the paper outside, it turns the paper inside and nothing else. */
+		key(m, SDLK_F, SDL_KMOD_NONE);
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 0, 0);
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 0, 0);
+		TALLY(in, out);
+		ok("CHANGE-COLOURS READS ANYWHERE AND REPLACES ONLY INSIDE", in == 36 && out == 0);
+		undo_undo(m);
+
+		/* The selection's own move is the one stroke let out - its hole is outside the
+		 * rectangle it lands in, and has to be written. */
+		key(m, SDLK_Q, SDL_KMOD_NONE);
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 5, 5);
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 5, 5);   /* one ink pixel inside */
+		key(m, SDLK_Z, SDL_KMOD_NONE);
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 5, 5);
+		mouse(m, SDL_EVENT_MOUSE_MOTION,      0,               11, 5);
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 11, 5);
+		select_commit(m);
+		ok("A MOVED SELECTION STILL EMPTIES THE PLACE IT LEFT",
+		   m->pixels[5 * 16 + 5] == 0x00000000u && m->pixels[5 * 16 + 11] == ink);
+		ok("and the edge moved with it",
+		   select_area(m, &r) && r.x == 10 && r.y == 4 && r.w == 6 && r.h == 6);
+		undo_undo(m);
+		undo_undo(m);
+
+		/* ESC lets go of the rectangle, and the whole sheet is writable again. */
+		key(m, SDLK_ESCAPE, SDL_KMOD_NONE);
+		ok("ESC lets go of the selection", !select_area(m, &r));
+		key(m, SDLK_Q, SDL_KMOD_NONE);
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 0,  6);
+		mouse(m, SDL_EVENT_MOUSE_MOTION,      0,               15, 6);
+		mouse(m, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 15, 6);
+		TALLY(in, out);
+		ok("WITH NOTHING SELECTED THE PENCIL REACHES THE WHOLE SHEET", in == 6 && out == 10);
+		undo_undo(m);
+
+		#undef TALLY
+		#undef IN
+
+		tool_set_colour(0, was0);
+		tool_set_colour(1, was1);
+		tool_set(was_tool);
+	}
+
 	/* ---- CREATE PALETTE, on the selection's menu ----
 	 *
 	 * A right press on the selection opens the first Vangopix's gui_select, and its first row

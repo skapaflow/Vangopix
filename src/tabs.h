@@ -55,6 +55,8 @@ typedef struct _vng_tab_ {
 	bool    direct;            /* ... unless it writes straight through - see stroke_open */
 	int     sx0, sy0, sx1, sy1;/* what it has touched, half open, so nothing else is
 	                            * uploaded or walked when it closes */
+	SDL_Rect clip;             /* where it may write: the selection, or the whole sheet -
+	                            * see vng_tab_stroke_open. Always inside the sheet. */
 
 	VNG_UNDO *undo;            /* NULL until the document is first changed */
 
@@ -104,8 +106,31 @@ extern VNG_TAB *vng_tab;    /* the one on screen */
  *          is still one undo.
  *   close  merges every marked pixel into the document, records every one of them, and
  *          leaves the preview empty for the next stroke.
+ *
+ * WHILE A RECTANGLE IS MARKED, NO COLOUR LANDS OUTSIDE IT - and this is where that is true,
+ * not in the tools. A stroke takes its `clip` from the selection (select_area) when it OPENS,
+ * the same moment a tool takes its colour, and `put` refuses every pixel outside it. With
+ * nothing marked the clip is the whole sheet. So no tool asks about the selection and no tool
+ * can forget to: the pencil, the bucket and whatever is written next are held to it by the
+ * only road into the document, exactly as they are held to undo.
+ *
+ * WHICH IS WHY A NEW TOOL MUST WRITE THROUGH open + put AND NEVER INTO t->pixels. A direct
+ * write skips the selection and the undo step both - it is wrong twice before it is wrong
+ * in any way of its own.
+ *
+ *   writable  may the open stroke write here: inside the sheet AND inside the clip. False
+ *          with no stroke open. What a tool that WALKS a region asks, because a walk has to
+ *          take the edge as a wall rather than merely be refused at it - see plot_flood.
+ *
+ *   open_unclipped  THE ONE EXCEPTION, AND IT HAS ONE CALLER: select_commit. Putting a float
+ *          down writes the hole it left AND the place it landed, and by then the marked
+ *          rectangle is the second of those - bounding the selection's own move by the
+ *          selection would leave the hole unwritten. The selection is what says where the
+ *          edge is; it cannot be held inside itself. A second caller is a decision to raise.
  */
 extern bool vng_tab_stroke_open  (VNG_TAB *t, bool direct);
+extern bool vng_tab_stroke_open_unclipped (VNG_TAB *t, bool direct);
+extern bool vng_tab_writable     (VNG_TAB *t, int x, int y);
 extern bool vng_tab_touched      (VNG_TAB *t, int x, int y);
 extern void vng_tab_put          (VNG_TAB *t, int x, int y, Uint32 argb);
 extern void vng_tab_stroke_reset (VNG_TAB *t);

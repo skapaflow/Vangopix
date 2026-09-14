@@ -396,7 +396,8 @@ static void plot_line (VNG_TAB *t, int x0, int y0, int x1, int y1)
 	for (;;) {
 		/* No bounds test: a stroke that runs off the sheet and comes back is ONE stroke,
 		 * and the line between two samples outside it still has to be walked. vng_tab_put
-		 * clips, so the part that lands is the part that lands. */
+		 * clips - to the sheet, and to the selection while one is marked - so the part that
+		 * lands is the part that lands. */
 		tip(t, x0, y0);
 
 		if (x0 == x1 && y0 == y1) break;
@@ -528,10 +529,19 @@ static void plot_ellipse (VNG_TAB *t, int x0, int y0, int x1, int y1)
  *
  * THE MASK IS THE VISITED SET, and that is free: a pixel already marked in this stroke is a
  * pixel already filled, so nothing else has to remember where the fill has been.
+ *
+ * AND THAT IS WHY THE SELECTION IS A WALL HERE, not merely a place writes are refused. Only
+ * vng_tab_put writes the mask, and it writes nothing outside the stroke's clip - so a fill let
+ * loose past the edge would find every pixel out there forever unvisited and never finish; a
+ * barrier fill on an open sheet is exactly that. The walk is bounded by t->clip, the same
+ * rectangle put enforces, and a drop outside it fills nothing and leaves no undo step.
  */
 static void plot_flood (VNG_TAB *t, int sx, int sy, bool barrier)
 {
-	if (!inside(t, sx, sy)) return;
+	if (!vng_tab_writable(t, sx, sy)) return;
+
+	const int bx0 = t->clip.x, bx1 = t->clip.x + t->clip.w - 1;
+	const int by0 = t->clip.y, by1 = t->clip.y + t->clip.h - 1;
 
 	Uint32 target = t->pixels[(size_t)sy * t->w + sx];
 
@@ -552,7 +562,7 @@ static void plot_flood (VNG_TAB *t, int sx, int sy, bool barrier)
 
 	/* Two ints per span start. One entry per row is the worst case, and a few rows of slack
 	 * cost nothing beside the buffers a document already carries. */
-	int  cap   = t->h * 4 + 64;
+	int  cap   = t->clip.h * 4 + 64;
 	int *stack = (int *) SDL_malloc((size_t)cap * 2 * sizeof(int));
 	if (!stack) return;
 
@@ -563,7 +573,7 @@ static void plot_flood (VNG_TAB *t, int sx, int sy, bool barrier)
 		top--;
 		int x = stack[top * 2], y = stack[top * 2 + 1];
 
-		if (!inside(t, x, y)) continue;
+		if (x < bx0 || y < by0 || x > bx1 || y > by1) continue;
 
 		/* The document is read, never the preview, so the wall a barrier fill stops at is
 		 * the drawing as it was when the button went down. The mask guards against walking
@@ -574,10 +584,10 @@ static void plot_flood (VNG_TAB *t, int sx, int sy, bool barrier)
 		if (!MATCH(row, x)) continue;
 
 		int x0 = x;
-		while (x0 > 0 && MATCH(row, x0 - 1)) x0--;
+		while (x0 > bx0 && MATCH(row, x0 - 1)) x0--;
 
 		int x1 = x;
-		while (x1 < t->w - 1 && MATCH(row, x1 + 1)) x1++;
+		while (x1 < bx1 && MATCH(row, x1 + 1)) x1++;
 
 		for (int i = x0; i <= x1; i++)
 			vng_tab_put(t, i, y, laying);
@@ -585,7 +595,7 @@ static void plot_flood (VNG_TAB *t, int sx, int sy, bool barrier)
 		/* One push per RUN on each neighbouring row, not one per pixel. */
 		for (int dy = -1; dy <= 1; dy += 2) {
 			int ny = y + dy;
-			if (ny < 0 || ny >= t->h) continue;
+			if (ny < by0 || ny > by1) continue;
 
 			size_t nrow = (size_t)ny * t->w;
 			bool   run  = false;
@@ -633,6 +643,11 @@ static void plot_spray (VNG_TAB *t, int cx, int cy, int r)
  * one, or only inside a circle or a square when there is a size to work with: replacing one
  * shade of a sprite everywhere is one gesture, and replacing it only where a shadow falls is
  * the same gesture with a shape around it.
+ *
+ * THE SELECTION IS A THIRD LIMITER, and the one that always applies. The colour is READ under
+ * the pointer wherever the pointer is - reading the drawing is never restricted, CTRL picks
+ * from anywhere too - and REPLACED only inside the stroke's clip. The walk is bounded by it
+ * rather than left to put to refuse, so "the whole sheet" costs the selection, not the sheet.
  */
 static void plot_change (VNG_TAB *t, int cx, int cy)
 {
@@ -643,14 +658,13 @@ static void plot_change (VNG_TAB *t, int cx, int cy)
 
 	int r = size[T_CHANGE];
 
-	int x0 = 0, y0 = 0, x1 = t->w - 1, y1 = t->h - 1;
+	int x0 = t->clip.x, x1 = t->clip.x + t->clip.w - 1;
+	int y0 = t->clip.y, y1 = t->clip.y + t->clip.h - 1;
 	if (limiter != 0) {
-		x0 = cx - r; x1 = cx + r;
-		y0 = cy - r; y1 = cy + r;
-		if (x0 < 0) x0 = 0;
-		if (y0 < 0) y0 = 0;
-		if (x1 > t->w - 1) x1 = t->w - 1;
-		if (y1 > t->h - 1) y1 = t->h - 1;
+		if (x0 < cx - r) x0 = cx - r;
+		if (y0 < cy - r) y0 = cy - r;
+		if (x1 > cx + r) x1 = cx + r;
+		if (y1 > cy + r) y1 = cy + r;
 	}
 
 	for (int y = y0; y <= y1; y++) {

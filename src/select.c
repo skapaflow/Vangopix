@@ -143,8 +143,13 @@ void select_commit (VNG_TAB *t)
 
 	/* Direct, always: what a cut leaves may be transparent, and transparency cannot be shown
 	 * by compositing a preview over the sheet - see tabs.h. Everything a selection does is
-	 * one step from the person's side, so it may as well be one kind of stroke. */
-	if (!vng_tab_stroke_open(t, true)) { float_drop(s); return; }
+	 * one step from the person's side, so it may as well be one kind of stroke.
+	 *
+	 * AND UNCLIPPED, the only stroke in the program that is. Every other edit is held inside
+	 * the marked rectangle, but this one writes the place the float left as well as the place
+	 * it landed, and the rectangle is already only the second. It is the selection moving its
+	 * own pixels - the thing that decides where the edge is, not a thing inside it. */
+	if (!vng_tab_stroke_open_unclipped(t, true)) { float_drop(s); return; }
 
 	/* WHAT A CUT LEAVES BEHIND IS COLOUR 2, not a hole and not white. The second colour is
 	 * already "what the right button lays down" - the background of the moment - so cutting
@@ -259,6 +264,22 @@ static bool inside_sel (VNG_SEL *s, int x, int y)
 	return s->on && x >= s->x && y >= s->y && x < s->x + s->w && y < s->y + s->h;
 }
 
+/* What every stroke is clipped to - see select.h and tabs.h. Read from the rectangle as it
+ * stands, never cached: a stroke asks once when it opens, and that is the only answer that
+ * matters to it. */
+bool select_area (VNG_TAB *t, SDL_Rect *r)
+{
+	VNG_SEL *s = t ? t->sel : NULL;
+	if (!s || !s->on || !r) return false;
+
+	int x = s->x, y = s->y, w = s->w, h = s->h;
+	clamp_rect(t, &x, &y, &w, &h);
+
+	r->x = x; r->y = y;
+	r->w = w; r->h = h;
+	return true;
+}
+
 static Uint32 *grab_from_float (VNG_SEL *s);
 
 static void copy_out (VNG_TAB *t, VNG_SEL *s)
@@ -346,7 +367,9 @@ static void clear_marked (VNG_TAB *t, VNG_SEL *s)
 	if (w < 1 || h < 1) return;
 
 	/* Direct, like everything else here: colour 2 may be nothing, and nothing cannot be shown
-	 * by compositing a preview over the sheet. */
+	 * by compositing a preview over the sheet. CLIPPED, like a tool's, although it only ever
+	 * writes inside the rectangle - held to the rule rather than trusted with it; only
+	 * select_commit is let out. */
 	if (!vng_tab_stroke_open(t, true)) return;
 
 	Uint32 back = tool_colour(1);
