@@ -579,6 +579,68 @@ int main (void)
 		#undef SNAP
 	}
 
+	/* ---- SHIFT holds a rectangle square and an ellipse round ---- */
+	{
+		int x, y;
+		#define SQUARE(sx, sy) (x = (sx), y = (sy), tool_snap_square(10, 10, &x, &y))
+
+		SQUARE(16, 12);
+		ok("A WIDE DRAG IS PUSHED DOWN TO A SQUARE", x == 16 && y == 16);
+		SQUARE(12, 16);
+		ok("a tall one is pushed across", x == 16 && y == 16);
+		SQUARE(4, 13);
+		ok("and each side keeps the way it was dragged", x == 4 && y == 16);
+		SQUARE(8, 2);
+		ok("up and to the left too", x == 2 && y == 2);
+		SQUARE(10, 15);
+		ok("a drag straight down still opens a square", x == 15 && y == 15);
+
+		#undef SQUARE
+
+		VNG_TAB *q = vng_tab_new(20, 20);
+		view_sheet_rect(q);
+		Uint32 paper = q->pixels[0];
+		Uint32 was0  = tool_colour(0);
+		tool_set_colour(0, 0xFF000000u);
+
+		/* A rectangle dragged 7 across and 4 down, with SHIFT: it comes out 7 by 7. */
+		key(q, SDLK_E, SDL_KMOD_NONE);
+		SDL_SetModState(SDL_KMOD_LSHIFT);
+		mouse(q, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 2, 2);
+		mouse(q, SDL_EVENT_MOUSE_MOTION,      0,               8, 5);
+		mouse(q, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 8, 5);
+		SDL_SetModState(SDL_KMOD_NONE);
+		ok("SHIFT DRAWS THE RECTANGLE SQUARE",
+		   q->pixels[8 * 20 + 2] != paper && q->pixels[8 * 20 + 8] != paper &&
+		   q->pixels[9 * 20 + 2] == paper);
+		undo_undo(q);
+
+		/* The same drag without it is the rectangle it was. */
+		mouse(q, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 2, 2);
+		mouse(q, SDL_EVENT_MOUSE_MOTION,      0,               8, 5);
+		mouse(q, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 8, 5);
+		ok("and without SHIFT it follows the hand",
+		   q->pixels[5 * 20 + 2] != paper && q->pixels[8 * 20 + 2] == paper);
+		undo_undo(q);
+
+		/* An ellipse dragged 10 across and 4 down, with SHIFT: a circle 11 across, whose four
+		 * extremes sit the same distance from its centre at (5,5). */
+		key(q, SDLK_R, SDL_KMOD_NONE);
+		SDL_SetModState(SDL_KMOD_LSHIFT);
+		mouse(q, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 0,  0);
+		mouse(q, SDL_EVENT_MOUSE_MOTION,      0,               10, 4);
+		mouse(q, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 10, 4);
+		SDL_SetModState(SDL_KMOD_NONE);
+		ok("SHIFT DRAWS THE ELLIPSE ROUND",
+		   q->pixels[0 * 20 + 5] != paper && q->pixels[10 * 20 + 5] != paper &&
+		   q->pixels[5 * 20 + 0] != paper && q->pixels[5 * 20 + 10] != paper);
+		undo_undo(q);
+
+		key(q, SDLK_Q, SDL_KMOD_NONE);
+		tool_set_colour(0, was0);
+		vng_tab_close(q);
+	}
+
 	/* ---- the barrier fill, which is a different question from the bucket ---- */
 	{
 		VNG_TAB *f = vng_tab_new(20, 20);

@@ -860,6 +860,33 @@ void tool_fill (VNG_TAB *t, int x, int y, int slot, bool barrier)
 	vng_tab_stroke_close(t);
 }
 
+/*
+ * SHIFT HOLDS A RECTANGLE SQUARE AND AN ELLIPSE ROUND. The far corner is moved out along the
+ * SHORTER side until both are as long as the longer one, keeping the direction the hand went on
+ * each axis - so the shape grows from the anchor toward the pointer, and the pointer always
+ * sits on one of its edges rather than somewhere inside it. The longer side, because a drag
+ * that shrank to the shorter one would stop following the hand on the axis it moved most.
+ */
+void tool_snap_square (int ax, int ay, int *x, int *y)
+{
+	int dx = *x - ax, dy = *y - ay;
+	int side = SDL_abs(dx) > SDL_abs(dy) ? SDL_abs(dx) : SDL_abs(dy);
+
+	*x = ax + (dx < 0 ? -side : side);
+	*y = ay + (dy < 0 ? -side : side);
+}
+
+/* Where a dragged shape's far end really is: the pointer, snapped by SHIFT to the slopes for a
+ * line and to a square for the other two. Asked by the drawing and by the size readout, so the
+ * number beside the hand is the size of what is on the sheet. */
+static void shape_end (int *x, int *y)
+{
+	if (!(keys_mods() & SDL_KMOD_SHIFT)) return;
+
+	if (current == T_LINE)                             tool_snap_iso(anchor_x, anchor_y, x, y);
+	if (current == T_RECT || current == T_ELLIPSE)     tool_snap_square(anchor_x, anchor_y, x, y);
+}
+
 /* Everything a press or a drag lays down, in one place, so the event handler stays a list of
  * gestures instead of a list of tools. */
 static void apply (VNG_TAB *t, int x, int y)
@@ -869,14 +896,11 @@ static void apply (VNG_TAB *t, int x, int y)
 	case T_ERASER:  plot_line(t, last_x, last_y, x, y);        break;
 	case T_SPRAY:   plot_spray(t, x, y, size[T_SPRAY],         /* the press: one frame's */
 	                           size[T_SPRAY] * size[T_SPRAY]);   break;
-	case T_LINE:
-		/* SHIFT snaps the far end to the pixel-art slopes before anything is drawn, so the
-		 * preview and the committed line are the same line. */
-		if (keys_mods() & SDL_KMOD_SHIFT) tool_snap_iso(anchor_x, anchor_y, &x, &y);
-		plot_line(t, anchor_x, anchor_y, x, y);
-		break;
-	case T_RECT:    plot_rect(t, anchor_x, anchor_y, x, y);    break;
-	case T_ELLIPSE: plot_ellipse(t, anchor_x, anchor_y, x, y); break;
+	/* SHIFT snaps the far end before anything is drawn - the slopes for a line, a square for
+	 * the other two - so the preview and the committed shape are the same shape. */
+	case T_LINE:    shape_end(&x, &y); plot_line(t, anchor_x, anchor_y, x, y);    break;
+	case T_RECT:    shape_end(&x, &y); plot_rect(t, anchor_x, anchor_y, x, y);    break;
+	case T_ELLIPSE: shape_end(&x, &y); plot_ellipse(t, anchor_x, anchor_y, x, y); break;
 	case T_CHANGE:  plot_change(t, x, y);                      break;
 	default: break;
 	}
@@ -1831,8 +1855,11 @@ void tool_draw (VNG_TAB *t)
 
 		beside(mx, my, WHERE_DY, WHERE_INK, "(%d,%d)", x, y);
 
-		if (drawing && (current == T_LINE || current == T_RECT || current == T_ELLIPSE))
-			beside(mx, my, SPAN_DY, SPAN_INK, "[%dx%d]", SDL_abs(x - anchor_x) + 1, SDL_abs(y - anchor_y) + 1);
+		if (drawing && (current == T_LINE || current == T_RECT || current == T_ELLIPSE)) {
+			int ex = x, ey = y;
+			shape_end(&ex, &ey);
+			beside(mx, my, SPAN_DY, SPAN_INK, "[%dx%d]", SDL_abs(ex - anchor_x) + 1, SDL_abs(ey - anchor_y) + 1);
+		}
 	}
 
 	slots_draw();

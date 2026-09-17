@@ -100,6 +100,7 @@ version keeps the keys it moved.
 | `CTRL` + drag a selection | copy it instead of moving it |
 | `SHIFT` + click, pencil | draw a straight line from the last point |
 | `SHIFT` + drag a line | snap to the pixel-art slopes: 2:1, 1:1, 1:2 |
+| `SHIFT` + drag a rect / ellipse | keep it square / round |
 | `SHIFT` + bucket | barrier fill — spread until it meets your colour |
 | `SHIFT` + drag a grip | put the canvas corner on the 8 pixel grid |
 | drag a file in | open it in a new tab |

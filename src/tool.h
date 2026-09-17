@@ -156,6 +156,11 @@ extern void tool_fill (VNG_TAB *t, int x, int y, int slot, bool barrier);
  */
 extern void tool_snap_iso (int ax, int ay, int *x, int *y);
 
+/* SHIFT with the rectangle or the ellipse: the far corner pushed out along the shorter side so
+   both sides match the longer one, each keeping the direction it was dragged. A square, and a
+   circle inscribed in one. Checkable without a mouse, like the above. */
+extern void tool_snap_square (int ax, int ay, int *x, int *y);
+
 /*
  * A colour as a person reads it: RRGGBBAA, eight hex digits, no prefix.
  *
