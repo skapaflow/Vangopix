@@ -66,6 +66,8 @@ typedef struct _vng_tab_ {
 	SDL_Texture *tex_preview;
 	bool    stroke;            /* a stroke is open, so the preview has something in it */
 	bool    direct;            /* ... unless it writes straight through - see stroke_open */
+	bool    blend;             /* ... and lays a see-through colour OVER what is there -
+	                            * see vng_tab_stroke_blend */
 	int     sx0, sy0, sx1, sy1;/* what it has touched, half open, so nothing else is
 	                            * uploaded or walked when it closes */
 	SDL_Rect clip;             /* where it may write: the selection, or the whole sheet -
@@ -162,6 +164,28 @@ extern VNG_TAB *vng_tab;    /* the one on screen */
  */
 extern bool vng_tab_stroke_open  (VNG_TAB *t, bool direct);
 extern bool vng_tab_stroke_open_unclipped (VNG_TAB *t, bool direct);
+
+/*
+ * BLEND: THE STROKE JUST OPENED LAYS A SEE-THROUGH COLOUR OVER THE SHEET instead of in place of
+ * it. Said after the open, because every open starts it off - a selection put down or cleared
+ * never blends, and only the tool asks for it.
+ *
+ * It only has anything to do on a DIRECT stroke, and that is not a limit: a colour that blends
+ * is one with alpha below full, and every such colour already writes through. An opaque colour
+ * blended over anything is itself, and ALPHA ZERO ALWAYS REPLACES - rubbing out is drawing with
+ * nothing, and nothing blended over a pixel would leave the pixel, which is an eraser that has
+ * stopped erasing.
+ *
+ * ONCE PER PIXEL PER STROKE, against the sheet as it was: passing back over the same spot in
+ * one stroke does not darken it, a new stroke does. The mask already says which pixels this
+ * stroke has laid, and a shape's reset rewinds the sheet and wipes the mask together, so a
+ * dragged shape always blends over the original.
+ */
+extern void vng_tab_stroke_blend (VNG_TAB *t, bool on);
+
+/* A over B, straight (not premultiplied) alpha, 0xAARRGGBB - the arithmetic of the above, in
+   one named place so the checks can pin it. */
+extern Uint32 vng_argb_over (Uint32 src, Uint32 dst);
 extern bool vng_tab_writable     (VNG_TAB *t, int x, int y);
 extern bool vng_tab_touched      (VNG_TAB *t, int x, int y);
 extern void vng_tab_put          (VNG_TAB *t, int x, int y, Uint32 argb);

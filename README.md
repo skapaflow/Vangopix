@@ -93,6 +93,7 @@ version keeps the keys it moved.
 | `CTRL` + left / right click | absorb that colour into 1 or 2; drag to keep absorbing |
 | `ALT` | the palette under the pointer |
 | `SHIFT`+`R` / `M` | a random colour into slot 1 / average the two into slot 1 |
+| `B` | blend: a see-through colour goes over what is there instead of replacing it |
 | `CTRL+A` `CTRL+C` `CTRL+X` `CTRL+V` | select all, copy, cut, paste |
 | `V` `H` `I` `R`, with a selection | flip, mirror, invert, rotate |
 | `DELETE` / `ESC`, with a selection | clear it / let it go |

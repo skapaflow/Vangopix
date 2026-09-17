@@ -32,6 +32,7 @@ static const BIND fallback[] = {
 	{ "tool-select",    "select",                          SDLK_Z },
 
 	{ "colour-mix",     "mix the two in hand",             SDLK_M },
+	{ "colour-blend",   "see-through colour: blend over",  SDLK_B },
 
 	{ "sheet-prev",     "the sheet before this one",       SDLK_1 },
 	{ "sheet-next",     "the one after it",                SDLK_2 },
@@ -127,6 +128,7 @@ static const SHOWROW layout[] = {
 	HEAD("colour"),
 	FIXED("SHIFT R",      "a colour at random"),
 	ACT(VNG_ACT_COLOUR_MIX),
+	ACT(VNG_ACT_COLOUR_BLEND),
 	FIXED("ALT",          "the palette under the pointer"),
 	GAP,
 
@@ -264,7 +266,7 @@ bool keymap_hit (VNG_ACT a, const SDL_Event *e)
  * stamp is then read for the keys it still names, and written again with everything this
  * build has - see keymap_load in keymap.h.
  */
-#define KEYMAP_STAMP "# vangopix-keys 3"
+#define KEYMAP_STAMP "# vangopix-keys 4"
 
 static const char *const PREAMBLE =
 	KEYMAP_STAMP "\n"

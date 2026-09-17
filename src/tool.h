@@ -82,6 +82,12 @@ extern void tool_draw (VNG_TAB *t);
 
 extern TOOL tool_current (void);
 
+/* B: whether a see-through colour is laid OVER the sheet rather than in place of it - see
+   vng_tab_stroke_blend. Named beside the pointer while it is on and a colour in hand has alpha
+   between nothing and full, the only time it changes anything. */
+extern bool tool_blend     (void);
+extern void tool_set_blend (bool on);
+
 /* Puts a tool in hand from outside - what CTRL+V and CTRL+A call, since a paste with no way
    to move what was pasted is a gesture that stops halfway. */
 extern void tool_set (TOOL t);

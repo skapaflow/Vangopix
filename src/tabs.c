@@ -234,6 +234,7 @@ static bool stroke_begin (VNG_TAB *t, bool direct, bool clipped)
 	if (!undo_open(t)) return false;
 
 	t->direct = direct;
+	t->blend  = false;
 
 	/* THE EDGE IS DECIDED HERE, ONCE, like the colour a tool lays: a selection changed while a
 	 * stroke is running must not move the edge of a line already begun. select_area leaves the
@@ -281,6 +282,36 @@ bool vng_tab_touched (VNG_TAB *t, int x, int y)
 	return t->mask[(size_t)y * t->w + x] != 0;
 }
 
+void vng_tab_stroke_blend (VNG_TAB *t, bool on)
+{
+	if (t && t->stroke) t->blend = on;
+}
+
+/*
+ * Everything scaled by 255 until the last division, so the alpha of the result and the weights
+ * of its channels come from one number and cannot round apart. Fully opaque and fully
+ * transparent sources come back as they are - see vng_tab_stroke_blend.
+ */
+Uint32 vng_argb_over (Uint32 src, Uint32 dst)
+{
+	Uint32 sa = (src >> 24) & 0xFF;
+	Uint32 da = (dst >> 24) & 0xFF;
+
+	if (sa == 0xFF || sa == 0) return src;
+
+	Uint32 wd  = da * (255 - sa);          /* how much of the pixel below shows, x255 */
+	Uint32 sum = sa * 255 + wd;            /* the alpha of the result, x255 */
+	Uint32 out = (sum + 127) / 255;
+
+	Uint32 argb = out << 24;
+	for (int sh = 0; sh <= 16; sh += 8) {
+		Uint32 s = (src >> sh) & 0xFF;
+		Uint32 d = (dst >> sh) & 0xFF;
+		argb |= ((s * sa * 255 + d * wd + sum / 2) / sum) << sh;
+	}
+	return argb;
+}
+
 void vng_tab_put (VNG_TAB *t, int x, int y, Uint32 argb)
 {
 	/* THE SELECTION HOLDS HERE, for every tool at once. Refused and not clamped: a pixel
@@ -291,6 +322,13 @@ void vng_tab_put (VNG_TAB *t, int x, int y, Uint32 argb)
 	size_t i = (size_t)y * t->w + x;
 
 	if (t->direct) {
+		/* Blended over the sheet as it was, so once: a pixel this stroke has already laid
+		 * is left alone, or passing back over it would darken it a little more each time. */
+		if (t->blend) {
+			if (t->mask[i]) return;
+			argb = vng_argb_over(argb, t->pixels[i]);
+		}
+
 		/* Straight into the document, carry first. There is no preview to composite and
 		 * nothing to merge later - which is the whole point, since what this stroke lays
 		 * cannot be shown by drawing it over anything.

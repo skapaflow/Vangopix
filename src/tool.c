@@ -70,6 +70,10 @@ static VNG_CURSOR  cur_want = VNG_CUR_ARROW;
 static Uint32 colour[2] = { START_1, START_2 };
 static Uint32 laying    = START_1;
 
+/* B. See-through colours blend over the sheet instead of replacing it - vng_tab_stroke_blend.
+ * One switch for the program, not per tool or per sheet, and not kept across a restart. */
+static bool   blend     = false;
+
 static TOOL current = T_PENCIL;
 
 /* Sizes and steps, both the first Vangopix's: vng_tool.tool_size in its tool_core.c, and the
@@ -207,6 +211,11 @@ static bool anchored (TOOL t) { return t == T_LINE || t == T_RECT || t == T_ELLI
 static bool writes_through (Uint32 c) { return ((c >> 24) & 0xFF) != 0xFF; }
 
 TOOL tool_current  (void) { return current; }
+bool tool_blend    (void) { return blend; }
+void tool_set_blend (bool on) { blend = on; }
+
+/* Alpha strictly between nothing and full: the only colours BLEND does anything to. */
+static bool partial (Uint32 c) { Uint32 a = (c >> 24) & 0xFF; return a != 0 && a != 0xFF; }
 void tool_set (TOOL t) { if (t >= 0 && t < T_LOT) current = t; }
 int  tool_tip_size (void) { return size[current]; }
 
@@ -846,6 +855,7 @@ void tool_fill (VNG_TAB *t, int x, int y, int slot, bool barrier)
 
 	laying = colour[slot == 1 ? 1 : 0];
 	if (!vng_tab_stroke_open(t, writes_through(laying))) return;
+	vng_tab_stroke_blend(t, blend);
 	plot_flood(t, x, y, barrier);
 	vng_tab_stroke_close(t);
 }
@@ -1032,6 +1042,11 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 			return true;
 		}
 
+		if (keymap_hit(VNG_ACT_COLOUR_BLEND, e)) {
+			blend = !blend;
+			return true;
+		}
+
 		if (keymap_hit(VNG_ACT_COLOUR_MIX, e)) {
 			Uint32 a = colour[0], b = colour[1];
 			colour[0] = ((((a >> 24) & 0xFF) + ((b >> 24) & 0xFF)) / 2) << 24
@@ -1191,6 +1206,7 @@ bool tool_event (const SDL_Event *e, VNG_TAB *t)
 
 		if (!vng_tab_stroke_open(t, writes_through(laying)))
 			return true;                       /* no memory for it; still ours */
+		vng_tab_stroke_blend(t, blend);
 
 		drawing  = true;
 		owner    = t->id;
@@ -1350,6 +1366,7 @@ void tool_frame_at (VNG_TAB *t, float mx, float my)
 	if (!hinting) {
 		laying = colour[0];
 		if (!vng_tab_stroke_open(t, writes_through(laying))) return;
+		vng_tab_stroke_blend(t, blend);
 		hinting = true;
 		owner   = t->id;
 		hint_sig.valid = false;
@@ -1797,8 +1814,16 @@ void tool_draw (VNG_TAB *t)
 
 	/* The bucket's two fills look identical until one of them runs, so the variant is named
 	 * while the modifier that chooses it is held. */
-	if (on && !eyedropper && current == T_BUCKET && (keys_mods() & SDL_KMOD_SHIFT))
-		label("barrier", mx, my);
+	bool barrier = on && !eyedropper && current == T_BUCKET && (keys_mods() & SDL_KMOD_SHIFT);
+
+	/* BLEND is named while it is on AND could do something: with both colours opaque, or
+	 * nothing, it lays exactly what replacing would, and a word that changes nothing is noise.
+	 * The eraser always lays nothing and the select tool lays nothing at all. */
+	bool blends  = on && !eyedropper && blend && current != T_ERASER && current != T_SELECT &&
+	               (partial(colour[0]) || partial(colour[1]));
+
+	if (barrier || blends)
+		label(barrier && blends ? "barrier blend" : barrier ? "barrier" : "blend", mx, my);
 
 	/* WHERE THE HAND IS, and - while a shape is being pulled - HOW BIG IT HAS GOT. See the
 	 * note above `beside` for why these are two colours rather than one line. */

@@ -3570,6 +3570,78 @@ int main (void)
 		tool_set_colour(0, was0);
 	}
 
+	/* ---- B: A SEE-THROUGH COLOUR BLENDED OVER THE SHEET ----
+	 *
+	 * Off, a colour with alpha replaces what is under it. On, it goes OVER it - once per pixel
+	 * per stroke, against the sheet as it was - and alpha zero still rubs out.
+	 */
+	{
+		ok("HALF RED OVER OPAQUE BLUE IS AN OPAQUE PURPLE",
+		   vng_argb_over(0x80FF0000u, 0xFF0000FFu) == 0xFF80007Fu);
+		ok("over nothing, a colour is itself", vng_argb_over(0x80FF0000u, 0x00000000u) == 0x80FF0000u);
+		ok("an opaque colour replaces",        vng_argb_over(0xFF00FF00u, 0x80123456u) == 0xFF00FF00u);
+		ok("and nothing replaces too",          vng_argb_over(0x00000000u, 0xFF123456u) == 0x00000000u);
+		ok("half over half is three quarters",
+		   ((vng_argb_over(0x80FF0000u, 0x80FF0000u) >> 24) & 0xFF) == 0xC0);
+
+		VNG_TAB *g = vng_tab_new(20, 20);
+		view_sheet_rect(g);
+
+		Uint32 was0 = tool_colour(0), was1 = tool_colour(1);
+		const Uint32 ink = 0x80FF0000u;
+		tool_set_colour(0, ink);
+		tool_set_colour(1, 0x00000000u);
+
+		Uint32 paper = g->pixels[5 * 20 + 5];
+		key(g, SDLK_Q, SDL_KMOD_NONE);
+
+		ok("B starts off", tool_blend() == false);
+		key(g, SDLK_B, SDL_KMOD_NONE);
+		ok("B TURNS IT ON", tool_blend());
+
+		/* Along the row and back over where it began, in one stroke. */
+		mouse(g, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 5,  5);
+		mouse(g, SDL_EVENT_MOUSE_MOTION,      0,               10, 5);
+		mouse(g, SDL_EVENT_MOUSE_MOTION,      0,               5,  5);
+		mouse(g, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 5,  5);
+
+		Uint32 once = vng_argb_over(ink, paper);
+		ok("THE COLOUR GOES OVER THE SHEET, NOT IN PLACE OF IT", g->pixels[5 * 20 + 8] == once);
+		ok("AND ONCE A STROKE, however often it passes back", g->pixels[5 * 20 + 5] == once);
+
+		mouse(g, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 5, 5);
+		mouse(g, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 5, 5);
+		ok("a second stroke builds on the first", g->pixels[5 * 20 + 5] == vng_argb_over(ink, once));
+
+		ok("and undo takes it back", undo_undo(g) && g->pixels[5 * 20 + 5] == once);
+
+		/* The right button lays colour 2, which is nothing - and nothing blended would leave
+		 * the pixel. */
+		mouse(g, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_RIGHT, 5, 5);
+		mouse(g, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_RIGHT, 5, 5);
+		ok("THE RIGHT BUTTON STILL RUBS OUT", g->pixels[5 * 20 + 5] == 0u);
+
+		/* A dragged shape rewinds on every motion, so it blends over the original each time. */
+		key(g, SDLK_W, SDL_KMOD_NONE);
+		mouse(g, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 0,  9);
+		mouse(g, SDL_EVENT_MOUSE_MOTION,      0,               12, 9);
+		mouse(g, SDL_EVENT_MOUSE_MOTION,      0,               15, 9);
+		mouse(g, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 15, 9);
+		ok("A DRAGGED LINE BLENDS ONCE, over the sheet it began on", g->pixels[9 * 20 + 6] == once);
+
+		key(g, SDLK_B, SDL_KMOD_NONE);
+		ok("B turns it off again", tool_blend() == false);
+
+		key(g, SDLK_Q, SDL_KMOD_NONE);
+		mouse(g, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 5, 12);
+		mouse(g, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 5, 12);
+		ok("and off, the colour replaces what was there", g->pixels[12 * 20 + 5] == ink);
+
+		tool_set_colour(0, was0);
+		tool_set_colour(1, was1);
+		vng_tab_close(g);
+	}
+
 	/* ---- CTRL+Z IN THE MIDDLE OF A RUB-OUT ----
 	 *
 	 * The eraser writes through, carrying as it goes. Undo pressed mid-stroke found the stroke
@@ -4155,7 +4227,7 @@ int main (void)
 		if (kp) {
 			SDL_IOStream *io = SDL_IOFromFile(kp, "w");
 			if (io) {
-				const char *swap = "# vangopix-keys 3\n"
+				const char *swap = "# vangopix-keys 4\n"
 				                   "tool-pencil  = W\n"
 				                   "tool-line    = Q\n"
 				                   "panel-colour = Z\n";
@@ -4190,7 +4262,7 @@ int main (void)
 
 			char *txt = (char *) SDL_LoadFile(kp, NULL);
 			ok("and is written again, stamped and holding them",
-			   txt && SDL_strstr(txt, "# vangopix-keys 3") && SDL_strstr(txt, "tool-pencil     = G") &&
+			   txt && SDL_strstr(txt, "# vangopix-keys 4") && SDL_strstr(txt, "tool-pencil     = G") &&
 			   SDL_strstr(txt, "tool-line       = W"));
 			SDL_free(txt);
 
