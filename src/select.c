@@ -142,6 +142,23 @@ static bool lift (VNG_TAB *t, VNG_SEL *s, bool cut)
 }
 
 /*
+ * WHAT ONE PIXEL OF A FLOAT LEAVES WHERE IT LANDS: itself, or - with B on - itself OVER what is
+ * there, so a pane of glass carried across a texture lands as glass and not as a hole cut in
+ * the texture and filled with tinted nothing.
+ *
+ * Blended here and not by the stroke, for two reasons. The stroke's blend is once per pixel,
+ * and the place a cut float came from has just been written in this same stroke - a nudge
+ * would find its landing pixels already laid and skip them. And "over what is there" has to
+ * mean the sheet AFTER that hole: a float is not under itself. The sheet is read directly,
+ * since this stroke writes through.
+ */
+static Uint32 landed (VNG_TAB *t, int x, int y, Uint32 c)
+{
+	if (!tool_blend() || x < 0 || y < 0 || x >= t->w || y >= t->h) return c;
+	return vng_argb_over(c, t->pixels[(size_t)y * t->w + x]);
+}
+
+/*
  * Ends a float as ONE undo step: the place it was lifted from emptied if it was a cut, and
  * then - when it is `landing` - its pixels written where they now are. Landing is putting it
  * down; not landing is a cut float being thrown away, whose pixels are to be gone from the
@@ -184,7 +201,7 @@ static void put_down (VNG_TAB *t, VNG_SEL *s, bool landing)
 			for (int i = 0; i < s->w; i++) {
 				Uint32 c = s->pixels[j * s->w + i];
 				if ((c >> 24) != 0)   /* a transparent pixel of the float leaves what is under it */
-					vng_tab_put(t, s->x + i, s->y + j, c);
+					vng_tab_put(t, s->x + i, s->y + j, landed(t, s->x + i, s->y + j, c));
 			}
 
 	vng_tab_stroke_close(t);
@@ -375,7 +392,7 @@ static bool stamp_changes (VNG_TAB *t, VNG_SEL *s)
 			Uint32 c = s->pixels[j * s->w + i];
 			int px = s->x + i, py = s->y + j;
 			if ((c >> 24) == 0 || px < 0 || py < 0 || px >= t->w || py >= t->h) continue;
-			if (t->pixels[(size_t)py * t->w + px] != c) return true;
+			if (t->pixels[(size_t)py * t->w + px] != landed(t, px, py, c)) return true;
 		}
 	return false;
 }

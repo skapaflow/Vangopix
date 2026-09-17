@@ -167,8 +167,9 @@ extern bool vng_tab_stroke_open_unclipped (VNG_TAB *t, bool direct);
 
 /*
  * BLEND: THE STROKE JUST OPENED LAYS A SEE-THROUGH COLOUR OVER THE SHEET instead of in place of
- * it. Said after the open, because every open starts it off - a selection put down or cleared
- * never blends, and only the tool asks for it.
+ * it. Said after the open, because every open starts it off and only the tool asks for it. A
+ * selection landing blends too, but by itself - `landed` in select.c says why the stroke's
+ * once-per-pixel rule is the wrong one for a float.
  *
  * It only has anything to do on a DIRECT stroke, and that is not a limit: a colour that blends
  * is one with alpha below full, and every such colour already writes through. An opaque colour

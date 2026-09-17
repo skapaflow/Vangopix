@@ -3629,6 +3629,41 @@ int main (void)
 		mouse(g, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 15, 9);
 		ok("A DRAGGED LINE BLENDS ONCE, over the sheet it began on", g->pixels[9 * 20 + 6] == once);
 
+		/* A SELECTION LANDS BLENDED TOO - a pane of glass carried over a texture. Half red at
+		 * (2,15) beside nothing at (3,15), opaque blue at (6,15); carry the pair four to the
+		 * right, so the red lands on the blue, and put it down. */
+		g->pixels[15 * 20 + 2] = ink;
+		g->pixels[15 * 20 + 3] = 0u;
+		g->pixels[15 * 20 + 6] = 0xFF0000FFu;
+
+		key(g, SDLK_Z, SDL_KMOD_NONE);
+		mouse(g, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 2, 15);   /* a click marks nothing */
+		mouse(g, SDL_EVENT_MOUSE_MOTION,      0,               3, 15);
+		mouse(g, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 3, 15);
+		mouse(g, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 2, 15);
+		mouse(g, SDL_EVENT_MOUSE_MOTION,      0,               6, 15);
+		mouse(g, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 6, 15);
+		select_commit(g);
+
+		ok("A SEE-THROUGH SELECTION LANDS OVER WHAT IS THERE",
+		   g->pixels[15 * 20 + 6] == vng_argb_over(ink, 0xFF0000FFu));
+		ok("and the place it left is still colour 2", g->pixels[15 * 20 + 2] == tool_colour(1));
+
+		/* Put back, then the same move with B off: it replaces, as it always did. */
+		undo_undo(g);
+		key(g, SDLK_B, SDL_KMOD_NONE);
+		key(g, SDLK_ESCAPE, SDL_KMOD_NONE);
+		mouse(g, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 2, 15);   /* a click marks nothing */
+		mouse(g, SDL_EVENT_MOUSE_MOTION,      0,               3, 15);
+		mouse(g, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 3, 15);
+		mouse(g, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 2, 15);
+		mouse(g, SDL_EVENT_MOUSE_MOTION,      0,               6, 15);
+		mouse(g, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 6, 15);
+		select_commit(g);
+		ok("and with B off it replaces", g->pixels[15 * 20 + 6] == ink);
+		key(g, SDLK_B, SDL_KMOD_NONE);
+		key(g, SDLK_ESCAPE, SDL_KMOD_NONE);
+
 		key(g, SDLK_B, SDL_KMOD_NONE);
 		ok("B turns it off again", tool_blend() == false);
 
