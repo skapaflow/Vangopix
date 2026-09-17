@@ -75,6 +75,10 @@ extern void win_clip   (VNG_WIN *w);
 
 extern void win_show    (VNG_WIN *w, bool on);
 
+/* A title that says something about the state inside - the 1:1 panel names its own scale
+   there, 2:1, 3:1, because the head is the one strip of that window not showing the art. */
+extern void win_title   (VNG_WIN *w, const char *title);
+
 /*
  * TOLD WHEN THE WINDOW GOES AWAY, however it goes - its own close dot included.
  *

@@ -193,6 +193,11 @@ VNG_WIN *win_open (const char *title, SDL_FRect area, SDL_FPoint min,
 	return w;
 }
 
+void win_title (VNG_WIN *w, const char *title)
+{
+	if (w) SDL_utf8strlcpy(w->title, title ? title : "", sizeof w->title);
+}
+
 void win_free (void)
 {
 	for (VNG_WIN *w = list; w; ) {

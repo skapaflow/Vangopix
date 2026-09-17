@@ -43,11 +43,18 @@
  * considered and left out: it is a crop around where the camera already IS, so clicking
  * inside would move the view a few pixels - a gesture that looks useful and is not.
  *
+ * THE WHEEL OVER IT ZOOMS IN, in whole steps from 1:1 to 8:1, and the head says which. It
+ * never goes below 1:1: shrinking would turn it into the overview it deliberately is not.
+ *
  * Summoned by V and gone again.
  */
 
 extern void thumb_toggle  (void);
 extern bool thumb_visible (void);
+
+/* The panel's scale, a whole multiple of 1:1 from 1 to 8, stepped by the wheel over it and
+   named in its head (2:1). Its crop shrinks to match, so the marker on the sheet follows. */
+extern int  thumb_zoom    (void);
 
 /* Draws only the marker on the SHEET saying which part the panel is showing - the panel
    itself is drawn by win.c, inside the frame. Called after the sheet, because both halves

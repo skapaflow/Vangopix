@@ -1243,6 +1243,35 @@ int main (void)
 		 * is the whole reason it is a window rather than a corner. */
 		thumb_toggle();
 		ok("it comes back", thumb_visible());
+
+		/* THE WHEEL OVER IT ZOOMS IN WHOLE STEPS, from 1:1 to 8:1 and no further either way. */
+		{
+			win_place(win_top(), 200.0f, 150.0f);
+			SDL_FRect za = win_area(win_top());
+
+			SDL_Event w;
+			SDL_zero(w);
+			w.type = SDL_EVENT_MOUSE_WHEEL;
+			w.wheel.mouse_x = za.x + za.w * 0.5f;
+			w.wheel.mouse_y = za.y + za.h * 0.5f;
+
+			ok("the panel opens at 1:1", thumb_zoom() == 1);
+
+			w.wheel.integer_y = -1;
+			ok("the wheel over it is the panel's", win_event(&w));
+			ok("and it never goes below 1:1", thumb_zoom() == 1);
+
+			w.wheel.integer_y = 1;
+			win_event(&w);
+			ok("A NOTCH UP IS 2:1", thumb_zoom() == 2);
+
+			for (int i = 0; i < 20; i++) win_event(&w);
+			ok("and it stops at 8:1", thumb_zoom() == 8);
+
+			w.wheel.integer_y = -1;
+			for (int i = 0; i < 20; i++) win_event(&w);
+			ok("and comes back down to 1:1", thumb_zoom() == 1);
+		}
 		thumb_toggle();
 	}
 

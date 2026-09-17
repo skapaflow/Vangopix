@@ -84,6 +84,7 @@ version keeps the keys it moved.
 | `TAB` | projects |
 | `ESC` | the row of sheets |
 | `C` `P` `V` `X` | colour, palette, 1:1 panel, animation |
+| wheel over the 1:1 panel | zoom it in whole steps, 1:1 to 8:1 |
 | `F1` | the keys, and what is on screen |
 | wheel | zoom in steps, centred on the cursor |
 | middle drag, or `SPACE` + left drag | pan |

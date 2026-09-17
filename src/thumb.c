@@ -9,7 +9,20 @@
 #define OPEN_SIDE  128.0f
 #define MIN_SIDE    32.0f
 
-static VNG_WIN *win = NULL;
+/*
+ * THE PANEL ZOOMS IN WHOLE MULTIPLES OF 1:1, and never below it. Whole, for the reason the
+ * sheet's own ladder is whole above 1:1: a fractional scale with nearest filtering spreads the
+ * art pixels unevenly, and this panel exists to show what the art really looks like. Never
+ * below, because shrinking is a question the panel is not for - at 1:2 it would be answering
+ * "where am I", which the sheet already answers by filling the window.
+ *
+ * One number for the panel rather than one per tab, like its size: it is a property of the
+ * window a person has set up beside the drawing, and a tab switch must not change it.
+ */
+#define ZOOM_MAX  8
+
+static VNG_WIN *win  = NULL;
+static int      zoom = 1;
 
 /*
  * The part of the document the panel shows: as much as fits its interior at 1:1, centred on
@@ -23,8 +36,12 @@ static VNG_WIN *win = NULL;
  */
 static SDL_FRect source (VNG_TAB *t, SDL_FRect area)
 {
-	float aw = area.w < (float)t->w ? area.w : (float)t->w;
-	float ah = area.h < (float)t->h ? area.h : (float)t->h;
+	/* Whole document pixels only, so every one of them lands as a zoom x zoom square. */
+	float fw = SDL_floorf(area.w / (float)zoom);
+	float fh = SDL_floorf(area.h / (float)zoom);
+
+	float aw = fw < (float)t->w ? fw : (float)t->w;
+	float ah = fh < (float)t->h ? fh : (float)t->h;
 
 	SDL_FPoint c = view_screen_to_world(t, vng_win_w * 0.5f, vng_win_h * 0.5f);
 
@@ -45,10 +62,45 @@ static SDL_FRect source (VNG_TAB *t, SDL_FRect area)
  * thing sitting in the top left of a box reads as a thing that has been cut off. */
 static SDL_FRect placed (SDL_FRect area, SDL_FRect src)
 {
-	SDL_FRect r = { area.x + SDL_floorf((area.w - src.w) * 0.5f),
-	                area.y + SDL_floorf((area.h - src.h) * 0.5f),
-	                src.w, src.h };
+	float w = src.w * (float)zoom;
+	float h = src.h * (float)zoom;
+
+	SDL_FRect r = { area.x + SDL_floorf((area.w - w) * 0.5f),
+	                area.y + SDL_floorf((area.h - h) * 0.5f),
+	                w, h };
 	return r;
+}
+
+/* The head says the scale, in the notation the panel is named in: 1:1, 2:1, 3:1. It is the
+ * one strip of this window not showing the art, and a multiplier printed over the art would
+ * cover the pixels it is describing. */
+static void retitle (void)
+{
+	char s[16];
+	SDL_snprintf(s, sizeof s, "%d:1", zoom);
+	win_title(win, s);
+}
+
+/*
+ * THE WHEEL, a notch a step, and nothing else. A press is declined so the whole interior stays
+ * somewhere to take hold of the window, which is what it was before it had a gesture at all.
+ * integer_y and not y, for the trackpad reason recorded in view.c.
+ */
+static bool on_event (SDL_FRect area, const SDL_Event *e, void *ctx)
+{
+	(void)area; (void)ctx;
+
+	if (e->type != SDL_EVENT_MOUSE_WHEEL) return false;
+
+	int z = zoom + e->wheel.integer_y;
+	if (z < 1)        z = 1;
+	if (z > ZOOM_MAX) z = ZOOM_MAX;
+
+	if (z != zoom) {
+		zoom = z;
+		retitle();
+	}
+	return true;
 }
 
 static void body (SDL_FRect area, void *ctx)
@@ -66,9 +118,9 @@ static void body (SDL_FRect area, void *ctx)
 	 * whatever happened to be under the window. */
 	vangopix_desk_rect(dst);
 
-	/* NEAREST is not a choice: at 1:1 there is nothing to filter, and the moment the panel is
-	 * showing what the art really looks like, a filtered copy would be showing something
-	 * else. */
+	/* NEAREST is not a choice: at 1:1 there is nothing to filter, above it every art pixel is
+	 * a whole square, and the moment the panel is showing what the art really looks like, a
+	 * filtered copy would be showing something else. */
 	SDL_SetTextureScaleMode(t->tex, SDL_SCALEMODE_NEAREST);
 	SDL_RenderTexture(vng_ren, t->tex, &src, &dst);
 }
@@ -97,11 +149,13 @@ void thumb_toggle (void)
 	SDL_FRect  a = { 0.0f, 0.0f, OPEN_SIDE, OPEN_SIDE };
 	SDL_FPoint m = { MIN_SIDE, MIN_SIDE };
 
-	win = win_open("1:1", a, m, body, NULL, NULL);
+	win = win_open("1:1", a, m, body, on_event, NULL);
 	win_place(win, mx, my);
+	retitle();
 }
 
 bool thumb_visible (void) { return win_visible(win); }
+int  thumb_zoom    (void) { return zoom; }
 
 void thumb_draw (VNG_TAB *t)
 {
