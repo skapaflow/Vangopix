@@ -71,6 +71,11 @@ extern bool undo_redo (VNG_TAB *t);
    mark instead of leaving a star on a file that matches its disk copy exactly. */
 extern void undo_mark_saved (VNG_TAB *t);
 
+/* The document matches NO file, whatever the stack says: dirty until it is saved. For a sheet
+   born holding something - a pasted picture - where there is no step to stand off the saved
+   mark, and a clean star would let CTRL+W throw the picture away without asking. */
+extern void undo_mark_unsaved (VNG_TAB *t);
+
 /* The ceiling on what one document's history may hold, in bytes; 0 puts back the built-in
    one. There for the checks, which need to watch the oldest step fall off without first
    drawing a hundred and twenty-eight megabytes of strokes. */

@@ -445,6 +445,14 @@ void vangopix_input (void)
 				case SDLK_W: file_close_tab(vng_tab);           break;
 				case SDLK_O: file_open_ask();                   break;
 
+				/* With a sheet on screen the selection has already answered CTRL+V, and
+				 * it only reaches here when there was nothing to paste. On the empty desk
+				 * there is nowhere to paste INTO, so the picture becomes the sheet - a
+				 * screenshot pasted into a program with nothing open is a new image. */
+				case SDLK_V:
+					if (!vng_tab) select_paste_sheet();
+					break;
+
 				/* CTRL+Z back, CTRL+SHIFT+Z or CTRL+Y forward. Both redo spellings,
 				 * because half the world learned one and half the other.
 				 *

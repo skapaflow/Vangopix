@@ -9,6 +9,7 @@
 #include "file.h"
 #include "tool.h"
 #include "select.h"
+#include "clipboard.h"
 #include "win.h"
 #include "colour.h"
 #include "style.h"
@@ -235,7 +236,7 @@ void vangopix_quit (void)
 	colour_free();
 	prompt_free();
 	win_free();
-	select_clipboard_free();
+	clipboard_free();
 	vng_tabs_free();
 	project_free();
 	vangopix_core_free();

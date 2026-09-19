@@ -14,6 +14,8 @@
 #include "undo.h"
 #include "tool.h"
 #include "select.h"
+#include "clipboard.h"
+#include <SDL3_image/SDL_image.h>
 #include "thumb.h"
 #include "win.h"
 #include "colour.h"
@@ -156,6 +158,9 @@ static bool same (const Uint32 *a, const Uint32 *b, int n)
 int main (void)
 {
 	if (!SDL_Init(SDL_INIT_VIDEO)) { SDL_Log("init: %s", SDL_GetError()); return 2; }
+	/* Before anything can copy: this runs on the real video driver, and a CTRL+C below would
+	 * otherwise overwrite the clipboard of whoever ran it - and a paste would read theirs. */
+	clipboard_local(true);
 	if (!SDL_CreateWindowAndRenderer("t", 320, 240, SDL_WINDOW_HIDDEN,
 	                                 &vng_win, &vng_ren)) {
 		SDL_Log("window: %s", SDL_GetError());
@@ -4464,6 +4469,76 @@ int main (void)
 			ok("A TAB'S NAME CUT TO ITS FIELD IS STILL WHOLE LETTERS", whole);
 			SDL_free(longname);
 		}
+	}
+
+	/* ---- THE CLIPBOARD IS THE MACHINE'S: what comes in from another program ---- */
+	{
+		/* png both ways, alpha included - the type a copy goes out as and a paste prefers. */
+		Uint32 src[6] = { 0xFF102030u, 0x80FF0000u, 0x00000000u,
+		                  0xFF00FF00u, 0x400000FFu, 0xFFFFFFFFu };
+		SDL_Surface *ss = SDL_CreateSurfaceFrom(3, 2, SDL_PIXELFORMAT_ARGB8888, src, 12);
+		SDL_IOStream *io = SDL_IOFromDynamicMem();
+		bool saved = ss && io && IMG_SavePNG_IO(ss, io, false);
+		size_t n = saved ? (size_t)SDL_GetIOSize(io) : 0;
+		void *mem = saved ? SDL_GetPointerProperty(SDL_GetIOProperties(io),
+		                        SDL_PROP_IOSTREAM_DYNAMIC_MEMORY_POINTER, NULL) : NULL;
+		int w = 0, h = 0;
+		Uint32 *back = mem ? clipboard_decode(mem, n, 4096, &w, &h) : NULL;
+		ok("A PNG ON THE CLIPBOARD COMES IN EXACTLY, ALPHA AND ALL",
+		   back && w == 3 && h == 2 && same(back, src, 6));
+		SDL_free(back);
+
+		back = mem ? clipboard_decode(mem, n, 2, &w, &h) : NULL;
+		ok("one too big for a texture is refused, and still says how big it was",
+		   back == NULL && w == 3 && h == 2);
+		SDL_free(back);
+		if (io) SDL_CloseIO(io);
+		SDL_DestroySurface(ss);
+
+		/* A Windows screenshot: a 32-bit DIB, BI_RGB, alpha byte all zero - the case that would
+		 * paste as nothing at all if the zeros were believed. Built by hand, because SDL's own
+		 * writer adds an alpha mask and so could never produce it. */
+		Uint8 bmp[14 + 40 + 8] = { 0 };
+		bmp[0] = 'B'; bmp[1] = 'M';
+		bmp[2] = sizeof bmp;
+		bmp[10] = 14 + 40;             /* pixels start after the two headers */
+		bmp[14] = 40;                  /* BITMAPINFOHEADER */
+		bmp[18] = 2;                   /* 2 wide */
+		bmp[22] = 1;                   /* 1 high */
+		bmp[26] = 1;                   /* one plane */
+		bmp[28] = 32;                  /* bits per pixel; compression stays 0, BI_RGB */
+		const Uint8 px[8] = { 0x30, 0x20, 0x10, 0x00,  0xFF, 0x00, 0x80, 0x00 };   /* BGRA */
+		SDL_memcpy(bmp + 54, px, 8);
+		back = clipboard_decode(bmp, sizeof bmp, 4096, &w, &h);
+		ok("A SCREENSHOT WITH NOTHING IN ITS ALPHA COMES IN OPAQUE, NOT INVISIBLE",
+		   back && w == 2 && h == 1 && back[0] == 0xFF102030u && back[1] == 0xFF8000FFu);
+		SDL_free(back);
+
+		const char junk[] = "not a picture";
+		back = clipboard_decode(junk, sizeof junk, 4096, &w, &h);
+		ok("what is not an image is nothing, and says no size", back == NULL && w == 0 && h == 0);
+
+		/* CTRL+V on the empty desk: the picture becomes the sheet. */
+		Uint32 *mine = (Uint32 *) SDL_malloc(sizeof src);
+		SDL_memcpy(mine, src, sizeof src);
+		clipboard_put(mine, 3, 2);
+
+		Uint32 *a1 = clipboard_take(&w, &h);
+		if (a1) a1[0] = 0u;
+		Uint32 *a2 = clipboard_take(&w, &h);
+		ok("what a paste takes is its own copy", a2 && a2[0] == src[0]);
+		SDL_free(a1);
+		SDL_free(a2);
+
+		VNG_TAB *ps = select_paste_sheet();
+		ok("CTRL+V WITH NO SHEET MAKES ONE THE SIZE OF THE PICTURE, HOLES AND ALL",
+		   ps && ps->w == 3 && ps->h == 2 && same(ps->pixels, src, 6));
+		SDL_Rect none;
+		ok("and nothing is left in the air or marked over it", ps && !select_area(ps, &none));
+		ok("it is dirty, so closing asks before a pasted screenshot is lost", ps && ps->dirty);
+		ok("and there is no step back to a white sheet that never existed",
+		   ps && !undo_undo(ps) && ps->dirty);
+		if (ps) vng_tab_close(ps);
 	}
 
 	vng_tabs_free();

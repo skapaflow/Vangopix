@@ -91,9 +91,12 @@ extern void select_shift (VNG_TAB *t, int dx, int dy);
 /* Puts the clipboard down as a float centred on that document pixel, and takes the select
    tool: a paste with no way to move what was pasted is a gesture that stops halfway. CTRL+V
    calls it with the pointer's position; it takes one because "where" is the only thing the
-   gesture adds, and because a keyboard cannot say it in a test. */
-extern void select_paste (VNG_TAB *t, int x, int y);
+   gesture adds, and because a keyboard cannot say it in a test. False if there was nothing
+   to paste. The clipboard is the SYSTEM's - see clipboard.h. */
+extern bool select_paste (VNG_TAB *t, int x, int y);
 
-extern void select_clipboard_free (void);
+/* CTRL+V on the empty desk: a new sheet the size of what is on the clipboard, holding it.
+   NULL if there is nothing to paste. */
+extern VNG_TAB *select_paste_sheet (void);
 
 #endif

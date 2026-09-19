@@ -8,6 +8,7 @@
 #include "win.h"
 #include "palette.h"
 #include "style.h"
+#include "clipboard.h"
 
 /* The dashes of the marching rectangle, in SCREEN pixels: it is an annotation about the
  * document, not part of it, so it stays the same size at any zoom. */
@@ -45,10 +46,6 @@ struct _vng_sel_ {
 	int     grab_x, grab_y; /* where inside the float it was taken hold of */
 };
 
-/* One buffer for the whole program, which is the whole of the cross-tab story. */
-static Uint32 *clip = NULL;
-static int     clip_w = 0, clip_h = 0;
-
 static float march = 0.0f;
 
 /* ------------------------------------------------------------------------ the state */
@@ -80,13 +77,6 @@ void select_free (VNG_SEL *s)
 	if (!s) return;
 	float_drop(s);
 	SDL_free(s);
-}
-
-void select_clipboard_free (void)
-{
-	SDL_free(clip);
-	clip = NULL;
-	clip_w = clip_h = 0;
 }
 
 /* ------------------------------------------------------------------------ the pixels */
@@ -375,12 +365,7 @@ static void copy_out (VNG_TAB *t, VNG_SEL *s)
 	if (!s->on) return;
 
 	Uint32 *take = s->pixels ? grab_from_float(s) : grab(t, s->x, s->y, s->w, s->h);
-	if (!take) return;
-
-	SDL_free(clip);
-	clip   = take;
-	clip_w = s->w;
-	clip_h = s->h;
+	if (take) clipboard_put(take, s->w, s->h);
 }
 
 /* Would putting this copy down change the sheet at all? Only asked of a COPY: a cut always
@@ -425,27 +410,48 @@ static bool stamp (VNG_TAB *t, VNG_SEL *s)
 	return true;
 }
 
-void select_paste (VNG_TAB *t, int x, int y)
+/* Puts a buffer down as a float centred on (x, y), taking ownership of it. */
+static bool paste_pixels (VNG_TAB *t, Uint32 *px, int w, int h, int x, int y)
 {
 	VNG_SEL *s = sel_of(t);
-	if (!s || !clip) return;
+	if (!s) { SDL_free(px); return false; }
 
 	select_commit(t);   /* whatever was floating lands before the new one arrives */
 
-	s->pixels = (Uint32 *) SDL_calloc((size_t)clip_w * clip_h, sizeof(Uint32));
-	if (!s->pixels) return;
-
-	SDL_memcpy(s->pixels, clip, (size_t)clip_w * clip_h * sizeof(Uint32));
-
-	s->w = s->sw = clip_w;
-	s->h = s->sh = clip_h;
-	s->x = s->sx = x - clip_w / 2;
-	s->y = s->sy = y - clip_h / 2;
+	s->pixels = px;
+	s->w = s->sw = w;
+	s->h = s->sh = h;
+	s->x = s->sx = x - w / 2;
+	s->y = s->sy = y - h / 2;
 	s->on  = true;
 	s->cut = false;      /* a paste has no source in this document to empty */
 	s->tex_stale = true;
 
 	tool_set(T_SELECT);
+	return true;
+}
+
+bool select_paste (VNG_TAB *t, int x, int y)
+{
+	if (!t) return false;
+
+	int w, h;
+	Uint32 *px = clipboard_take(&w, &h);
+	return px && paste_pixels(t, px, w, h, x, y);
+}
+
+VNG_TAB *select_paste_sheet (void)
+{
+	int w, h;
+	Uint32 *px = clipboard_take(&w, &h);
+	if (!px) return NULL;
+
+	/* NOT a float landed on a white sheet: a float lands with its holes, so every transparent
+	   pixel of the picture would come out white. The sheet is born holding it instead - and
+	   dirty, since it matches no file, so CTRL+W asks before a pasted screenshot is lost. */
+	VNG_TAB *t = vng_tab_new_from(px, w, h);
+	if (t) undo_mark_unsaved(t);
+	return t;
 }
 
 static void clear_marked (VNG_TAB *t, VNG_SEL *s)
@@ -698,12 +704,10 @@ bool select_event (const SDL_Event *e, VNG_TAB *t)
 				return true;
 
 			case SDLK_V: {
-				if (!clip) return false;
 				float mx, my;
 				SDL_GetMouseState(&mx, &my);
 				SDL_FPoint w = view_screen_to_world(t, mx, my);
-				select_paste(t, (int)SDL_floorf(w.x), (int)SDL_floorf(w.y));
-				return true;
+				return select_paste(t, (int)SDL_floorf(w.x), (int)SDL_floorf(w.y));
 			}
 			default: return false;
 			}

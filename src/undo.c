@@ -343,6 +343,15 @@ bool undo_redo (VNG_TAB *t)
 	return true;
 }
 
+void undo_mark_unsaved (VNG_TAB *t)
+{
+	VNG_UNDO *u = stack_of(t);
+	if (!u) return;
+
+	u->saved_lost = true;
+	mark(t, u);
+}
+
 void undo_mark_saved (VNG_TAB *t)
 {
 	VNG_UNDO *u = stack_of(t);

@@ -206,6 +206,11 @@ extern void vng_tab_upload (VNG_TAB *t);
 
 extern VNG_TAB *vng_tab_new   (int w, int h);
 
+/* A new untitled sheet BORN holding these pixels, which it takes (and frees, even on failure).
+   What a paste on the empty desk makes: the picture is where the sheet starts, the way an
+   opened file is, not a stroke over a white one that CTRL+Z would take back to white. */
+extern VNG_TAB *vng_tab_new_from (Uint32 *px, int w, int h);
+
 /*
  * Opens anything SDL3_image can read, as a new tab - OR SHOWS THE TAB THAT ALREADY HOLDS THAT
  * FILE. Two tabs editing one file is two futures for it, and whichever is saved second

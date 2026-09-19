@@ -19,7 +19,7 @@ that — opening, viewing, framing, sizing and saving.
 | | |
 | --- | --- |
 | drawing | nine tools on `Q W E R / A S D F / Z`, each with its own tip size |
-| selection | mark, move, copy and paste between documents, flip, rotate, invert |
+| selection | mark, move, copy and paste - between documents and to and from other programs, screenshots included - flip, rotate, invert |
 | undo | per document, made of pixel carries and resizes rather than snapshots |
 | colour | two, one per mouse button, filled by `CTRL`+click; a hue-ring picker and a palette |
 | documents | tabs that carry their own camera, reorderable by dragging |
@@ -95,6 +95,7 @@ version keeps the keys it moved.
 | `SHIFT`+`R` / `M` | a random colour into slot 1 / average the two into slot 1 |
 | `B` | blend: a see-through colour goes over what is there instead of replacing it |
 | `CTRL+A` `CTRL+C` `CTRL+X` `CTRL+V` | select all, copy, cut, paste |
+| `CTRL+V` with no sheet open | a new sheet holding what is on the clipboard |
 | `V` `H` `I` `R`, with a selection | flip, mirror, invert, rotate |
 | `DELETE` / `ESC`, with a selection | clear it / let it go |
 | `CTRL` + drag a selection | copy it instead of moving it |

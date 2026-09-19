@@ -495,6 +495,25 @@ VNG_TAB *vng_tab_new (int w, int h)
 	return t;
 }
 
+VNG_TAB *vng_tab_new_from (Uint32 *px, int w, int h)
+{
+	if (!px) return NULL;
+
+	VNG_TAB *t = tab_alloc(w, h);
+	if (!t) { SDL_free(px); return NULL; }
+
+	SDL_memcpy(t->pixels, px, (size_t)w * h * sizeof(Uint32));
+	SDL_free(px);
+
+	SDL_snprintf(t->name, sizeof t->name, "untitled %u", untitled_seq++);
+
+	if (!tab_make_texture(t)) { SDL_free(t->pixels); SDL_free(t); return NULL; }
+
+	tab_link(t);
+	vng_tab_show(t);
+	return t;
+}
+
 /*
  * AN OPEN THAT FAILS SAYS SO, IN A BOX.
  *
