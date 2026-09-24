@@ -641,6 +641,27 @@ int main (void)
 		   q->pixels[5 * 20 + 0] != paper && q->pixels[5 * 20 + 10] != paper);
 		undo_undo(q);
 
+		/* The ellipse fills the dragged box EXACTLY, even sides included: its far column is the
+		 * pointer's column at every width, so each pixel of drag moves the edge by one. Halving
+		 * the width with an integer divide stopped an even box one short and then jumped two.
+		 * From three across: a box two across is two full columns, and owns its corner. */
+		bool reaches = true;
+		for (int ex = 4; ex <= 15; ex++) {
+			mouse(q, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 2,  2);
+			mouse(q, SDL_EVENT_MOUSE_MOTION,      0,               ex, 7);
+			mouse(q, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, ex, 7);
+			int far = -1, low = -1;
+			for (int py = 0; py < 20; py++)
+				for (int px = 0; px < 20; px++)
+					if (q->pixels[py * 20 + px] != paper) {
+						if (px > far) far = px;
+						if (py > low) low = py;
+					}
+			if (far != ex || low != 7 || q->pixels[2 * 20 + 2] != paper) reaches = false;
+			undo_undo(q);
+		}
+		ok("THE ELLIPSE REACHES THE POINTER AT EVERY WIDTH, ODD OR EVEN", reaches);
+
 		key(q, SDLK_Q, SDL_KMOD_NONE);
 		tool_set_colour(0, was0);
 		vng_tab_close(q);

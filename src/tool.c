@@ -592,43 +592,44 @@ static void plot_rect (VNG_TAB *t, int x0, int y0, int x1, int y1)
  * Midpoint ellipse, inscribed in the dragged rectangle rather than centred on the press.
  * Dragging a box and getting the ellipse that fits it is what every editor does, and it is
  * the only reading where both corners mean something.
+ *
+ * THE BOX IS FILLED EXACTLY, EVEN SIDES INCLUDED. The centre-and-radius form halved the
+ * width with an integer divide, so a box an even number of pixels across lost its last
+ * column: the ellipse stopped one short of the corner, and the next pixel of drag moved its
+ * far edge by two. Dragging it read as a shape that skipped. This is Zingl's rectangle form
+ * (plotEllipseRect), which walks the two halves of an even diameter as two pixels rather
+ * than one centre - so every pixel of drag moves the edge by one.
+ *
+ * 64-bit because the error terms are 8 * a^2 * b-ish: a long is 32 bits on Windows, and a
+ * few thousand pixels across is past it.
  */
 static void plot_ellipse (VNG_TAB *t, int x0, int y0, int x1, int y1)
 {
-	int left = x0 < x1 ? x0 : x1, right  = x0 < x1 ? x1 : x0;
-	int top  = y0 < y1 ? y0 : y1, bottom = y0 < y1 ? y1 : y0;
+	Sint64 a = x1 > x0 ? x1 - x0 : x0 - x1, b = y1 > y0 ? y1 - y0 : y0 - y1, b1 = b & 1;
+	Sint64 dx = 4 * (1 - a) * b * b, dy = 4 * (b1 + 1) * a * a;
+	Sint64 err = dx + dy + b1 * a * a, e2;
 
-	long a = (right - left) / 2, b = (bottom - top) / 2;
-	long cx = left + a, cy = top + b;
+	if (x0 > x1) { x0 = x1; x1 += (int)a; }
+	if (y0 > y1) y0 = y1;
+	y0 += (int)((b + 1) / 2); y1 = y0 - (int)b1;
+	a *= 8 * a; b1 = 8 * b * b;
 
-	/* Degenerate in one axis is a line, and drawing it as one beats drawing nothing. */
-	if (a == 0 || b == 0) { plot_line(t, x0, y0, x1, y1); return; }
+	do {
+		tip(t, x1, y0);
+		tip(t, x0, y0);
+		tip(t, x0, y1);
+		tip(t, x1, y1);
+		e2 = 2 * err;
+		if (e2 <= dy) { y0++; y1--; err += dy += a; }
+		if (e2 >= dx || 2 * err > dy) { x0++; x1--; err += dx += b1; }
+	} while (x0 <= x1);
 
-	long a2 = a * a, b2 = b * b;
-	long x = 0, y = b;
-	long sigma = 2 * b2 + a2 * (1 - 2 * b);
-
-	while (b2 * x <= a2 * y) {
-		tip(t, (int)(cx + x), (int)(cy + y));
-		tip(t, (int)(cx - x), (int)(cy + y));
-		tip(t, (int)(cx + x), (int)(cy - y));
-		tip(t, (int)(cx - x), (int)(cy - y));
-		if (sigma >= 0) { sigma += 4 * a2 * (1 - y); y--; }
-		sigma += b2 * (4 * x + 6);
-		x++;
-	}
-
-	x = a; y = 0;
-	sigma = 2 * a2 + b2 * (1 - 2 * a);
-
-	while (a2 * y <= b2 * x) {
-		tip(t, (int)(cx + x), (int)(cy + y));
-		tip(t, (int)(cx - x), (int)(cy + y));
-		tip(t, (int)(cx + x), (int)(cy - y));
-		tip(t, (int)(cx - x), (int)(cy - y));
-		if (sigma >= 0) { sigma += 4 * b2 * (1 - x); x--; }
-		sigma += a2 * (4 * y + 6);
-		y++;
+	/* A flat ellipse runs out of columns before it reaches its ends: finish the tips. */
+	while (y0 - y1 <= b) {
+		tip(t, x0 - 1, y0);
+		tip(t, x1 + 1, y0++);
+		tip(t, x0 - 1, y1);
+		tip(t, x1 + 1, y1--);
 	}
 }
 
