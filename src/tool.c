@@ -1843,9 +1843,11 @@ void tool_draw (VNG_TAB *t)
 
 	/* BLEND is named while it is on AND could do something: with both colours opaque, or
 	 * nothing, it lays exactly what replacing would, and a word that changes nothing is noise.
-	 * The eraser always lays nothing and the select tool lays nothing at all. */
-	bool blends  = on && !eyedropper && blend && current != T_ERASER && current != T_SELECT &&
-	               (partial(colour[0]) || partial(colour[1]));
+	 * The eraser always lays nothing. The select tool lays what it will carry, not the colours
+	 * in hand, and what that is is not known until it is lifted - so with the tool in hand the
+	 * switch is named as it stands, before anything is marked. */
+	bool blends  = on && !eyedropper && blend && current != T_ERASER &&
+	               (current == T_SELECT || partial(colour[0]) || partial(colour[1]));
 
 	if (barrier || blends)
 		label(barrier && blends ? "barrier blend" : barrier ? "barrier" : "blend", mx, my);
