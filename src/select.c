@@ -44,6 +44,14 @@ struct _vng_sel_ {
 	bool    moving;         /* carrying the float */
 	int     ax, ay;         /* where the drag began, document pixels */
 	int     grab_x, grab_y; /* where inside the float it was taken hold of */
+
+	/* WHAT TOGGLE ALPHA MADE OPAQUE, AND WHAT IT WAS - see sel_alpha. The colours as they were
+	 * before, over (kx, ky, kw, kh) in sheet pixels; an entry whose alpha is already FF has
+	 * nothing to give back. `fkept` is the same for a float, aligned to `pixels` and turned
+	 * with it, because a float's pixels are not on the sheet to be looked up. */
+	Uint32 *kept;
+	int     kx, ky, kw, kh;
+	Uint32 *fkept;
 };
 
 static float march = 0.0f;
@@ -66,9 +74,11 @@ static void float_drop (VNG_SEL *s)
 
 	if (s->tex) SDL_DestroyTexture(s->tex);
 	SDL_free(s->pixels);
+	SDL_free(s->fkept);
 
 	s->tex    = NULL;
 	s->pixels = NULL;
+	s->fkept  = NULL;
 	s->cut    = false;
 }
 
@@ -76,8 +86,96 @@ void select_free (VNG_SEL *s)
 {
 	if (!s) return;
 	float_drop(s);
+	SDL_free(s->kept);
 	SDL_free(s);
 }
+
+/* ------------------------------------------------------------- the alpha toggle's memory */
+
+/* An entry with nothing to give back: any colour that is already opaque. */
+#define KEPT_NONE 0xFF000000u
+
+/* Was `now` made opaque from `was`, and is it still exactly that? The second half is what
+ * keeps a pixel painted over since out of it - only what the toggle did is given back. */
+static bool hidden (Uint32 now, Uint32 was)
+{
+	return (was >> 24) != 0xFF && now == (was | 0xFF000000u);
+}
+
+static Uint32 *kept_new (size_t n)
+{
+	Uint32 *k = (Uint32 *) SDL_malloc(n * sizeof(Uint32));
+	if (k) for (size_t i = 0; i < n; i++) k[i] = KEPT_NONE;
+	return k;
+}
+
+static Uint32 *kept_at (VNG_SEL *s, int x, int y)
+{
+	if (!s->kept || x < s->kx || y < s->ky || x >= s->kx + s->kw || y >= s->ky + s->kh)
+		return NULL;
+	return &s->kept[(size_t)(y - s->ky) * s->kw + (x - s->kx)];
+}
+
+/* Grows the sheet memory to cover a rectangle as well as what it already holds. One box and
+ * not a list: the toggle is used on one part of a drawing at a time, and the box only ever
+ * grows to what was actually selected. */
+static bool kept_cover (VNG_SEL *s, int x, int y, int w, int h)
+{
+	if (w < 1 || h < 1) return false;
+	if (s->kept && x >= s->kx && y >= s->ky &&
+	    x + w <= s->kx + s->kw && y + h <= s->ky + s->kh) return true;
+
+	int x0 = x, y0 = y, x1 = x + w, y1 = y + h;
+	if (s->kept) {
+		if (s->kx < x0) x0 = s->kx;
+		if (s->ky < y0) y0 = s->ky;
+		if (s->kx + s->kw > x1) x1 = s->kx + s->kw;
+		if (s->ky + s->kh > y1) y1 = s->ky + s->kh;
+	}
+
+	Uint32 *k = kept_new((size_t)(x1 - x0) * (y1 - y0));
+	if (!k) return false;
+
+	if (s->kept)
+		for (int j = 0; j < s->kh; j++)
+			SDL_memcpy(&k[(size_t)(s->ky - y0 + j) * (x1 - x0) + (s->kx - x0)],
+			           &s->kept[(size_t)j * s->kw], (size_t)s->kw * sizeof(Uint32));
+
+	SDL_free(s->kept);
+	s->kept = k;
+	s->kx = x0; s->ky = y0;
+	s->kw = x1 - x0; s->kh = y1 - y0;
+	return true;
+}
+
+/* What is remembered under a rectangle being lifted goes up with it, so a block made opaque
+ * and then carried somewhere can still be given its alpha back. */
+static void kept_lift (VNG_SEL *s)
+{
+	if (!s->kept || !s->pixels) return;
+
+	for (int j = 0; j < s->h; j++)
+		for (int i = 0; i < s->w; i++) {
+			Uint32 *k = kept_at(s, s->x + i, s->y + j);
+			if (!k || (*k >> 24) == 0xFF) continue;
+			if (!s->fkept && !(s->fkept = kept_new((size_t)s->w * s->h))) return;
+			s->fkept[j * s->w + i] = *k;
+		}
+}
+
+/* A cut float leaves colour 2 where it was, which is nothing the toggle made - forgotten, or
+ * an opaque colour 2 that happened to match would be "given back" its alpha. */
+static void kept_forget (VNG_SEL *s, int x, int y, int w, int h)
+{
+	for (int j = 0; j < h; j++)
+		for (int i = 0; i < w; i++) {
+			Uint32 *k = kept_at(s, x + i, y + j);
+			if (k) *k = KEPT_NONE;
+		}
+}
+
+/* And what a float remembers comes down with it where it lands. */
+static void kept_land (VNG_TAB *t, VNG_SEL *s, int x, int y, int w, int h);
 
 /* ------------------------------------------------------------------------ the pixels */
 
@@ -128,7 +226,23 @@ static bool lift (VNG_TAB *t, VNG_SEL *s, bool cut)
 	s->sh  = s->h;
 	s->cut = cut;
 	s->tex_stale = true;
+	kept_lift(s);
 	return true;
+}
+
+static void kept_land (VNG_TAB *t, VNG_SEL *s, int x, int y, int w, int h)
+{
+	if (!s->fkept) return;
+
+	int fx = x, fy = y;
+	clamp_rect(t, &x, &y, &w, &h);
+	if (!kept_cover(s, x, y, w, h)) return;
+
+	for (int j = 0; j < h; j++)
+		for (int i = 0; i < w; i++) {
+			Uint32 k = s->fkept[(size_t)(y + j - fy) * s->w + (x + i - fx)];
+			if ((k >> 24) != 0xFF) *kept_at(s, x + i, y + j) = k;
+		}
 }
 
 /*
@@ -194,6 +308,9 @@ static void put_down (VNG_TAB *t, VNG_SEL *s, bool landing)
 					vng_tab_put(t, s->x + i, s->y + j, landed(t, s->x + i, s->y + j, c));
 			}
 
+	if (s->cut)  kept_forget(s, s->sx, s->sy, s->sw, s->sh);
+	if (landing) kept_land(t, s, s->x, s->y, s->w, s->h);
+
 	vng_tab_stroke_close(t);
 	float_drop(s);
 }
@@ -240,7 +357,14 @@ void select_settle (VNG_TAB *t)
 void select_shift (VNG_TAB *t, int dx, int dy)
 {
 	VNG_SEL *s = t ? t->sel : NULL;
-	if (!s || !s->on) return;
+	if (!s) return;
+
+	/* The toggle's memory is about the sheet's pixels, marked or not, so it moves with them
+	 * whether or not there is a rectangle on screen. */
+	s->kx += dx;
+	s->ky += dy;
+
+	if (!s->on) return;
 
 	s->x  += dx;
 	s->y  += dy;
@@ -294,19 +418,33 @@ static void invert (Uint32 *p, int n)
 }
 
 /* A quarter turn clockwise into a new buffer, because the result has the other shape. */
+static Uint32 *turn (const Uint32 *p, int w, int h)
+{
+	Uint32 *out = (Uint32 *) SDL_calloc((size_t)w * h, sizeof(Uint32));
+	if (!out) return NULL;
+
+	for (int y = 0; y < h; y++)
+		for (int x = 0; x < w; x++)
+			out[x * h + (h - 1 - y)] = p[y * w + x];
+	return out;
+}
+
+/* The float and what the alpha toggle remembers of it turn TOGETHER, or a pixel would be given
+ * back the alpha of the one that used to stand where it now is. */
 static bool rotate (VNG_SEL *s)
 {
 	int w = s->w, h = s->h;
 
-	Uint32 *out = (Uint32 *) SDL_calloc((size_t)w * h, sizeof(Uint32));
+	Uint32 *out = turn(s->pixels, w, h);
 	if (!out) return false;
 
-	for (int y = 0; y < h; y++)
-		for (int x = 0; x < w; x++)
-			out[x * h + (h - 1 - y)] = s->pixels[y * w + x];
+	Uint32 *kout = NULL;
+	if (s->fkept && !(kout = turn(s->fkept, w, h))) { SDL_free(out); return false; }
 
 	SDL_free(s->pixels);
 	s->pixels = out;
+	SDL_free(s->fkept);
+	s->fkept = kout;
 
 	/* Turned about its CENTRE, so a rotation does not walk the selection across the sheet. */
 	s->x += (w - h) / 2;
@@ -397,10 +535,16 @@ static bool stamp (VNG_TAB *t, VNG_SEL *s)
 	Uint32 *copy = grab_from_float(s);
 	if (!copy) return false;
 
+	/* The copy remembers what the original does, so either can be given its alpha back. */
+	Uint32 *kcopy = NULL;
+	if (s->fkept && (kcopy = (Uint32 *) SDL_malloc((size_t)s->w * s->h * sizeof(Uint32))))
+		SDL_memcpy(kcopy, s->fkept, (size_t)s->w * s->h * sizeof(Uint32));
+
 	if (s->cut || stamp_changes(t, s)) select_commit(t);
 	else                                float_drop(s);
 
 	s->pixels = copy;
+	s->fkept  = kcopy;
 	s->sx  = s->x;
 	s->sy  = s->y;
 	s->sw  = s->w;
@@ -501,6 +645,9 @@ static void clear_marked (VNG_TAB *t, VNG_SEL *s)
  *                    says where. It keeps one colour out of a mess, a line pulled off a
  *                    scanned sketch, and it leaves colour 2 for the reason a cut does: that
  *                    is already what the right button lays down, so it defaults to a hole.
+ *   TOGGLE ALPHA     not the original's. Every pixel in the selection that is see-through is
+ *                    made opaque, and the next press gives each one back its OWN alpha - see
+ *                    sel_alpha.
  *
  * It acts on the selection of the document ON SCREEN, read at the moment a row is pressed and
  * not remembered from when the menu came up: switching tabs puts a float down, and a menu
@@ -509,8 +656,9 @@ static void clear_marked (VNG_TAB *t, VNG_SEL *s)
  */
 static VNG_WIN *menu = NULL;
 
-enum { M_CREATE, M_ADD, M_REMOVE };
-static const char *const MENU[] = { "Create palette", "Add color", "Remove unselected colors" };
+enum { M_CREATE, M_ADD, M_REMOVE, M_ALPHA };
+static const char *const MENU[] = { "Create palette", "Add color", "Remove unselected colors",
+                                    "Toggle alpha" };
 #define MENU_LOT  ((int)SDL_arraysize(MENU))
 #define MENU_ROW  ui_row()
 
@@ -579,6 +727,95 @@ static void sel_remove_others (VNG_TAB *t)
 	vng_tab_stroke_close(t);
 }
 
+/*
+ * TOGGLE ALPHA: SEE WHAT THE ALPHA IS HIDING, AND HIDE IT AGAIN.
+ *
+ * A pixel keeps its colour under any alpha, nothing included - so an image whose colours each
+ * carry an alpha of their own has colours nobody can see. The first press makes every
+ * see-through pixel in the selection opaque, exactly its colour at FF; the second gives each
+ * one back the alpha IT had, not one alpha for all of them. That is why it has a memory, and
+ * the memory is why it is not simply "set alpha to FF".
+ *
+ * WHICH WAY A PRESS GOES IS READ OFF THE PIXELS, NOT A FLAG. If anything in the selection is
+ * still exactly what the toggle made of it, the press gives back; otherwise it makes opaque.
+ * A flag would disagree with the sheet the moment CTRL+Z, a stroke or another selection got
+ * in between; this cannot. And only what the toggle did is given back: a pixel painted over
+ * since no longer matches its opaque self and is left as it is now.
+ *
+ * Each press is one undo step on the sheet, and one that would change nothing records nothing;
+ * a float changes in its own buffer, like REMOVE, and its memory travels with it.
+ */
+static void alpha_float (VNG_SEL *s)
+{
+	int n = s->w * s->h;
+	bool back = false, any = false;
+
+	for (int i = 0; s->fkept && i < n && !back; i++) back = hidden(s->pixels[i], s->fkept[i]);
+	for (int i = 0; !back && i < n && !any; i++) any = (s->pixels[i] >> 24) != 0xFF;
+	if (!back && !any) return;
+
+	if (!back && !s->fkept && !(s->fkept = kept_new((size_t)n))) return;
+
+	for (int i = 0; i < n; i++) {
+		Uint32 c = s->pixels[i];
+		if (back) {
+			if (hidden(c, s->fkept[i])) s->pixels[i] = s->fkept[i];
+		} else if ((c >> 24) != 0xFF) {
+			s->fkept[i]  = c;
+			s->pixels[i] = c | 0xFF000000u;
+		}
+	}
+	s->tex_stale = true;
+}
+
+static void sel_alpha (VNG_TAB *t)
+{
+	VNG_SEL *s = t ? t->sel : NULL;
+	if (!s || !s->on) return;
+
+	if (s->pixels) { alpha_float(s); return; }
+
+	int x = s->x, y = s->y, w = s->w, h = s->h;
+	clamp_rect(t, &x, &y, &w, &h);
+	if (w < 1 || h < 1) return;
+
+	/* Settled before the pixels are read, for the reason clear_marked gives. */
+	tool_settle(t);
+
+	#define AT(i, j) t->pixels[(size_t)(y + (j)) * t->w + (x + (i))]
+
+	bool back = false, any = false;
+	for (int j = 0; j < h && !back; j++)
+		for (int i = 0; i < w && !back; i++) {
+			Uint32 *k = kept_at(s, x + i, y + j);
+			back = k && hidden(AT(i, j), *k);
+		}
+	for (int j = 0; !back && j < h && !any; j++)
+		for (int i = 0; i < w && !any; i++) any = (AT(i, j) >> 24) != 0xFF;
+
+	if (!back && !any) return;
+	if (!back && !kept_cover(s, x, y, w, h)) return;
+
+	/* Direct: the way back lays colours that are not opaque, which a preview cannot show. */
+	if (!vng_tab_stroke_open(t, true)) return;
+
+	for (int j = 0; j < h; j++)
+		for (int i = 0; i < w; i++) {
+			Uint32  c = AT(i, j);
+			Uint32 *k = kept_at(s, x + i, y + j);
+			if (back) {
+				if (k && hidden(c, *k)) vng_tab_put(t, x + i, y + j, *k);
+			} else if ((c >> 24) != 0xFF) {
+				*k = c;
+				vng_tab_put(t, x + i, y + j, c | 0xFF000000u);
+			}
+		}
+
+	#undef AT
+
+	vng_tab_stroke_close(t);
+}
+
 static void menu_body (SDL_FRect area, void *ctx)
 {
 	(void)ctx;
@@ -623,6 +860,7 @@ static bool menu_event (SDL_FRect area, const SDL_Event *e, void *ctx)
 	case M_CREATE: sel_palette(vng_tab, false); break;
 	case M_ADD:    sel_palette(vng_tab, true);  break;
 	case M_REMOVE: sel_remove_others(vng_tab);  break;
+	case M_ALPHA:  sel_alpha(vng_tab);          break;
 	default: break;
 	}
 
@@ -750,6 +988,16 @@ bool select_event (const SDL_Event *e, VNG_TAB *t)
 			case SDLK_H: flip_h(s->pixels, s->w, s->h);      break;
 			case SDLK_I: invert(s->pixels, s->w * s->h);     break;
 			case SDLK_R: rotate(s);                          break;
+			default: break;
+			}
+
+			/* What the alpha toggle remembers goes the same way - rotate has already turned
+			 * it. Inverted too: the memory is a colour that has to match the pixel, and
+			 * invert leaves an entry's "nothing to give back" alpha where it was. */
+			if (s->fkept) switch (e->key.key) {
+			case SDLK_V: flip_v(s->fkept, s->w, s->h);       break;
+			case SDLK_H: flip_h(s->fkept, s->w, s->h);       break;
+			case SDLK_I: invert(s->fkept, s->w * s->h);      break;
 			default: break;
 			}
 			s->tex_stale = true;

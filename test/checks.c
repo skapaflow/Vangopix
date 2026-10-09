@@ -30,6 +30,7 @@
 #include "style.h"
 #include "keymap.h"
 #include "prompt.h"
+#include "tabbar.h"
 
 /* Text and ENTER, the way core.c hands them to whoever owns the keyboard. */
 static void typed (const char *t)
@@ -1251,6 +1252,56 @@ int main (void)
 		undo_undo(q);
 		key(q, SDLK_ESCAPE, SDL_KMOD_NONE);
 
+		/* TOGGLE ALPHA: two pixels with alphas of their own, 0x40 and nothing at all, beside the
+		 * opaque red. The first press shows both colours at FF and leaves the red alone; the
+		 * second gives each its OWN alpha back, not one alpha for both. */
+		{
+			PX(4, 4) = 0x40112233u;
+			PX(5, 4) = 0x00ABCDEFu;
+			Uint32 seen[8 * 8];
+			SDL_memcpy(seen, q->pixels, sizeof seen);
+
+			mouse(q, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 4, 4);
+			mouse(q, SDL_EVENT_MOUSE_MOTION,      0,               5, 5);
+			mouse(q, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 5, 5);
+			MENU_PICK(4, 4, 3);
+			ok("TOGGLE ALPHA SHOWS EVERY COLOUR AT FF",
+			   PX(4, 4) == 0xFF112233u && PX(5, 4) == 0xFFABCDEFu && PX(4, 5) == RED);
+
+			MENU_PICK(4, 4, 3);
+			ok("AND THE NEXT PRESS GIVES EACH ITS OWN ALPHA BACK",
+			   SDL_memcmp(q->pixels, seen, sizeof seen) == 0);
+
+			ok("each press is one undo step",
+			   undo_undo(q) && PX(4, 4) == 0xFF112233u && PX(5, 4) == 0xFFABCDEFu &&
+			   undo_undo(q) && SDL_memcmp(q->pixels, seen, sizeof seen) == 0);
+			ok("and nothing else was recorded", undo_undo(q) == false);
+
+			/* Only what the toggle did is given back: a pixel painted over since stays painted. */
+			MENU_PICK(4, 4, 3);
+			PX(4, 4) = GREEN;
+			MENU_PICK(4, 4, 3);
+			ok("A PIXEL PAINTED SINCE IS LEFT AS IT IS",
+			   PX(4, 4) == GREEN && PX(5, 4) == 0x00ABCDEFu);
+			SDL_memcpy(q->pixels, seen, sizeof seen);
+			key(q, SDLK_ESCAPE, SDL_KMOD_NONE);
+
+			/* The memory goes up with a lifted float and turns with it: made opaque on the sheet,
+			 * flipped (which lifts it), given back in the air, and put down. */
+			mouse(q, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_LEFT, 4, 4);
+			mouse(q, SDL_EVENT_MOUSE_MOTION,      0,               5, 4);
+			mouse(q, SDL_EVENT_MOUSE_BUTTON_UP,   SDL_BUTTON_LEFT, 5, 4);
+			MENU_PICK(4, 4, 3);
+			key(q, SDLK_H, SDL_KMOD_NONE);
+			MENU_PICK(4, 4, 3);
+			select_commit(q);
+			ok("A FLOAT TAKES THE MEMORY WITH IT, AND IT TURNS WITH THE PIXELS",
+			   PX(5, 4) == 0x40112233u && (PX(4, 4) >> 24) == 0);
+
+			key(q, SDLK_ESCAPE, SDL_KMOD_NONE);
+			SDL_memcpy(q->pixels, fresh, sizeof fresh);
+		}
+
 		/* Colours 1 and 2 back as they were, for whatever reads them next. */
 		q->pixels[0] = was0; tool_pick(q, 0, 0, 0);
 		q->pixels[0] = was1; tool_pick(q, 0, 0, 1);
@@ -1262,6 +1313,25 @@ int main (void)
 		#undef RED
 		#undef GREEN
 		#undef BLUE
+	}
+
+	/* ---- A SHEET THAT ARRIVES BRINGS THE TAB BAR UP ----
+	 *
+	 * Put away with ESC, it stayed away for a sheet opened or made afterwards - a new document
+	 * that appeared nowhere. */
+	{
+		bool was = tabbar_visible();
+		if (was) tabbar_toggle();
+		ok("the bar can be put away", !tabbar_visible());
+
+		VNG_TAB *q = vng_tab_new(8, 8);
+		ok("A NEW SHEET BRINGS THE TAB BAR UP", tabbar_visible());
+
+		tabbar_toggle();
+		ok("and ESC still puts it away afterwards", !tabbar_visible());
+
+		vng_tab_close(q);
+		if (was) tabbar_toggle();
 	}
 
 	/* ---- the 1:1 panel, which is now a window ---- */

@@ -41,8 +41,22 @@ static VNG_TAB *close_armed = NULL;
  *
  * One question, asked in one place, and the flag survives untouched underneath: ESC pressed
  * on an empty desk still arms the bar, and it comes up with the first sheet.
+ *
+ * A SHEET THAT ARRIVES BRINGS THE BAR UP WITH IT - created, opened, dropped, pasted. A new tab
+ * the person cannot see is a document that appeared nowhere, and ESC put it away only for the
+ * sheets that were already there. Watched here, by the count, rather than at every place a
+ * sheet is made: tabs.c knows nothing about the screen, and seven call sites would be seven
+ * places for the next way in to forget.
  */
-static bool up (void) { return visible && vng_tabs != NULL; }
+static int seen = 0;   /* how many sheets there were the last time anyone asked */
+
+static bool up (void)
+{
+	int n = vng_tab_count();
+	if (n > seen) visible = true;
+	seen = n;
+	return visible && vng_tabs != NULL;
+}
 
 void tabbar_toggle  (void) { visible = !visible; }
 bool tabbar_visible (void) { return up(); }
